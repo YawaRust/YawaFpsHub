@@ -69,18 +69,43 @@ jobs:
       - name: Самопроверка приложения
         shell: pwsh
         run: |
+          $diagnostics = New-Object System.Collections.Generic.List[string]
           $exe = ".\build\Release\YawaFpsHub.exe"
-          if (-not (Test-Path $exe)) { throw "нет $exe" }
-          $process = Start-Process -FilePath $exe -ArgumentList "--smoke" -PassThru -Wait
-          if ($process.ExitCode -ne 0) { throw "приложение завершилось с кодом $($process.ExitCode)" }
-          $log = Get-Content ".\build\Release\YawaFpsHub.log" -Raw
-          $ini = ".\build\Release\YawaFpsHub.ini"
-          if (-not (Test-Path $ini)) { throw "не создан YawaFpsHub.ini" }
-          Write-Output "::notice title=YawaFpsHub::самопроверка ок, ini создан"
-          foreach ($line in ($log -split "`n")) {
-            if ($line.Trim().Length -eq 0) { continue }
-            Write-Output "::notice title=YawaFpsHub.log::$line"
+          $diagnostics.Add("exe: " + (Test-Path $exe))
+          $fail = $null
+          if (-not (Test-Path $exe)) {
+            $fail = "нет YawaFpsHub.exe"
+          } else {
+            $process = Start-Process -FilePath $exe -ArgumentList "--smoke" -PassThru
+            if (-not $process.WaitForExit(30000)) {
+              $process.Kill()
+              $fail = "приложение не закрылось за 30 с"
+            } else {
+              $diagnostics.Add("exit code: " + $process.ExitCode)
+              if ($process.ExitCode -ne 0) { $fail = "код возврата " + $process.ExitCode }
+            }
           }
+
+          $logPath = ".\build\Release\YawaFpsHub.log"
+          if (Test-Path $logPath) {
+            foreach ($line in (Get-Content $logPath)) {
+              if ($line.Trim().Length -eq 0) { continue }
+              $diagnostics.Add("log: " + $line)
+            }
+          } else {
+            $diagnostics.Add("log: нет файла")
+          }
+
+          $ini = ".\build\Release\YawaFpsHub.ini"
+          $diagnostics.Add("ini: " + (Test-Path $ini))
+          if (-not (Test-Path $ini) -and -not $fail) { $fail = "не создан YawaFpsHub.ini" }
+
+          foreach ($line in $diagnostics) { Write-Output "::notice title=YawaFpsHub::$line" }
+          if ($fail) {
+            Write-Output "::error title=YawaFpsHub::самопроверка не прошла: $fail"
+            exit 1
+          }
+          Write-Output "::notice title=YawaFpsHub::самопроверка ок"
 
       - name: Прогон диагностики
         shell: pwsh
