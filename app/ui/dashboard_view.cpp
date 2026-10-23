@@ -198,13 +198,13 @@ void drawSessionCard(Renderer& renderer, const AppModel& model, const Theme& the
 
 void drawGaugeCard(Renderer& renderer, const Rect& inner, double load, const Color& color, const Theme& theme)
 {
-    const float radius = std::min(46.0f, (inner.bottom - inner.top - 46.0f) * 0.5f);
+    const float radius = std::min(42.0f, (inner.bottom - inner.top - 52.0f) * 0.5f);
     const float centerX = inner.left + radius + 4.0f;
     const float centerY = inner.top + 12.0f + radius;
     drawGauge(renderer, centerX, centerY, radius, static_cast<float>(load / 100.0), color, theme.line,
         wideNumber(load, MetricUnit::Percent, 0), theme.text);
-    renderer.text(L"ЗАГРУЗКА", Rect{ centerX - radius, centerY + radius * 0.52f, centerX + radius,
-                                  centerY + radius * 0.52f + 14.0f },
+    renderer.text(L"ЗАГРУЗКА", Rect{ centerX - radius, centerY + radius + 2.0f, centerX + radius,
+                                  centerY + radius + 14.0f },
         TextRole::Tiny, theme.textFaint, TextAlign::Center);
 }
 
@@ -217,7 +217,7 @@ void drawCpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
     const double load = model.store.value(MetricId::CpuLoad);
     drawGaugeCard(renderer, Rect{ inner.left, top, inner.right, inner.bottom }, load, theme.cpu, theme);
 
-    const float radius = std::min(46.0f, (inner.bottom - top - 46.0f) * 0.5f);
+    const float radius = std::min(40.0f, (inner.bottom - top - 44.0f) * 0.5f);
     const float rowsLeft = inner.left + radius * 2.0f + 20.0f;
     float rowTop = top + 10.0f;
     const std::array<std::pair<std::wstring, std::wstring>, 2> rows{
@@ -250,7 +250,7 @@ void drawGpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
     const double load = model.store.value(MetricId::GpuLoad);
     drawGaugeCard(renderer, Rect{ inner.left, top, inner.right, inner.bottom }, load, theme.gpu, theme);
 
-    const float radius = std::min(46.0f, (inner.bottom - top - 46.0f) * 0.5f);
+    const float radius = std::min(40.0f, (inner.bottom - top - 44.0f) * 0.5f);
     const float rowsLeft = inner.left + radius * 2.0f + 20.0f;
     float rowTop = top + 8.0f;
     const double vramTotal = model.store.value(MetricId::VramTotal);
@@ -407,20 +407,20 @@ void drawDiskNetCard(Renderer& renderer, const AppModel& model, const Theme& the
         { L"Диск: запись", MetricId::DiskWrite }, { L"Сеть: входящий", MetricId::NetDown },
         { L"Сеть: исходящий", MetricId::NetUp } };
 
-    const float cellWidth = (inner.width() - 12.0f) / 2.0f;
+    const float cellWidth = (inner.width() - 24.0f) / 2.0f;
     float rowTop = top + 2.0f;
 
     for (std::size_t index = 0; index < cells.size(); ++index) {
-        const float left = inner.left + static_cast<float>(index % 2) * (cellWidth + 12.0f);
+        const float left = inner.left + static_cast<float>(index % 2) * (cellWidth + 24.0f);
         const float current = rowTop + static_cast<float>(index / 2) * 22.0f;
         if (current + 18.0f > inner.bottom) {
             break;
         }
         const bool known = model.store.hasValue(cells[index].id);
-        renderer.text(cells[index].label, Rect{ left, current, left + cellWidth * 0.55f, current + 18.0f },
+        renderer.text(cells[index].label, Rect{ left, current, left + cellWidth * 0.48f, current + 18.0f },
             TextRole::Tiny, theme.textDim);
         renderer.text(known ? wideMetric(cells[index].id, model.store.value(cells[index].id)) : L"—",
-            Rect{ left + cellWidth * 0.5f, current, left + cellWidth, current + 18.0f }, TextRole::Small,
+            Rect{ left + cellWidth * 0.48f, current, left + cellWidth, current + 18.0f }, TextRole::Small,
             known ? theme.text : theme.textFaint, TextAlign::Right);
     }
 }
