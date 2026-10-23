@@ -69,23 +69,62 @@ jobs:
       - name: Самопроверка приложения
         shell: pwsh
         run: |
+          Add-Type @"
+          using System;
+          using System.Text;
+          using System.Runtime.InteropServices;
+          public class YawaWin {
+            public delegate bool EnumProc(IntPtr hWnd, IntPtr lParam);
+            [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr lParam);
+            [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+            [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr hWnd, int index);
+            [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder sb, int max);
+          }
+          "@
           $diagnostics = New-Object System.Collections.Generic.List[string]
           $found = Get-ChildItem -Path .\build -Recurse -Filter YawaFpsHub.exe | Select-Object -First 1
           $exe = if ($found) { $found.FullName } else { "" }
           $outDir = if ($found) { $found.DirectoryName } else { "" }
-          $diagnostics.Add("exe path: " + $exe)
-          $diagnostics.Add("exe: " + (Test-Path $exe))
+          $diagnostics.Add("exe: " + $exe)
           $fail = $null
           if (-not (Test-Path $exe)) {
             $fail = "нет YawaFpsHub.exe"
           } else {
             $process = Start-Process -FilePath $exe -ArgumentList "--smoke" -PassThru
+            Start-Sleep -Seconds 5
+            $process.Refresh()
+            $diagnostics.Add("память: " + [math]::Round($process.WorkingSet64 / 1MB, 1) + " МБ")
+            $diagnostics.Add("CPU за 5 с: " + [math]::Round($process.TotalProcessorTime.TotalMilliseconds, 0) + " мс")
+
+            # Оверлей — отдельное окно: проверяем класс и стили layered/topmost/click-through.
+            $overlayFound = $false
+            $callback = [YawaWin+EnumProc] {
+              param($hwnd, $state)
+              $windowPid = 0
+              [void][YawaWin]::GetWindowThreadProcessId($hwnd, [ref] $windowPid)
+              if ($windowPid -eq $script:targetPid) {
+                $name = New-Object System.Text.StringBuilder 256
+                [void][YawaWin]::GetClassName($hwnd, $name, 256)
+                if ($name.ToString() -eq "YawaFpsHubOverlay") {
+                  $exStyle = [YawaWin]::GetWindowLong($hwnd, -20)
+                  $script:overlayFound = (($exStyle -band 0x00080000) -ne 0) -and (($exStyle -band 0x00000008) -ne 0) -and (($exStyle -band 0x00000020) -ne 0)
+                  $script:overlayStyle = "0x{0:X8}" -f $exStyle
+                }
+              }
+              return $true
+            }
+            $script:targetPid = $process.Id
+            $script:overlayFound = $false
+            [void][YawaWin]::EnumWindows($callback, [IntPtr]::Zero)
+            $diagnostics.Add("оверлей layered+topmost+click-through: " + $script:overlayFound + " (" + $script:overlayStyle + ")")
+            if (-not $script:overlayFound) { $fail = "окно оверлея не найдено или не имеет нужных стилей" }
+
             if (-not $process.WaitForExit(30000)) {
               $process.Kill()
-              $fail = "приложение не закрылось за 30 с"
+              if (-not $fail) { $fail = "приложение не закрылось за 30 с" }
             } else {
               $diagnostics.Add("exit code: " + $process.ExitCode)
-              if ($process.ExitCode -ne 0) { $fail = "код возврата " + $process.ExitCode }
+              if ($process.ExitCode -ne 0 -and -not $fail) { $fail = "код возврата " + $process.ExitCode }
             }
           }
 
@@ -100,8 +139,8 @@ jobs:
           }
 
           $ini = Join-Path $outDir "YawaFpsHub.ini"
-          $diagnostics.Add("ini: " + (Test-Path $ini))
           if (-not (Test-Path $ini) -and -not $fail) { $fail = "не создан YawaFpsHub.ini" }
+          $diagnostics.Add("ini: " + (Test-Path $ini))
 
           foreach ($line in $diagnostics) { Write-Output "::notice title=YawaFpsHub::$line" }
           if ($fail) {

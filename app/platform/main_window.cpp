@@ -136,6 +136,14 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
     return true;
 }
 
+void MainWindow::setOverlayVisible(bool visible)
+{
+    if (visible != m_overlay.isVisible()) {
+        m_overlay.toggle();
+    }
+    m_model.overlayVisible = m_overlay.isVisible();
+}
+
 int MainWindow::run(int smokeSeconds)
 {
     std::thread smoke;

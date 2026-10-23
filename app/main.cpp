@@ -64,6 +64,9 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
 
     // Самопроверка держит окно открытым, чтобы CI успел снять скриншот интерфейса.
     window.setInitialView(initialView);
+    if (arguments.find(L"--overlay") != std::wstring_view::npos) {
+        window.setOverlayVisible(true);
+    }
     const int result = window.run(smoke ? 8 : 0);
     log.info("остановка");
     return result;

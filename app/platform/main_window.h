@@ -31,6 +31,7 @@ public:
 
     bool create(HINSTANCE instance, Log& log, std::string& error);
     void setInitialView(View view) { m_model.view = view; }
+    void setOverlayVisible(bool visible);
     // smokeSeconds > 0 — самопроверка для CI: окно живёт заданное время и закрывается само.
     int run(int smokeSeconds = 0);
 
