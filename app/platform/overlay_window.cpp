@@ -280,31 +280,48 @@ void OverlayWindow::drawBackground(const D2D1_RECT_F& frame, float scale)
         return;
     }
 
-    D2D1_COLOR_F fill = colorOf(m_theme.panel);
-    fill.a = m_settings.style == OverlayStyle::Terminal ? 0.92f : opacity;
+    const bool isTerminal = m_settings.style == OverlayStyle::Terminal;
+    const bool isNeon = m_settings.style == OverlayStyle::Neon;
+    const float radius = isTerminal ? 2.0f * scale : 10.0f * scale;
+
+    D2D1_COLOR_F fill = colorOf(isTerminal ? m_theme.background : m_theme.panel);
+    fill.a = isTerminal ? 0.94f : opacity;
     ID2D1SolidColorBrush* brush = nullptr;
     if (SUCCEEDED(m_target->CreateSolidColorBrush(fill, &brush))) {
-        m_target->FillRoundedRectangle(D2D1::RoundedRect(frame, 8.0f * scale, 8.0f * scale), brush);
+        m_target->FillRoundedRectangle(D2D1::RoundedRect(frame, radius, radius), brush);
         brush->Release();
     }
 
-    D2D1_COLOR_F border = colorOf(m_settings.style == OverlayStyle::Neon ? m_theme.accent : m_theme.line);
-    border.a = m_settings.style == OverlayStyle::Neon ? 0.85f : 0.5f;
+    D2D1_COLOR_F border = colorOf(isNeon ? m_theme.accent : m_theme.line);
+    border.a = isNeon ? 0.9f : 0.45f;
     if (SUCCEEDED(m_target->CreateSolidColorBrush(border, &brush))) {
-        m_target->DrawRoundedRectangle(D2D1::RoundedRect(frame, 8.0f * scale, 8.0f * scale), brush, 1.0f);
+        m_target->DrawRoundedRectangle(D2D1::RoundedRect(frame, radius, radius), brush,
+            isNeon ? 1.6f : 1.0f);
         brush->Release();
+    }
+
+    if (isNeon) {
+        // Второй контур с малой прозрачностью даёт мягкое свечение без размытия.
+        D2D1_COLOR_F glow = colorOf(m_theme.accent);
+        glow.a = 0.18f;
+        if (SUCCEEDED(m_target->CreateSolidColorBrush(glow, &brush))) {
+            m_target->DrawRoundedRectangle(D2D1::RoundedRect(
+                D2D1::RectF(frame.left - 2.0f, frame.top - 2.0f, frame.right + 2.0f, frame.bottom + 2.0f),
+                radius + 2.0f, radius + 2.0f), brush, 2.0f);
+            brush->Release();
+        }
     }
 }
 
 void OverlayWindow::drawRow(float y, float scale, const std::wstring& key, const std::wstring& value,
-    const std::wstring& unit, bool emphasize)
+    const std::wstring& secondary, bool emphasize)
 {
     // Колонки считаются от рамки плитки, а не от края экрана: иначе подпись уходит
     // в левый угол, а число — в правый край монитора.
     const float left = m_contentRect.left + 10.0f * scale;
     const float right = m_contentRect.right - 10.0f * scale;
-    const float unitWidth = unit.empty() ? 0.0f : 30.0f * scale;
-    const float valueRight = right - unitWidth;
+    const float secondaryWidth = secondary.empty() ? 0.0f : 52.0f * scale;
+    const float valueRight = right - secondaryWidth;
 
     ID2D1SolidColorBrush* brush = nullptr;
     if (SUCCEEDED(m_target->CreateSolidColorBrush(colorOf(m_theme.accent), &brush))) {
@@ -316,12 +333,13 @@ void OverlayWindow::drawRow(float y, float scale, const std::wstring& key, const
     const float valueOpacity = emphasize ? 1.0f : 0.94f;
     if (SUCCEEDED(m_target->CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f, valueOpacity), &brush))) {
         m_target->DrawTextW(value.data(), static_cast<UINT32>(value.size()), m_smallFormat,
-            D2D1::RectF(valueRight - 78.0f * scale, y, valueRight, y + 16.0f * scale), brush);
+            D2D1::RectF(valueRight - 108.0f * scale, y, valueRight, y + 16.0f * scale), brush);
         brush->Release();
     }
 
-    if (!unit.empty() && SUCCEEDED(m_target->CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.45f), &brush))) {
-        m_target->DrawTextW(unit.data(), static_cast<UINT32>(unit.size()), m_keyFormat,
+    if (!secondary.empty()
+        && SUCCEEDED(m_target->CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.45f), &brush))) {
+        m_target->DrawTextW(secondary.data(), static_cast<UINT32>(secondary.size()), m_keyFormat,
             D2D1::RectF(valueRight + 2.0f * scale, y, right + 4.0f * scale, y + 16.0f * scale), brush);
         brush->Release();
     }
@@ -384,23 +402,33 @@ void OverlayWindow::drawPlates(float scale)
     float y = top + 8.0f * scale;
     const float lineHeight = 16.5f * scale;
 
-    const std::wstring fps = std::to_wstring(static_cast<int>(std::lround(m_fps.currentFps)));
-    drawRow(y, scale, wideText(m_settings.labels[0]), fps, L"fps", true);
+    const auto temperature = [this](MetricId id) {
+        const double value = m_store.value(id);
+        return value > 0.0 ? std::to_wstring(static_cast<int>(std::lround(value))) + L" °C"
+                           : std::wstring(L"—");
+    };
+
+    wchar_t buffer[32]{};
+    swprintf_s(buffer, L"%d fps", static_cast<int>(std::lround(m_fps.currentFps)));
+    drawRow(y, scale, wideText(m_settings.labels[0]), buffer, std::wstring(), true);
     y += lineHeight + 4.0f * scale;
 
-    drawRow(y, scale, wideText(m_settings.labels[1]),
-        std::to_wstring(static_cast<int>(std::lround(m_store.value(MetricId::CpuLoad)))),
-        std::to_wstring(static_cast<int>(std::lround(m_store.value(MetricId::CpuTemp)))) + L"°C", false);
+    swprintf_s(buffer, L"%d %%", static_cast<int>(std::lround(m_store.value(MetricId::CpuLoad))));
+    drawRow(y, scale, wideText(m_settings.labels[1]), buffer, temperature(MetricId::CpuTemp), false);
     y += lineHeight;
 
-    drawRow(y, scale, wideText(m_settings.labels[2]),
-        std::to_wstring(static_cast<int>(std::lround(m_store.value(MetricId::GpuLoad)))),
-        std::to_wstring(static_cast<int>(std::lround(m_store.value(MetricId::GpuTemp)))) + L"°C", false);
+    swprintf_s(buffer, L"%d %%", static_cast<int>(std::lround(m_store.value(MetricId::GpuLoad))));
+    drawRow(y, scale, wideText(m_settings.labels[2]), buffer, temperature(MetricId::GpuTemp), false);
     y += lineHeight;
 
-    wchar_t ram[32]{};
-    swprintf_s(ram, L"%.1f", m_store.value(MetricId::RamUsed));
-    drawRow(y, scale, wideText(m_settings.labels[3]), ram, L"ГБ", false);
+    // Десятичная запятая: интерфейс приложения везде русский.
+    swprintf_s(buffer, L"%.1f ГБ", m_store.value(MetricId::RamUsed));
+    for (wchar_t* symbol = buffer; *symbol != L'\0'; ++symbol) {
+        if (*symbol == L'.') {
+            *symbol = L',';
+        }
+    }
+    drawRow(y, scale, wideText(m_settings.labels[3]), buffer, std::wstring(), false);
 }
 
 void OverlayWindow::drawLine(float scale)
