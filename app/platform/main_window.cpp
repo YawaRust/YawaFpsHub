@@ -513,54 +513,42 @@ void MainWindow::samplingLoop()
 
     while (!m_stopRequested) {
         int interval = 1000;
-        {
-            std::lock_guard<std::mutex> guard(m_modelMutex);
-            interval = m_model.settings.capture.intervalMs;
-        }
-        {
-            std::unique_lock<std::mutex> lock(m_wakeMutex);
-            m_wake.wait_for(lock, std::chrono::milliseconds(interval),
-                [this]() { return m_stopRequested.load(); });
-        }
-
-        if (m_stopRequested) {
-            break;
-        }
-
         bool paused = false;
         {
             std::lock_guard<std::mutex> guard(m_modelMutex);
+            interval = m_model.settings.capture.intervalMs;
             paused = m_model.paused;
         }
-        if (paused) {
-            // На паузе счётчики не опрашиваются: приложение не тратит CPU вхолостую.
-            previous = std::chrono::steady_clock::now();
-            continue;
+
+        if (!paused) {
+            const auto now = std::chrono::steady_clock::now();
+            const double elapsed = std::chrono::duration<double>(now - previous).count();
+            previous = now;
+
+            m_etw.drain(tracker);
+
+            yawa::SystemSnapshot snapshot;
+            m_sensors.sample(snapshot);
+
+            const yawa::SystemSampler::Deltas deltas = sampler.compute(snapshot, elapsed);
+            const yawa::DerivedValues values = yawa::deriveValues(snapshot, deltas);
+            const yawa::FpsSummary fps = tracker.summary(static_cast<double>(m_model.settings.capture.targetHz));
+
+            {
+                std::lock_guard<std::mutex> guard(m_modelMutex);
+                yawa::applySnapshot(m_model.store, snapshot, values, fps,
+                    static_cast<std::uint8_t>(m_model.settings.capture.smoothingPercent));
+                m_model.fps = fps;
+                m_model.availability = m_sensors.availability();
+                m_model.etwRunning = m_etw.isRunning();
+            }
+
+            PostMessageW(m_window, kTickMessage, 0, 0);
         }
 
-        const auto now = std::chrono::steady_clock::now();
-        const double elapsed = std::chrono::duration<double>(now - previous).count();
-        previous = now;
-
-        m_etw.drain(tracker);
-
-        yawa::SystemSnapshot snapshot;
-        m_sensors.sample(snapshot);
-
-        const yawa::SystemSampler::Deltas deltas = sampler.compute(snapshot, elapsed);
-        const yawa::DerivedValues values = yawa::deriveValues(snapshot, deltas);
-        const yawa::FpsSummary fps = tracker.summary(static_cast<double>(m_model.settings.capture.targetHz));
-
-        {
-            std::lock_guard<std::mutex> guard(m_modelMutex);
-            yawa::applySnapshot(m_model.store, snapshot, values, fps, static_cast<std::uint8_t>(
-                                                                        m_model.settings.capture.smoothingPercent));
-            m_model.fps = fps;
-            m_model.availability = m_sensors.availability();
-            m_model.etwRunning = m_etw.isRunning();
-        }
-
-        PostMessageW(m_window, kTickMessage, 0, 0);
+        std::unique_lock<std::mutex> lock(m_wakeMutex);
+        m_wake.wait_for(lock, std::chrono::milliseconds(interval),
+            [this]() { return m_stopRequested.load(); });
     }
 
     m_etw.stop();

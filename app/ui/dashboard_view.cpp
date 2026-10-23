@@ -202,8 +202,13 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
 
     renderer.text(L"Память", Rect{ inner.left, inner.top, inner.right, inner.top + 22.0f }, TextRole::Heading,
         theme.text);
-    renderer.text(L"DDR · два канала", Rect{ inner.left, inner.top + 20.0f, inner.right, inner.top + 38.0f },
-        TextRole::Tiny, theme.textFaint);
+    const double ramTotal = model.store.value(MetricId::RamUsed) + model.store.value(MetricId::RamFree);
+    const std::wstring subtitle = ramTotal > 0.0
+        ? L"занято " + wideNumber(model.store.value(MetricId::RamUsed), MetricUnit::Gigabytes, 1) + L" из "
+            + wideNumber(ramTotal, MetricUnit::Gigabytes, 1)
+        : std::wstring(L"нет данных");
+    renderer.text(subtitle, Rect{ inner.left, inner.top + 20.0f, inner.right, inner.top + 38.0f }, TextRole::Tiny,
+        theme.textFaint);
 
     const std::wstring used = wideMetric(MetricId::RamUsed, model.store.value(MetricId::RamUsed));
     renderer.text(used, Rect{ inner.left, inner.top + 42.0f, inner.left + 140.0f, inner.top + 78.0f },
@@ -223,10 +228,14 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
         { L"Своп-файл", wideMetric(MetricId::PageFile, model.store.value(MetricId::PageFile)) },
     };
 
-    float top = inner.top + 106.0f;
+    // Строки ужимаются под фактическую высоту карточки: при маленьком окне они
+    // не вылезают за рамку и не наезжают на полосу памяти.
+    const float rowsTop = inner.top + 100.0f;
+    const float rowStep = std::clamp((inner.bottom - rowsTop) / 3.0f, 18.0f, 26.0f);
+    float top = rowsTop;
     for (const auto& [label, value] : rows) {
         drawLabelValue(renderer, Rect{ inner.left, top, inner.right, top + 18.0f }, label, value, theme);
-        top += 26.0f;
+        top += rowStep;
     }
 }
 
@@ -323,8 +332,8 @@ void drawDashboard(Renderer& renderer, const AppModel& model, const Theme& theme
     const Rect leftColumn{ area.left, area.top, area.left + leftWidth - kGap, area.bottom };
     const Rect rightColumn{ leftColumn.right + kGap, area.top, area.right, area.bottom };
 
-    const float topRow = std::clamp(area.height() * 0.36f, 196.0f, 230.0f);
-    const float middleRow = std::clamp(area.height() * 0.27f, 168.0f, 200.0f);
+    const float topRow = std::clamp(area.height() * 0.34f, 190.0f, 228.0f);
+    const float middleRow = std::clamp(area.height() * 0.28f, 176.0f, 200.0f);
 
     drawFpsCard(renderer, model, theme, Rect{ leftColumn.left, leftColumn.top, leftColumn.right,
                                                 leftColumn.top + topRow });

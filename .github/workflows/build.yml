@@ -126,9 +126,10 @@ jobs:
           "@
           $exe = (Get-ChildItem -Path .\build -Recurse -Filter YawaFpsHub.exe | Select-Object -First 1).FullName
           $process = Start-Process -FilePath $exe -ArgumentList "--smoke" -PassThru
+          # Даём приложению несколько циклов опроса, чтобы графики и счётчики были живыми.
+          Start-Sleep -Seconds 4
           $shot = $null
-          for ($i = 0; $i -lt 20 -and -not $shot; $i++) {
-            Start-Sleep -Milliseconds 500
+          for ($i = 0; $i -lt 10 -and -not $shot; $i++) {
             $process.Refresh()
             $hwnd = $process.MainWindowHandle
             if ($hwnd -eq [IntPtr]::Zero) { continue }
