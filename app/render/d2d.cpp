@@ -63,7 +63,7 @@ void Renderer::createTextFormats()
         return;
     }
 
-    m_display = createFormat(m_dwrite, kFontFamily, 66.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    m_display = createFormat(m_dwrite, kFontFamily, 84.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     m_value = createFormat(m_dwrite, kFontFamily, 26.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     m_heading = createFormat(m_dwrite, kFontFamily, 14.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     m_body = createFormat(m_dwrite, kFontFamily, 12.5f, DWRITE_FONT_WEIGHT_NORMAL);
@@ -74,7 +74,7 @@ void Renderer::createTextFormats()
     // Без Segoe UI Variable (Windows 10) DirectWrite вернёт формат с подставленным шрифтом,
     // но интерфейс заметно поедет по метрикам — тогда берём обычный Segoe UI.
     if (m_display == nullptr) {
-        m_display = createFormat(m_dwrite, kFallbackFamily, 66.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+        m_display = createFormat(m_dwrite, kFallbackFamily, 84.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     }
 }
 

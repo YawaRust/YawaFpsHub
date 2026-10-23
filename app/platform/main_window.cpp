@@ -1305,6 +1305,7 @@ void MainWindow::samplingLoop()
                 yawa::applySnapshot(m_model.store, snapshot, values, fps,
                     static_cast<std::uint8_t>(m_model.settings.capture.smoothingPercent));
                 m_model.fps = fps;
+                m_model.framesPresented = tracker.activePresents();
                 m_model.availability = m_sensors.availability();
                 m_model.cpuCores = m_sensors.coreCount();
                 m_model.cpuThreads = m_sensors.cpuThreads();

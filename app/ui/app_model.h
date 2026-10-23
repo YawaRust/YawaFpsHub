@@ -78,6 +78,8 @@ struct AppModel {
     MetricStore store;
     Settings settings;
     FpsSummary fps;
+    // Всего кадров отрисовано активной игрой — строка «Отрисовано кадров».
+    std::uint64_t framesPresented = 0;
     SensorAvailability availability;
     std::vector<std::wstring> gpuNames;
     std::size_t activeGpu = 0;

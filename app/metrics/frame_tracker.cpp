@@ -139,6 +139,12 @@ std::uint32_t FrameTracker::activeProcessId() const
     return index == kMaxStreams ? 0 : m_streams[index].processId;
 }
 
+std::uint64_t FrameTracker::activePresents() const
+{
+    const std::size_t index = activeIndex();
+    return index == kMaxStreams ? 0 : m_streams[index].totalPresents;
+}
+
 std::uint64_t FrameTracker::activeSwapChain() const
 {
     const std::size_t index = activeIndex();

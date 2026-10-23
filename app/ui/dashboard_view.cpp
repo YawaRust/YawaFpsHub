@@ -126,9 +126,8 @@ void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
             stats[index][1], theme);
     }
 
-    // График прижимается к низу карточки и не залезает под чип разницы:
-    // в коротком окне он просто становится ниже.
-    const float chartTop = std::max(numberTop + 78.0f, inner.bottom - 74.0f);
+    // График прижимается к низу карточки: в демо он занимает нижние ~118 px.
+    const float chartTop = std::max(numberTop + 92.0f, inner.bottom - 118.0f);
     const Rect chart{ inner.left, chartTop, inner.right, inner.bottom };
     if (chart.height() < 22.0f) {
         return;
@@ -145,11 +144,9 @@ void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
         maximum = std::max(maximum, history[index]);
     }
 
-    const float budgetY = chart.bottom - std::clamp(static_cast<float>(budget) / maximum, 0.0f, 1.0f) * chart.height();
+    const float budgetY
+        = chart.bottom - std::clamp(static_cast<float>(budget) / maximum, 0.0f, 1.0f) * chart.height();
     renderer.drawDashedLine(chart.left, budgetY, chart.right, budgetY, theme.lineStrong, 1.0f);
-    renderer.text(L"бюджет " + wideNumber(budget, MetricUnit::Milliseconds, 1),
-        Rect{ chart.left, chart.top - 14.0f, chart.right, chart.top }, TextRole::Tiny, theme.textFaint,
-        TextAlign::Right);
 
     if (count < 2) {
         renderer.text(L"данные появятся после первых кадров", chart, TextRole::Small, theme.textFaint,
@@ -164,40 +161,40 @@ void drawSessionCard(Renderer& renderer, const AppModel& model, const Theme& the
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
-    float rowTop = drawCardHeader(renderer, card, L"Сессия", L"длительность и темп кадров", theme) + 6.0f;
+    float rowTop = drawCardHeader(renderer, card, L"Сессия", L"профиль включается по запуску игры", theme) + 6.0f;
 
-    const std::array<std::pair<std::wstring, std::wstring>, 4> rows{
+    // Чип с временем сессии в правом верхнем углу карточки.
+    {
+        const std::wstring clock = formatClock(model.elapsedMs);
+        const float chipWidth = renderer.measureText(clock, TextRole::Mono) + 26.0f;
+        const Rect chip{ inner.right - chipWidth, inner.top - 2.0f, inner.right, inner.top + 22.0f };
+        renderer.fillRoundRect(chip, 11.0f, theme.panelSoft);
+        renderer.strokeRoundRect(chip, 11.0f, theme.line, 1.0f);
+        renderer.text(clock, chip, TextRole::Mono, theme.textDim, TextAlign::Center);
+    }
+
+    // Строки и их порядок — как в прототипе: бюджет кадра не отдельная полоса, а строка списка.
+    const double budgetMs = 1000.0 / static_cast<double>(std::max(model.settings.capture.targetHz, 30));
+    const double used = model.fps.frameTimeMs / budgetMs;
+    const std::wstring budgetLabel
+        = L"Бюджет кадра " + wideText(std::to_string(model.settings.capture.targetHz) + " Гц");
+
+    const std::array<std::pair<std::wstring, std::wstring>, 6> rows{
         std::pair<std::wstring, std::wstring>{ L"Длительность", formatClock(model.elapsedMs) },
+        { L"Отрисовано кадров", wideNumber(static_cast<double>(model.framesPresented), MetricUnit::Count, 0) },
+        { L"Пропущено кадров", wideNumber(model.fps.droppedShare * 100.0, MetricUnit::Percent, 1) },
         { L"Средний FPS", wideNumber(model.fps.averageFps, MetricUnit::Count, 1) },
         { L"Медианный frame time", wideNumber(model.fps.frameTimeMs, MetricUnit::Milliseconds, 2) },
-        { L"Пропущено кадров", wideNumber(model.fps.droppedShare * 100.0, MetricUnit::Percent, 1) },
+        { budgetLabel, wideNumber(std::clamp(used, 0.0, 1.999) * 100.0, MetricUnit::Percent, 0) },
     };
 
     for (const auto& [label, value] : rows) {
-        if (rowTop + 16.0f > inner.bottom - 38.0f) {
+        if (rowTop + 16.0f > inner.bottom) {
             return;
         }
         drawLabelValue(renderer, Rect{ inner.left, rowTop, inner.right, rowTop + 16.0f }, label, value, theme);
-        rowTop += 21.0f;
+        rowTop += 33.0f;
     }
-
-    const double budgetMs = 1000.0 / static_cast<double>(std::max(model.settings.capture.targetHz, 30));
-    const double used = model.fps.frameTimeMs / budgetMs;
-    const float barTop = inner.bottom - 34.0f;
-    if (barTop < rowTop) {
-        return;
-    }
-
-    renderer.text(L"Бюджет кадра " + wideText(std::to_string(model.settings.capture.targetHz) + " Гц"),
-        Rect{ inner.left, barTop, inner.centerX(), barTop + 16.0f }, TextRole::Small, theme.textDim);
-    renderer.text(wideNumber(std::clamp(used, 0.0, 1.999) * 100.0, MetricUnit::Percent, 0),
-        Rect{ inner.centerX(), barTop, inner.right, barTop + 16.0f }, TextRole::Body,
-        used > 1.0 ? theme.danger : theme.text, TextAlign::Right);
-    drawBar(renderer, Rect{ inner.left, barTop + 20.0f, inner.right, barTop + 26.0f },
-        static_cast<float>(std::clamp(used, 0.0, 1.0)), used > 1.0 ? theme.danger : theme.accent, theme);
-    renderer.text(wideNumber(std::max(budgetMs - model.fps.frameTimeMs, 0.0), MetricUnit::Milliseconds, 2)
-            + L" свободно",
-        Rect{ inner.left, barTop + 28.0f, inner.right, barTop + 42.0f }, TextRole::Tiny, theme.textFaint);
 }
 
 // Радиус кольца считается от места под карточку: два радиуса плюс подпись снизу.

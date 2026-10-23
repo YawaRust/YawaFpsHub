@@ -39,6 +39,8 @@ public:
 
     std::size_t streamCount() const { return m_streamCount; }
     std::uint64_t droppedStreams() const { return m_droppedStreams; }
+    // Сколько кадров отрисовала активная игра: нужно для строки «Отрисовано кадров».
+    std::uint64_t activePresents() const;
 
 private:
     struct Stream {

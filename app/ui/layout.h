@@ -16,7 +16,7 @@ constexpr float kDashboardHeight = 2539.0f;
 
 constexpr float kCardRadius = 20.0f;
 constexpr float kGap = 14.0f;
-constexpr float kCardPadding = 16.0f;
+constexpr float kCardPadding = 18.0f;
 
 std::wstring wideText(std::string_view utf8);
 std::wstring wideNumber(double value, MetricUnit unit, std::uint8_t decimals);
