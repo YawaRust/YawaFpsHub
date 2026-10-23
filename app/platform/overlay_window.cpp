@@ -1,4 +1,5 @@
 #include "platform/overlay_window.h"
+#include "platform/win_util.h"
 #include "ui/layout.h"
 
 #include <d2d1helper.h>
@@ -488,7 +489,7 @@ bool OverlayWindow::capturePng(const std::wstring& path, std::string& error)
         }
         if (FAILED(factory->CreateStream(&stream))
             || FAILED(stream->InitializeFromFilename(path.c_str(), GENERIC_WRITE))) {
-            error = "не удалось открыть " + std::string(path.begin(), path.end());
+            error = "не удалось открыть " + narrow(path);
             break;
         }
         if (FAILED(factory->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder))
