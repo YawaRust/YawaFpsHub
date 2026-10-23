@@ -188,19 +188,18 @@ void drawPortableCard(Renderer& renderer, const AppModel& model, const Theme& th
             break;
         }
         drawFieldLabel(renderer, Rect{ inner.left, top, inner.right, top + 16.0f }, row[0], row[1], theme);
-        top += 22.0f;
+        top += 20.0f;
     }
 
-    top += 6.0f;
+    // Кнопки прижимаем к низу карточки: раньше при низком окне путь и «Сбросить»
+    // уезжали за край, и кнопки просто исчезали.
+    const float actionsTop = inner.bottom - 28.0f;
+    const float pathTop = std::min(top + 2.0f, actionsTop - 18.0f);
     renderer.text(clipRight(renderer, wideText(model.settingsPath), TextRole::Mono, inner.width() * 0.96f),
-        Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Mono, theme.textFaint);
-    top += 24.0f;
+        Rect{ inner.left, pathTop, inner.right, pathTop + 16.0f }, TextRole::Mono, theme.textFaint);
 
-    if (top + 30.0f > inner.bottom) {
-        return;
-    }
-    const Rect open{ inner.left, top, inner.left + 150.0f, top + 30.0f };
-    const Rect reset{ open.right + 8.0f, top, open.right + 158.0f, top + 30.0f };
+    const Rect open{ inner.left, actionsTop, inner.left + 150.0f, actionsTop + 28.0f };
+    const Rect reset{ open.right + 8.0f, actionsTop, open.right + 158.0f, actionsTop + 28.0f };
     drawChip(renderer, open, L"Папка настроек", false, theme);
     drawChip(renderer, reset, L"Сбросить", false, theme);
     hits.push_back(UiHit{ open, ActionKind::OpenSettingsFolder, 0 });
