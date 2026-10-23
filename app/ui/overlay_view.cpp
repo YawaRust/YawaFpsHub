@@ -1,5 +1,6 @@
 #include "ui/overlay_view.h"
 #include "render/overlay_painter.h"
+#include "ui/hotkey_text.h"
 #include "ui/layout.h"
 
 #include <algorithm>
@@ -82,9 +83,10 @@ void drawPreviewCard(Renderer& renderer, const AppModel& model, const Theme& the
     renderer.text(L"предпросмотр на макете сцены: перетащите его, чтобы поставить оверлей точно",
         Rect{ inner.left, inner.top + 20.0f, inner.right - 60.0f, inner.top + 38.0f }, TextRole::Tiny, theme.textFaint);
 
-    const Rect tag{ inner.right - 52.0f, inner.top, inner.right, inner.top + 20.0f };
+    const Rect tag{ inner.right - 72.0f, inner.top, inner.right, inner.top + 20.0f };
     renderer.fillRoundRect(tag, 10.0f, theme.panelSoft);
-    renderer.text(L"F10", tag, TextRole::Tiny, theme.textFaint, TextAlign::Center);
+    renderer.text(hotkeyName(model.settings.hotkeys.overlay), tag, TextRole::Tiny, theme.textFaint,
+        TextAlign::Center);
 
     const float galleryTop = inner.bottom - 104.0f;
     const Rect scene{ inner.left, inner.top + 46.0f, inner.right, std::max(inner.top + 76.0f, galleryTop - 10.0f) };

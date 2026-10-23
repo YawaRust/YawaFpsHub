@@ -1,4 +1,5 @@
 #include "ui/settings_view.h"
+#include "ui/hotkey_text.h"
 #include "ui/layout.h"
 
 #include "metrics/units.h"
@@ -245,49 +246,6 @@ void drawAboutCard(Renderer& renderer, const AppModel& model, const Theme& theme
     }
 }
 
-// Имя клавиши для списка хоткеев: F-ряд и буквы читаются, остальное — кодом.
-std::wstring keyName(unsigned int key)
-{
-    if (key == 0) {
-        return L"выключено";
-    }
-    if (key >= VK_F1 && key <= VK_F24) {
-        return L"F" + std::to_wstring(key - VK_F1 + 1);
-    }
-    if ((key >= 'A' && key <= 'Z') || (key >= '0' && key <= '9')) {
-        return std::wstring(1, static_cast<wchar_t>(key));
-    }
-
-    switch (key) {
-    case VK_SPACE:
-        return L"Пробел";
-    case VK_INSERT:
-        return L"Insert";
-    case VK_DELETE:
-        return L"Delete";
-    case VK_HOME:
-        return L"Home";
-    case VK_END:
-        return L"End";
-    case VK_PRIOR:
-        return L"Page Up";
-    case VK_NEXT:
-        return L"Page Down";
-    case VK_SNAPSHOT:
-        return L"Print Screen";
-    case VK_PAUSE:
-        return L"Pause";
-    case VK_SCROLL:
-        return L"Scroll Lock";
-    default:
-        break;
-    }
-
-    wchar_t buffer[16]{};
-    swprintf_s(buffer, L"код %02X", key);
-    return buffer;
-}
-
 void drawHotkeyCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card,
     std::vector<UiHit>& hits)
 {
@@ -316,7 +274,7 @@ void drawHotkeyCard(Renderer& renderer, const AppModel& model, const Theme& them
 
         const Rect keyChip{ row.right - 108.0f, row.top + 3.0f, row.right - 8.0f, row.bottom - 3.0f };
         renderer.fillRoundRect(keyChip, 7.0f, editing ? theme.accent : theme.background.withAlpha(0.6f));
-        renderer.text(editing ? L"нажмите клавишу" : keyName(keys[index]), keyChip, TextRole::Tiny,
+        renderer.text(editing ? L"нажмите клавишу" : hotkeyName(keys[index]), keyChip, TextRole::Tiny,
             editing ? theme.background : theme.text, TextAlign::Center);
 
         hits.push_back(UiHit{ row, ActionKind::CaptureHotkey, static_cast<int>(index) });
