@@ -206,6 +206,14 @@ jobs:
             }
           }
 
+      - name: Скриншоты оверлея
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path .\shots | Out-Null
+          $exe = (Get-ChildItem -Path .\build -Recurse -Filter YawaFpsHub.exe | Select-Object -First 1).FullName
+          $process = Start-Process -FilePath $exe -ArgumentList "--smoke=12", "--overlay-shots=$PWD\shots\" -PassThru -Wait
+          Get-ChildItem .\shots | ForEach-Object { Write-Output "::notice title=YawaFpsHub::оверлей $($_.Name) $([math]::Round($_.Length / 1KB, 1)) КБ" }
+
       - name: Опубликовать скриншоты
         if: hashFiles('screenshot-*.png') != ''
         shell: bash
@@ -214,17 +222,12 @@ jobs:
           git config user.name "ci"
           git checkout -B ci-logs
           git add -f screenshot-*.png
-          if (Test-Path .\shots) { cp .\shots\*.png . ; git add -f overlay-*.png }
+          if [ -d shots ]; then
+            cp shots/*.png .
+            git add -f overlay-*.png
+          fi
           git commit -m "screenshots" || true
           git push -f origin ci-logs
-
-      - name: Скриншоты оверлея
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path .\shots | Out-Null
-          $exe = (Get-ChildItem -Path .\build -Recurse -Filter YawaFpsHub.exe | Select-Object -First 1).FullName
-          $process = Start-Process -FilePath $exe -ArgumentList "--smoke=12", "--overlay-shots=$PWD\shots\" -PassThru -Wait
-          Get-ChildItem .\shots | ForEach-Object { Write-Output "::notice title=YawaFpsHub::оверлей $($_.Name) $([math]::Round($_.Length / 1KB, 1)) КБ" }
 
       - name: Прогон диагностики
         shell: pwsh
