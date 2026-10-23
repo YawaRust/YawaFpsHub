@@ -299,8 +299,12 @@ void OverlayWindow::drawBackground(const D2D1_RECT_F& frame, float scale)
 void OverlayWindow::drawRow(float y, float scale, const std::wstring& key, const std::wstring& value,
     const std::wstring& unit, bool emphasize)
 {
-    const float left = kMargin + 10.0f * scale;
-    const float right = m_bitmapWidth - kMargin - 10.0f * scale;
+    // Колонки считаются от рамки плитки, а не от края экрана: иначе подпись уходит
+    // в левый угол, а число — в правый край монитора.
+    const float left = m_contentRect.left + 10.0f * scale;
+    const float right = m_contentRect.right - 10.0f * scale;
+    const float unitWidth = unit.empty() ? 0.0f : 30.0f * scale;
+    const float valueRight = right - unitWidth;
 
     ID2D1SolidColorBrush* brush = nullptr;
     if (SUCCEEDED(m_target->CreateSolidColorBrush(colorOf(m_theme.accent), &brush))) {
@@ -309,23 +313,23 @@ void OverlayWindow::drawRow(float y, float scale, const std::wstring& key, const
         brush->Release();
     }
 
-    if (SUCCEEDED(m_target->CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.94f), &brush))) {
+    const float valueOpacity = emphasize ? 1.0f : 0.94f;
+    if (SUCCEEDED(m_target->CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f, valueOpacity), &brush))) {
         m_target->DrawTextW(value.data(), static_cast<UINT32>(value.size()), m_smallFormat,
-            D2D1::RectF(right - 96.0f * scale, y, right, y + 16.0f * scale), brush);
+            D2D1::RectF(valueRight - 78.0f * scale, y, valueRight, y + 16.0f * scale), brush);
         brush->Release();
     }
 
     if (!unit.empty() && SUCCEEDED(m_target->CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.45f), &brush))) {
         m_target->DrawTextW(unit.data(), static_cast<UINT32>(unit.size()), m_keyFormat,
-            D2D1::RectF(right, y, right + 40.0f * scale, y + 16.0f * scale), brush);
+            D2D1::RectF(valueRight + 2.0f * scale, y, right + 4.0f * scale, y + 16.0f * scale), brush);
         brush->Release();
     }
-
-    (void)emphasize;
 }
 
 void OverlayWindow::drawScene(float scale)
 {
+    (void)scale;
     m_theme = makeTheme(Accent::Mint);
 
     m_target->BeginDraw();
