@@ -43,7 +43,7 @@ Options parseArgs(int argc, wchar_t** argv)
         } else if (arg == L"--gpu" && hasValue) {
             options.gpuIndex = _wtoi(argv[++index]);
         } else if (arg == L"--log" && hasValue) {
-            options.logPath = narrow(argv[++index]);
+            options.logPath = yawa::narrow(argv[++index]);
         } else if (arg == L"--no-etw") {
             options.useEtw = false;
         }
@@ -65,7 +65,7 @@ std::string executableDirectory()
 
     std::wstring full(path);
     const std::size_t slash = full.find_last_of(L"\\/");
-    return narrow(slash == std::wstring::npos ? full : full.substr(0, slash));
+    return yawa::narrow(slash == std::wstring::npos ? full : full.substr(0, slash));
 }
 
 void printHeader(const yawa::SystemSensors& sensors)
@@ -87,7 +87,7 @@ void printHeader(const yawa::SystemSensors& sensors)
             continue;
         }
         std::printf("  адаптер %zu%s: %s (%llu МБ)%s\n", index,
-            index == sensors.activeGpu() ? " *" : "", narrow(adapter->name).c_str(),
+            index == sensors.activeGpu() ? " *" : "", yawa::narrow(adapter->name).c_str(),
             static_cast<unsigned long long>(adapter->dedicatedVideoMemory / (1024 * 1024)),
             adapter->isSoftware ? " — программный" : "");
     }

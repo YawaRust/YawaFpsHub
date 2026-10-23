@@ -1,6 +1,7 @@
 #include "metrics/units.h"
 #include "test_support.h"
 
+#include <limits>
 #include <string>
 
 namespace yawa::test {
@@ -39,7 +40,7 @@ void testUnits()
 
 void testNotFinite()
 {
-    CHECK(formatValue(0.0 / 0.0, 0) == "—");
+    CHECK(formatValue(std::numeric_limits<double>::quiet_NaN(), 0) == "—");
 }
 
 void testMetricLookup()
