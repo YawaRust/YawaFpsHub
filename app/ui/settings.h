@@ -21,7 +21,9 @@ struct CaptureSettings {
     bool etwEnabled = true;
     bool pauseWhenIdle = true;
     bool includeDiskNet = true;
-    int targetHz = 120;
+    // 60 Гц — самый частый случай: на 120-герцовом профиле бюджет кадра считался бы
+    // проваленным для любой игры, которая честно держит 60 кадров.
+    int targetHz = 60;
 };
 
 struct OverlaySettings {

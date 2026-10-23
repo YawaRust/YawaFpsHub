@@ -16,7 +16,7 @@ void testDefaultsRoundTrip()
     CHECK(error.empty());
 
     CHECK(parsed.capture.intervalMs == 1000);
-    CHECK(parsed.capture.targetHz == 120);
+    CHECK(parsed.capture.targetHz == 60);
     CHECK(parsed.overlay.style == OverlayStyle::Glass);
     CHECK(parsed.overlay.position == OverlayPosition::TopLeft);
     CHECK(labelValue(parsed.overlay, LabelField::Gpu) == "GPU");

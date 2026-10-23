@@ -191,7 +191,7 @@ void drawPortableCard(Renderer& renderer, const AppModel& model, const Theme& th
     }
 
     top += 6.0f;
-    renderer.text(clipRight(renderer, wideText(model.settingsPath), TextRole::Mono, inner.width()),
+    renderer.text(clipRight(renderer, wideText(model.settingsPath), TextRole::Mono, inner.width() * 0.96f),
         Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Mono, theme.textFaint);
     top += 24.0f;
 
