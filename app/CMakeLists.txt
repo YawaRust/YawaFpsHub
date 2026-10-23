@@ -28,6 +28,12 @@ add_executable(YawaFpsHub WIN32
     ui/settings_view.cpp
 )
 
+# Ресурсы (иконка и свойства файла) собирает только MSVC: windres в CI не используется,
+# а локальная проверка ядра собирается без приложения.
+if(MSVC)
+    target_sources(YawaFpsHub PRIVATE resources/resource.rc)
+endif()
+
 target_include_directories(YawaFpsHub PRIVATE ${CMAKE_SOURCE_DIR}/app)
 target_link_libraries(YawaFpsHub PRIVATE d2d1 dwrite dxgi dwmapi pdh psapi shell32 user32 gdi32 advapi32 ole32 windowscodecs)
 target_compile_definitions(YawaFpsHub PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
