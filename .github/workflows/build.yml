@@ -110,6 +110,52 @@ jobs:
           }
           Write-Output "::notice title=YawaFpsHub::самопроверка ок"
 
+      - name: Скриншот интерфейса
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          Add-Type @"
+          using System;
+          using System.Runtime.InteropServices;
+          public class YawaShot {
+            [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+            [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
+          }
+          "@
+          $exe = (Get-ChildItem -Path .\build -Recurse -Filter YawaFpsHub.exe | Select-Object -First 1).FullName
+          $process = Start-Process -FilePath $exe -ArgumentList "--smoke" -PassThru
+          $shot = $null
+          for ($i = 0; $i -lt 20 -and -not $shot; $i++) {
+            Start-Sleep -Milliseconds 500
+            $process.Refresh()
+            $hwnd = $process.MainWindowHandle
+            if ($hwnd -eq [IntPtr]::Zero) { continue }
+            $rect = New-Object YawaShot+RECT
+            if (-not [YawaShot]::GetWindowRect($hwnd, [ref] $rect)) { continue }
+            $width = $rect.Right - $rect.Left
+            $height = $rect.Bottom - $rect.Top
+            if ($width -le 0 -or $height -le 0) { continue }
+            $bitmap = New-Object System.Drawing.Bitmap $width, $height
+            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+            $hdc = $graphics.GetHdc()
+            $ok = [YawaShot]::PrintWindow($hwnd, $hdc, 2)
+            $graphics.ReleaseHdc($hdc)
+            $graphics.Dispose()
+            if ($ok) {
+              $bitmap.Save("$PWD\screenshot.png", [System.Drawing.Imaging.ImageFormat]::Png)
+              $shot = "$PWD\screenshot.png"
+            }
+            $bitmap.Dispose()
+          }
+          $process.WaitForExit()
+          if ($shot) {
+            Write-Output "::notice title=YawaFpsHub::скриншот снят $shot"
+          } else {
+            Write-Output "::warning title=YawaFpsHub::скриншот не снят (нет интерактивного рабочего стола)"
+          }
+
       - name: Прогон диагностики
         shell: pwsh
         run: |

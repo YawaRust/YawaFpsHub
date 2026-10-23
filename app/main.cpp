@@ -53,7 +53,8 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
         return 1;
     }
 
-    const int result = window.run(smoke ? 3 : 0);
+    // Самопроверка держит окно открытым, чтобы CI успел снять скриншот интерфейса.
+    const int result = window.run(smoke ? 8 : 0);
     log.info("остановка");
     return result;
 }
