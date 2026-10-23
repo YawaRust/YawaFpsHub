@@ -212,7 +212,7 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
     top += 48.0f;
     drawSlider(renderer, Rect{ inner.left, top, inner.right, top + 34.0f }, overlay.opacityPercent, 0, 100,
         L"Прозрачность", theme, hits, ActionKind::SetOpacity, L" %");
-    top += 46.0f;
+    top += 42.0f;
 
     // Оформление: то, что нельзя выразить пресетом, но нужно для своей картинки.
     renderer.text(L"Оформление", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
@@ -237,7 +237,7 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
     const int radiusValue = overlay.cornerRadius >= 0 ? overlay.cornerRadius : 8;
     drawSlider(renderer, Rect{ inner.left, top, inner.right, top + 34.0f }, radiusValue, 0, 24, L"Углы", theme, hits,
         ActionKind::SetOverlayRadius, L" px");
-    top += 40.0f;
+    top += 36.0f;
 
     // Редактор текста: шрифт, начертание и обводка — как в RivaTuner и FPS Monitor.
     renderer.text(L"Шрифт", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
@@ -269,7 +269,7 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
         TextAlign::Center);
     hits.push_back(UiHit{ outlineMinus, ActionKind::ChangeOverlayOutline, -1 });
     hits.push_back(UiHit{ outlinePlus, ActionKind::ChangeOverlayOutline, 1 });
-    top += 32.0f;
+    top += 30.0f;
 
     renderer.text(L"Смещение", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
     top += 20.0f;
@@ -288,17 +288,17 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
     };
     drawOffset(inner.left, ActionKind::OffsetX, overlay.offsetX, L"X");
     drawOffset(inner.left + 148.0f, ActionKind::OffsetY, overlay.offsetY, L"Y");
-    top += 44.0f;
+    top += 40.0f;
 
     renderer.text(L"Состав", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
-    top += 22.0f;
+    top += 20.0f;
     for (std::size_t index = 0; index < kFieldNames.size(); ++index) {
         if (top + 24.0f > inner.bottom) {
             break;
         }
         drawToggleRow(renderer, Rect{ inner.left, top, inner.right, top + 24.0f }, kFieldNames[index],
             overlay.visible[index], theme, hits, ActionKind::ToggleMetric, static_cast<int>(index));
-        top += 28.0f;
+        top += 26.0f;
     }
 }
 

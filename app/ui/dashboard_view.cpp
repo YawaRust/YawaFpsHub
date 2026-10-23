@@ -227,10 +227,20 @@ void drawCpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
     if (!model.cpuName.empty()) {
         subtitle = model.cpuName;
         if (model.cpuCores > 0) {
-            subtitle += L" · " + std::to_wstring(model.cpuCores) + L" ядер";
+            // Склоняем: «1 ядро», «4 ядра», «8 ядер».
+            const std::uint32_t cores = model.cpuCores;
+            subtitle += L" · " + std::to_wstring(cores)
+                + (cores % 10 == 1 && cores % 100 != 11 ? L" ядро"
+                        : (cores % 10 >= 2 && cores % 10 <= 4 && (cores % 100 < 12 || cores % 100 > 14) ? L" ядра"
+                                                                                                        : L" ядер"));
         }
         if (model.cpuThreads > 0) {
-            subtitle += L" / " + std::to_wstring(model.cpuThreads) + L" потоков";
+            const std::uint32_t threads = model.cpuThreads;
+            subtitle += L" / " + std::to_wstring(threads)
+                + (threads % 10 == 1 && threads % 100 != 11 ? L" поток"
+                        : (threads % 10 >= 2 && threads % 10 <= 4 && (threads % 100 < 12 || threads % 100 > 14)
+                                ? L" потока"
+                                : L" потоков"));
         }
     }
     const float top = drawCardHeader(renderer, card, L"Процессор", std::wstring_view{}, theme);
