@@ -969,4 +969,8 @@
   if (params.get("nofx") === "1") {
     document.body.classList.add("no-fx");
   }
+  if (params.get("shot") === "1") {
+    // Один статичный кадр: таймер симулятора останавливаем, CSS-переходы уже выключены.
+    window.Sim.stop();
+  }
 })();

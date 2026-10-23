@@ -376,6 +376,11 @@
     isPaused() {
       return state.paused;
     },
+    // Для скриншотов: останавливаем таймер, чтобы страница «успокоилась» и
+    // headless-браузер снял кадр сразу, а не ждал виртуального времени.
+    stop() {
+      clearInterval(timer);
+    },
     gpuInfo() {
       const profile = GPU_PROFILES[state.gpuIndex];
       return {

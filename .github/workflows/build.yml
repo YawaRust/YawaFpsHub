@@ -264,15 +264,32 @@ jobs:
         continue-on-error: true
         shell: pwsh
         run: |
+          # Размер кадра берём у скриншота приложения: на раннере окно ограничено
+          # рабочим столом, и сравнивать можно только кадры одинакового размера.
+          $demoWidth = 1280
+          $demoHeight = 800
+          if (Test-Path "screenshot-dashboard.png") {
+            Add-Type -AssemblyName System.Drawing
+            $probe = [System.Drawing.Image]::FromFile("$PWD\screenshot-dashboard.png")
+            $demoWidth = $probe.Width
+            $demoHeight = $probe.Height
+            $probe.Dispose()
+          }
+          Write-Output "::notice title=YawaFpsHub::эталон снимается $($demoWidth)x$($demoHeight)"
           $python = (Get-Command python).Source
           $server = Start-Process -FilePath $python -ArgumentList "-m","http.server","8765","--bind","127.0.0.1","--directory","ui-prototype" -PassThru
           Start-Sleep -Seconds 2
           $edge = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
           if (-not (Test-Path $edge)) { $edge = "C:\Program Files\Microsoft\Edge\Application\msedge.exe" }
           foreach ($view in @("dashboard", "sensors", "overlay", "settings")) {
-            $url = "http://127.0.0.1:8765/index.html?view=$view&nofx=1"
-            Start-Process -FilePath $edge -ArgumentList "--headless=new","--disable-gpu","--hide-scrollbars","--window-size=1280,800","--virtual-time-budget=4000","--screenshot=$PWD\demo-$view.png",$url -Wait
-            if (Test-Path "demo-$view.png") {
+            $url = "http://127.0.0.1:8765/index.html?view=$view&nofx=1&shot=1"
+            $shot = "demo-$view.png"
+            # Первый запуск Edge бывает медленным: даём две попытки, иначе часть
+            # эталонов теряется и сравнивать не с чем.
+            for ($attempt = 0; $attempt -lt 2 -and -not (Test-Path $shot); $attempt++) {
+              Start-Process -FilePath $edge -ArgumentList "--headless=new","--disable-gpu","--hide-scrollbars","--no-first-run","--window-size=$demoWidth,$demoHeight","--virtual-time-budget=6000","--screenshot=$PWD\$shot",$url -Wait
+            }
+            if (Test-Path $shot) {
               Write-Output "::notice title=YawaFpsHub::демо $view снято"
             } else {
               Write-Output "::warning title=YawaFpsHub::демо $view не снято"
