@@ -40,12 +40,15 @@ void drawChip(Renderer& renderer, const Rect& rect, std::wstring_view label, boo
 // чтобы пользователь всё равно видел, где лежит файл.
 std::wstring clipPathLeft(Renderer& renderer, std::wstring value, float maxWidth)
 {
-    if (renderer.measureText(value, TextRole::Mono) <= maxWidth) {
+    // Запас в 8 %: DirectWrite и фактическая отрисовка расходятся на пару пикселей,
+    // без запаса хвост пути обрезался бы посреди буквы.
+    const float limit = maxWidth * 0.92f;
+    if (renderer.measureText(value, TextRole::Mono) <= limit) {
         return value;
     }
 
     const std::wstring prefix = L"…";
-    while (!value.empty() && renderer.measureText(prefix + value, TextRole::Mono) > maxWidth) {
+    while (!value.empty() && renderer.measureText(prefix + value, TextRole::Mono) > limit) {
         value.erase(0, 1);
     }
     return prefix + value;
