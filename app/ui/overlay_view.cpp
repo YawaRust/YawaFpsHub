@@ -152,9 +152,15 @@ void drawStyleGallery(Renderer& renderer, const AppModel& model, const Theme& th
         if (swatch.borderVisible) {
             renderer.strokeRoundRect(preview, swatch.radius * 0.6f, swatch.border.withAlpha(0.8f), 1.0f);
         }
-        renderer.text(L"142", Rect{ preview.left + 6.0f, preview.top, preview.left + 44.0f, preview.bottom },
-            swatch.mono ? TextRole::Mono : TextRole::Small, swatch.value, TextAlign::Left);
-        renderer.text(L"FPS", Rect{ preview.left + 34.0f, preview.top, preview.left + 62.0f, preview.bottom },
+        // «142» и «FPS» не должны наезжать друг на друга: подпись ставим по замеру числа.
+        const TextRole valueRole = swatch.mono ? TextRole::Mono : TextRole::Small;
+        const float valueWidth = renderer.measureText(L"142", valueRole);
+        renderer.text(L"142", Rect{ preview.left + 7.0f, preview.top, preview.left + 7.0f + valueWidth + 2.0f,
+                                    preview.bottom },
+            valueRole, swatch.value, TextAlign::Left);
+        renderer.text(L"FPS",
+            Rect{ preview.left + 9.0f + valueWidth, preview.top, preview.left + 9.0f + valueWidth + 34.0f,
+                preview.bottom },
             TextRole::Tiny, swatch.accent, TextAlign::Left);
         renderer.text(L"46%", Rect{ preview.right - 38.0f, preview.top, preview.right - 6.0f, preview.bottom },
             TextRole::Tiny, swatch.value, TextAlign::Right);

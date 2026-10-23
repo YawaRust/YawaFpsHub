@@ -302,12 +302,16 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
     std::size_t nextGroupStart = 0;
     for (std::size_t index = 0; index < entries.size(); ++index) {
         if (nextGroupStart < groupStarts.size() && groupStarts[nextGroupStart] == index) {
+            // Воздух ставим перед заголовком: иначе подсветка последней строки липла к нему.
+            if (nextGroupStart > 0) {
+                top += groupGap;
+            }
             if (top + kGroupHeight > viewport.top) {
                 renderer.text(groups[groupIndexes[nextGroupStart]].title,
                     Rect{ inner.left + 14.0f, top, inner.right, top + kGroupHeight - 4.0f }, TextRole::Small,
                     theme.accent);
             }
-            top += kGroupHeight + groupGap;
+            top += kGroupHeight;
             ++nextGroupStart;
         }
 
