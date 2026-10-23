@@ -42,27 +42,36 @@ std::wstring historyWindowLabel(int intervalMs)
     return L"Последние " + wideText(std::to_string(seconds) + " секунд");
 }
 
+// Заголовок карточки: крупное название и строка-пояснение под ним.
 float drawCardHeader(Renderer& renderer, const Rect& card, std::wstring_view title, std::wstring_view subtitle,
     const Theme& theme)
 {
     const Rect inner = card.inset(kCardPadding);
     renderer.text(title, Rect{ inner.left, inner.top, inner.right, inner.top + 20.0f }, TextRole::Heading, theme.text);
     if (!subtitle.empty()) {
-        renderer.text(subtitle, Rect{ inner.left, inner.top + 18.0f, inner.right, inner.top + 34.0f }, TextRole::Tiny,
-            theme.textFaint);
+        renderer.text(subtitle, Rect{ inner.left, inner.top + 18.0f, inner.right - 76.0f, inner.top + 34.0f },
+            TextRole::Tiny, theme.textFaint);
     }
-    return inner.top + 34.0f;
+    return inner.top + 36.0f;
 }
 
 void drawTag(Renderer& renderer, const Rect& card, std::wstring_view label, bool live, const Theme& theme)
 {
     const float width = renderer.measureText(label, TextRole::Tiny) + 30.0f;
-    const Rect tag{ card.right - kCardPadding - width, card.top + kCardPadding, card.right - kCardPadding,
-        card.top + kCardPadding + 22.0f };
+    const Rect tag{ card.right - kCardPadding - width, card.top + kCardPadding - 2.0f, card.right - kCardPadding,
+        card.top + kCardPadding + 20.0f };
     renderer.fillRoundRect(tag, 11.0f, live ? theme.accentSoft : theme.panelSoft);
     renderer.fillCircle(tag.left + 11.0f, tag.centerY(), 3.0f, live ? theme.accent : theme.textFaint);
     renderer.text(label, Rect{ tag.left + 20.0f, tag.top, tag.right - 6.0f, tag.bottom }, TextRole::Tiny,
         live ? theme.accent : theme.textFaint);
+}
+
+void drawStatBlock(Renderer& renderer, const Rect& rect, std::wstring_view label, std::wstring_view value,
+    const Theme& theme)
+{
+    renderer.text(label, Rect{ rect.left, rect.top, rect.right, rect.top + 14.0f }, TextRole::Tiny, theme.textFaint);
+    renderer.text(value, Rect{ rect.left, rect.top + 14.0f, rect.right, rect.top + 38.0f }, TextRole::Value,
+        theme.text);
 }
 
 void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card)
@@ -71,50 +80,54 @@ void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
     const Rect inner = card.inset(kCardPadding);
 
     const std::wstring game = model.foregroundApp.empty() ? L"игр не запущено" : model.foregroundApp;
-    const std::wstring subtitle = game + L" · цель " + wideText(std::to_string(model.settings.capture.targetHz) + " Гц");
+    const std::wstring subtitle
+        = game + L" · цель " + wideText(std::to_string(model.settings.capture.targetHz) + " Гц");
     drawCardHeader(renderer, card, L"Кадры в секунду", subtitle, theme);
     drawTag(renderer, card, model.etwRunning ? L"LIVE" : L"НЕТ ДАННЫХ", model.etwRunning, theme);
 
-    const float numberTop = inner.top + 40.0f;
+    const float numberTop = inner.top + 30.0f;
     const std::wstring value = wideNumber(model.fps.currentFps, MetricUnit::Count, 0);
-    renderer.text(value, Rect{ inner.left - 2.0f, numberTop, inner.left + 220.0f, numberTop + 66.0f },
-        TextRole::Display, model.etwRunning ? theme.accent : theme.textFaint);
     const float valueWidth = renderer.measureText(value, TextRole::Display);
-    renderer.text(L"fps", Rect{ inner.left + valueWidth + 4.0f, numberTop + 46.0f, inner.left + valueWidth + 48.0f,
-                            numberTop + 66.0f },
+    renderer.text(value, Rect{ inner.left - 2.0f, numberTop, inner.left + valueWidth + 8.0f, numberTop + 60.0f },
+        TextRole::Display, model.etwRunning ? theme.accent : theme.textFaint);
+    renderer.text(L"fps", Rect{ inner.left + valueWidth + 2.0f, numberTop + 40.0f, inner.left + valueWidth + 44.0f,
+                            numberTop + 60.0f },
         TextRole::Small, theme.textFaint);
 
     if (model.fps.averageFps > 0.1) {
         const double delta = (model.fps.currentFps - model.fps.averageFps) / model.fps.averageFps * 100.0;
-        renderer.text(signedPercent(delta), Rect{ inner.left, numberTop + 66.0f, inner.left + 80.0f,
-                                               numberTop + 84.0f },
-            TextRole::Small, delta >= 0.0 ? theme.accent : theme.warn);
-        renderer.text(L"к среднему за сессию", Rect{ inner.left + 84.0f, numberTop + 66.0f, inner.left + 240.0f,
-                                                 numberTop + 84.0f },
+        const std::wstring text = signedPercent(delta);
+        const float width = renderer.measureText(text, TextRole::Tiny) + 16.0f;
+        const Rect chip{ inner.left, numberTop + 58.0f, inner.left + width, numberTop + 76.0f };
+        const Color color = delta >= 0.0 ? theme.accent : theme.warn;
+        renderer.fillRoundRect(chip, 9.0f, color.withAlpha(0.16f));
+        renderer.text(text, chip, TextRole::Tiny, color, TextAlign::Center);
+        renderer.text(L"к среднему за сессию", Rect{ chip.right + 8.0f, chip.top, inner.left + 260.0f, chip.bottom },
             TextRole::Tiny, theme.textFaint);
     }
 
-    const std::array<std::pair<std::wstring, std::wstring>, 4> stats{
-        std::pair<std::wstring, std::wstring>{ L"1% LOW", wideNumber(model.fps.low1Fps, MetricUnit::Count, 0) },
+    // Статистика кадров — сетка 2x2, как в прототипе: подписи не наезжают друг на друга.
+    const float statsLeft = inner.left + std::max(inner.width() * 0.44f, 240.0f);
+    const float columnWidth = (inner.right - statsLeft) / 2.0f;
+    const std::array<std::array<std::wstring, 2>, 4> stats{ std::array<std::wstring, 2>{ L"1% LOW",
+                                                                                       wideNumber(model.fps.low1Fps,
+                                                                                                  MetricUnit::Count, 0) },
         { L"0.1% LOW", wideNumber(model.fps.low01Fps, MetricUnit::Count, 0) },
         { L"FRAME TIME", wideNumber(model.fps.frameTimeMs, MetricUnit::Milliseconds, 2) },
-        { L"ПРОПУЩЕНО", wideNumber(model.fps.droppedShare * 100.0, MetricUnit::Percent, 1) },
-    };
+        { L"ПРОПУЩЕНО", wideNumber(model.fps.droppedShare * 100.0, MetricUnit::Percent, 1) } };
 
-    const float statsLeft = inner.left + std::max(inner.width() * 0.40f, 250.0f);
-    const float columnWidth = (inner.right - statsLeft) / 4.0f;
     for (std::size_t index = 0; index < stats.size(); ++index) {
-        const float left = statsLeft + static_cast<float>(index) * columnWidth;
-        renderer.text(stats[index].first, Rect{ left, numberTop + 14.0f, left + columnWidth - 10.0f,
-                                                  numberTop + 30.0f },
-            TextRole::Tiny, theme.textFaint);
-        renderer.text(stats[index].second, Rect{ left, numberTop + 30.0f, left + columnWidth - 10.0f,
-                                                   numberTop + 56.0f },
-            TextRole::Value, theme.text);
+        const float left = statsLeft + static_cast<float>(index % 2) * columnWidth;
+        const float top = numberTop + (index < 2 ? 0.0f : 30.0f);
+        drawStatBlock(renderer, Rect{ left, top, left + columnWidth - 12.0f, top + 38.0f }, stats[index][0],
+            stats[index][1], theme);
     }
 
-    const float chartHeight = std::max(36.0f, inner.height() * 0.32f);
-    const Rect chart{ inner.left, inner.bottom - chartHeight, inner.right, inner.bottom };
+    const float chartTop = numberTop + 84.0f;
+    const Rect chart{ inner.left, chartTop + 8.0f, inner.right, inner.bottom };
+    if (chart.height() < 20.0f) {
+        return;
+    }
     renderer.drawLine(chart.left, chart.bottom, chart.right, chart.bottom, theme.line, 1.0f);
 
     const double budget = 1000.0 / static_cast<double>(std::max(model.settings.capture.targetHz, 30));
@@ -127,6 +140,9 @@ void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
 
     const float budgetY = chart.bottom - std::clamp(static_cast<float>(budget) / maximum, 0.0f, 1.0f) * chart.height();
     renderer.drawDashedLine(chart.left, budgetY, chart.right, budgetY, theme.lineStrong, 1.0f);
+    renderer.text(L"бюджет " + wideNumber(budget, MetricUnit::Milliseconds, 1),
+        Rect{ chart.left, chartTop - 6.0f, chart.right, chartTop + 8.0f }, TextRole::Tiny, theme.textFaint,
+        TextAlign::Right);
 
     if (count < 2) {
         renderer.text(L"данные появятся после первых кадров", chart, TextRole::Small, theme.textFaint,
@@ -134,72 +150,80 @@ void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
         return;
     }
 
-    renderer.drawSeries(ChartSeries{ history.data(), count, theme.accent, false }, chart, 0.0f, maximum, 1.6f);
-    renderer.text(wideNumber(budget, MetricUnit::Milliseconds, 1) + L" бюджет",
-        Rect{ chart.left, budgetY - 14.0f, chart.right, budgetY - 2.0f }, TextRole::Tiny, theme.textFaint,
-        TextAlign::Right);
+    renderer.drawSeries(ChartSeries{ history.data(), count, theme.accent, true }, chart, 0.0f, maximum, 1.6f);
 }
 
 void drawSessionCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card)
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
-    const float top = drawCardHeader(renderer, card, L"Сессия", L"профиль включается по запуску игры", theme);
+    float rowTop = drawCardHeader(renderer, card, L"Сессия", L"длительность и темп кадров", theme) + 6.0f;
 
-    const std::array<std::pair<std::wstring, std::wstring>, 3> rows{
+    const std::array<std::pair<std::wstring, std::wstring>, 4> rows{
         std::pair<std::wstring, std::wstring>{ L"Длительность", formatClock(model.elapsedMs) },
         { L"Средний FPS", wideNumber(model.fps.averageFps, MetricUnit::Count, 1) },
-        { L"Отброшено кадров", wideNumber(model.fps.droppedShare * 100.0, MetricUnit::Percent, 1) },
+        { L"Медианный frame time", wideNumber(model.fps.frameTimeMs, MetricUnit::Milliseconds, 2) },
+        { L"Пропущено кадров", wideNumber(model.fps.droppedShare * 100.0, MetricUnit::Percent, 1) },
     };
 
-    float rowTop = top + 14.0f;
     for (const auto& [label, value] : rows) {
-        if (rowTop + 18.0f > inner.bottom) {
+        if (rowTop + 16.0f > inner.bottom - 44.0f) {
             return;
         }
         drawLabelValue(renderer, Rect{ inner.left, rowTop, inner.right, rowTop + 16.0f }, label, value, theme);
-        rowTop += 24.0f;
+        rowTop += 22.0f;
     }
 
     const double budgetMs = 1000.0 / static_cast<double>(std::max(model.settings.capture.targetHz, 30));
     const double used = model.fps.frameTimeMs / budgetMs;
-    rowTop += 8.0f;
-    if (rowTop + 30.0f > inner.bottom) {
+    const float barTop = inner.bottom - 34.0f;
+    if (barTop < rowTop) {
         return;
     }
+
     renderer.text(L"Бюджет кадра " + wideText(std::to_string(model.settings.capture.targetHz) + " Гц"),
-        Rect{ inner.left, rowTop, inner.centerX(), rowTop + 16.0f }, TextRole::Small, theme.textDim);
+        Rect{ inner.left, barTop, inner.centerX(), barTop + 16.0f }, TextRole::Small, theme.textDim);
     renderer.text(wideNumber(std::clamp(used, 0.0, 1.999) * 100.0, MetricUnit::Percent, 0),
-        Rect{ inner.centerX(), rowTop, inner.right, rowTop + 16.0f }, TextRole::Body,
+        Rect{ inner.centerX(), barTop, inner.right, barTop + 16.0f }, TextRole::Body,
         used > 1.0 ? theme.danger : theme.text, TextAlign::Right);
-    drawBar(renderer, Rect{ inner.left, rowTop + 22.0f, inner.right, rowTop + 28.0f },
+    drawBar(renderer, Rect{ inner.left, barTop + 20.0f, inner.right, barTop + 26.0f },
         static_cast<float>(std::clamp(used, 0.0, 1.0)), used > 1.0 ? theme.danger : theme.accent, theme);
+    renderer.text(wideNumber(std::max(budgetMs - model.fps.frameTimeMs, 0.0), MetricUnit::Milliseconds, 2)
+            + L" свободно",
+        Rect{ inner.left, barTop + 28.0f, inner.right, barTop + 42.0f }, TextRole::Tiny, theme.textFaint);
+}
+
+void drawGaugeCard(Renderer& renderer, const Rect& inner, double load, const Color& color, const Theme& theme)
+{
+    const float radius = std::min(46.0f, (inner.bottom - inner.top - 46.0f) * 0.5f);
+    const float centerX = inner.left + radius + 4.0f;
+    const float centerY = inner.top + 12.0f + radius;
+    drawGauge(renderer, centerX, centerY, radius, static_cast<float>(load / 100.0), color, theme.line,
+        wideNumber(load, MetricUnit::Percent, 0), theme.text);
+    renderer.text(L"ЗАГРУЗКА", Rect{ centerX - radius, centerY + radius * 0.52f, centerX + radius,
+                                  centerY + radius * 0.52f + 14.0f },
+        TextRole::Tiny, theme.textFaint, TextAlign::Center);
 }
 
 void drawCpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card)
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
-    const float top = drawCardHeader(renderer, card, L"Процессор", L"загрузка по счётчику диспетчера задач", theme);
+    const float top = drawCardHeader(renderer, card, L"Процессор", L"счётчик загрузки как в диспетчере задач", theme);
 
     const double load = model.store.value(MetricId::CpuLoad);
-    const float radius = std::min(46.0f, (inner.height() - 50.0f) * 0.5f);
-    drawGauge(renderer, inner.left + radius + 4.0f, top + radius + 8.0f, radius,
-        static_cast<float>(load / 100.0), theme.cpu, theme.line, wideNumber(load, MetricUnit::Percent, 0), theme.text);
+    drawGaugeCard(renderer, Rect{ inner.left, top, inner.right, inner.bottom }, load, theme.cpu, theme);
 
-    const float rowsLeft = inner.left + radius * 2.0f + 18.0f;
-    float rowTop = top + 6.0f;
-    const std::array<std::pair<std::wstring, std::wstring>, 3> rows{
+    const float radius = std::min(46.0f, (inner.bottom - top - 46.0f) * 0.5f);
+    const float rowsLeft = inner.left + radius * 2.0f + 20.0f;
+    float rowTop = top + 10.0f;
+    const std::array<std::pair<std::wstring, std::wstring>, 2> rows{
         std::pair<std::wstring, std::wstring>{ L"Частота",
             model.availability.cpuClock ? wideMetric(MetricId::CpuClock, model.store.value(MetricId::CpuClock))
                                         : L"нет данных" },
         { L"Температура",
             model.availability.cpuTemperature ? wideMetric(MetricId::CpuTemp, model.store.value(MetricId::CpuTemp))
                                               : L"нет данных" },
-        { L"Поток игры",
-            model.store.value(MetricId::GameThreadLoad) > 0.0
-                ? wideMetric(MetricId::GameThreadLoad, model.store.value(MetricId::GameThreadLoad))
-                : L"нет данных" },
     };
 
     for (const auto& [label, value] : rows) {
@@ -207,7 +231,7 @@ void drawCpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
             break;
         }
         drawLabelValue(renderer, Rect{ rowsLeft, rowTop, inner.right, rowTop + 16.0f }, label, value, theme);
-        rowTop += 22.0f;
+        rowTop += 24.0f;
     }
 }
 
@@ -221,24 +245,19 @@ void drawGpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
     const float top = drawCardHeader(renderer, card, L"Видеокарта", name, theme);
 
     const double load = model.store.value(MetricId::GpuLoad);
-    const float radius = std::min(46.0f, (inner.height() - 50.0f) * 0.5f);
-    drawGauge(renderer, inner.left + radius + 4.0f, top + radius + 8.0f, radius,
-        static_cast<float>(load / 100.0), theme.gpu, theme.line, wideNumber(load, MetricUnit::Percent, 0), theme.text);
+    drawGaugeCard(renderer, Rect{ inner.left, top, inner.right, inner.bottom }, load, theme.gpu, theme);
 
-    const float rowsLeft = inner.left + radius * 2.0f + 18.0f;
-    float rowTop = top + 6.0f;
+    const float radius = std::min(46.0f, (inner.bottom - top - 46.0f) * 0.5f);
+    const float rowsLeft = inner.left + radius * 2.0f + 20.0f;
+    float rowTop = top + 8.0f;
     const double vramTotal = model.store.value(MetricId::VramTotal);
-    const std::array<std::pair<std::wstring, std::wstring>, 3> rows{
+    const std::array<std::pair<std::wstring, std::wstring>, 2> rows{
         std::pair<std::wstring, std::wstring>{ L"Температура",
             model.availability.gpuTemperature ? wideMetric(MetricId::GpuTemp, model.store.value(MetricId::GpuTemp))
                                               : L"нет данных" },
         { L"Питание",
             model.availability.gpuPower ? wideMetric(MetricId::GpuPower, model.store.value(MetricId::GpuPower))
                                         : L"нет данных" },
-        { L"Видеопамять",
-            vramTotal > 0.0 ? wideNumber(model.store.value(MetricId::VramUsed), MetricUnit::Gigabytes, 1) + L" / "
-                    + wideNumber(vramTotal, MetricUnit::Gigabytes, 1)
-                            : L"нет данных" },
     };
 
     for (const auto& [label, value] : rows) {
@@ -249,42 +268,73 @@ void drawGpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
         rowTop += 22.0f;
     }
 
-    if (model.gpuNames.size() > 1 && inner.bottom - rowTop > 24.0f) {
-        const Rect picker{ rowsLeft, rowTop + 2.0f, inner.right, rowTop + 26.0f };
+    if (vramTotal > 0.0 && rowTop + 16.0f <= inner.bottom) {
+        drawLabelValue(renderer, Rect{ rowsLeft, rowTop, inner.right, rowTop + 16.0f }, L"Видеопамять",
+            wideNumber(model.store.value(MetricId::VramUsed), MetricUnit::Gigabytes, 1) + L" / "
+                + wideNumber(vramTotal, MetricUnit::Gigabytes, 1),
+            theme);
+        rowTop += 22.0f;
+    }
+
+    if (model.gpuNames.size() > 1 && inner.bottom - rowTop >= 24.0f) {
+        const Rect picker{ rowsLeft, inner.bottom - 26.0f, inner.right, inner.bottom };
         drawChip(renderer, picker, L"сменить адаптер", false, theme, TextRole::Tiny);
         hits.push_back(UiHit{ picker, ActionKind::CycleGpu, 0 });
     }
+}
+
+void drawLegendChip(Renderer& renderer, const Rect& rect, std::wstring_view label, const Color& color,
+    const Theme& theme)
+{
+    const float width = renderer.measureText(label, TextRole::Tiny) + 18.0f;
+    renderer.fillCircle(rect.left + 4.0f, rect.centerY(), 3.0f, color);
+    renderer.text(label, Rect{ rect.left + 12.0f, rect.top, rect.left + width, rect.bottom }, TextRole::Tiny,
+        theme.textDim);
 }
 
 void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card)
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
-    const float top = drawCardHeader(renderer, card, L"Память", L"занято и свободно, как в диспетчере задач", theme);
+    const float top = drawCardHeader(renderer, card, L"Память", L"занято, кэш и свободно", theme);
 
     const double used = model.store.value(MetricId::RamUsed);
+    const double cache = model.store.value(MetricId::RamCache);
     const double free = model.store.value(MetricId::RamFree);
     const double total = used + free;
 
     renderer.text(wideNumber(used, MetricUnit::Gigabytes, 1),
-        Rect{ inner.left, top + 4.0f, inner.left + 150.0f, top + 40.0f }, TextRole::Value, theme.text);
+        Rect{ inner.left, top, inner.left + 160.0f, top + 38.0f }, TextRole::Value, theme.text);
     const float valueWidth = renderer.measureText(wideNumber(used, MetricUnit::Gigabytes, 1), TextRole::Value);
-    renderer.text(L"из " + wideNumber(total, MetricUnit::Gigabytes, 1),
-        Rect{ inner.left + valueWidth + 8.0f, top + 22.0f, inner.right, top + 40.0f }, TextRole::Tiny,
+    renderer.text(L"/ " + wideNumber(total, MetricUnit::Gigabytes, 1) + L" ГБ занято",
+        Rect{ inner.left + valueWidth + 8.0f, top + 20.0f, inner.right, top + 38.0f }, TextRole::Tiny,
         theme.textFaint);
 
-    const float barTop = top + 50.0f;
+    const float barTop = top + 48.0f;
     if (barTop + 8.0f < inner.bottom) {
         drawBar(renderer, Rect{ inner.left, barTop, inner.right, barTop + 6.0f },
             total > 0.0 ? static_cast<float>(used / total) : 0.0f, theme.ram, theme);
     }
 
-    float rowTop = barTop + 22.0f;
-    const std::array<std::pair<std::wstring, std::wstring>, 3> rows{
-        std::pair<std::wstring, std::wstring>{ L"Кэш", wideNumber(model.store.value(MetricId::RamCache),
-                                                   MetricUnit::Gigabytes, 1) },
-        { L"Свободно", wideNumber(free, MetricUnit::Gigabytes, 1) },
-        { L"Своп-файл", wideNumber(model.store.value(MetricId::PageFile), MetricUnit::Gigabytes, 1) },
+    const Rect legend{ inner.left, barTop + 14.0f, inner.right, barTop + 30.0f };
+    if (legend.bottom > inner.bottom) {
+        return;
+    }
+    float left = legend.left;
+    drawLegendChip(renderer, Rect{ left, legend.top, left + 120.0f, legend.bottom },
+        L"Приложения " + wideNumber(used, MetricUnit::Gigabytes, 1), theme.ram, theme);
+    left += 128.0f;
+    drawLegendChip(renderer, Rect{ left, legend.top, left + 100.0f, legend.bottom },
+        L"Кэш " + wideNumber(cache, MetricUnit::Gigabytes, 1), theme.disk, theme);
+    left += 96.0f;
+    drawLegendChip(renderer, Rect{ left, legend.top, left + 110.0f, legend.bottom },
+        L"Свободно " + wideNumber(free, MetricUnit::Gigabytes, 1), theme.lineStrong, theme);
+
+    float rowTop = legend.bottom + 8.0f;
+    const std::array<std::pair<std::wstring, std::wstring>, 2> rows{
+        std::pair<std::wstring, std::wstring>{ L"Своп-файл",
+            wideNumber(model.store.value(MetricId::PageFile), MetricUnit::Gigabytes, 1) },
+        { L"Всего", wideNumber(total, MetricUnit::Gigabytes, 1) },
     };
 
     for (const auto& [label, value] : rows) {
@@ -303,7 +353,8 @@ void drawPerformanceCard(Renderer& renderer, const AppModel& model, const Theme&
     const float top = drawCardHeader(renderer, card, L"Производительность",
         historyWindowLabel(model.settings.capture.intervalMs), theme);
 
-    const Rect legend{ inner.centerX() - 120.0f, card.top + kCardPadding, inner.right, card.top + kCardPadding + 18.0f };
+    const Rect legend{ inner.left + 260.0f, card.top + kCardPadding - 2.0f, inner.right,
+        card.top + kCardPadding + 18.0f };
     renderer.fillCircle(legend.left + 4.0f, legend.centerY(), 3.0f, theme.cpu);
     renderer.text(L"Процессор", Rect{ legend.left + 12.0f, legend.top, legend.left + 90.0f, legend.bottom },
         TextRole::Tiny, theme.textFaint);
@@ -311,7 +362,7 @@ void drawPerformanceCard(Renderer& renderer, const AppModel& model, const Theme&
     renderer.text(L"Видеокарта", Rect{ legend.left + 112.0f, legend.top, legend.right, legend.bottom }, TextRole::Tiny,
         theme.textFaint);
 
-    const Rect chart{ inner.left, top + 6.0f, inner.right, inner.bottom - 2.0f };
+    const Rect chart{ inner.left, top + 4.0f, inner.right, inner.bottom - 2.0f };
     if (chart.height() < 24.0f) {
         return;
     }
@@ -321,14 +372,15 @@ void drawPerformanceCard(Renderer& renderer, const AppModel& model, const Theme&
         renderer.drawLine(chart.left, y, chart.right, y, theme.line.withAlpha(0.6f), 1.0f);
     }
 
-    std::array<float, kHistoryCapacity> history{};
-    const std::size_t cpuCount = model.store.copyHistory(MetricId::CpuLoad, history.data(), history.size());
-    if (cpuCount >= 2) {
-        renderer.drawSeries(ChartSeries{ history.data(), cpuCount, theme.cpu, true }, chart, 0.0f, 100.0f, 1.4f);
-    }
-    const std::size_t gpuCount = model.store.copyHistory(MetricId::GpuLoad, history.data(), history.size());
+    std::array<float, kHistoryCapacity> cpuHistory{};
+    const std::size_t cpuCount = model.store.copyHistory(MetricId::CpuLoad, cpuHistory.data(), cpuHistory.size());
+    std::array<float, kHistoryCapacity> gpuHistory{};
+    const std::size_t gpuCount = model.store.copyHistory(MetricId::GpuLoad, gpuHistory.data(), gpuHistory.size());
     if (gpuCount >= 2) {
-        renderer.drawSeries(ChartSeries{ history.data(), gpuCount, theme.gpu, false }, chart, 0.0f, 100.0f, 1.4f);
+        renderer.drawSeries(ChartSeries{ gpuHistory.data(), gpuCount, theme.gpu, true }, chart, 0.0f, 100.0f, 1.2f);
+    }
+    if (cpuCount >= 2) {
+        renderer.drawSeries(ChartSeries{ cpuHistory.data(), cpuCount, theme.cpu, false }, chart, 0.0f, 100.0f, 1.4f);
     }
 
     renderer.text(L"100 %", Rect{ chart.left, chart.top - 12.0f, chart.right, chart.top - 1.0f }, TextRole::Tiny,
@@ -344,13 +396,13 @@ void drawDiskNetCard(Renderer& renderer, const AppModel& model, const Theme& the
     const float top = drawCardHeader(renderer, card, L"Диски и сеть", L"скорости за последнюю секунду", theme);
 
     if (!model.settings.capture.includeDiskNet) {
-        renderer.text(L"раздел отключён в настройках", Rect{ inner.left, top + 6.0f, inner.right, top + 24.0f },
+        renderer.text(L"раздел отключён в настройках", Rect{ inner.left, top, inner.right, top + 18.0f },
             TextRole::Small, theme.textFaint);
         return;
     }
 
     const std::array<MetricId, 4> ids{ MetricId::DiskRead, MetricId::DiskWrite, MetricId::NetDown, MetricId::NetUp };
-    float rowTop = top + 6.0f;
+    float rowTop = top + 4.0f;
     const float step = std::max(20.0f, (inner.bottom - rowTop) / 4.0f);
 
     for (MetricId id : ids) {
@@ -360,52 +412,43 @@ void drawDiskNetCard(Renderer& renderer, const AppModel& model, const Theme& the
         const MetricInfo& info = metricInfo(id);
         renderer.text(wideText(info.label), Rect{ inner.left, rowTop, inner.centerX(), rowTop + 16.0f },
             TextRole::Small, theme.textDim);
-        renderer.text(model.store.hasValue(id) ? wideMetric(id, model.store.value(id)) : L"нет данных",
+        const bool known = model.store.hasValue(id);
+        renderer.text(known ? wideMetric(id, model.store.value(id)) : L"нет данных",
             Rect{ inner.centerX(), rowTop, inner.right, rowTop + 16.0f }, TextRole::Body,
-            model.store.hasValue(id) ? theme.text : theme.textFaint, TextAlign::Right);
+            known ? theme.text : theme.textFaint, TextAlign::Right);
         rowTop += step;
     }
-}
-
-void drawTemperatureRow(Renderer& renderer, const Rect& row, std::wstring_view label, MetricId id,
-    bool available, const AppModel& model, const Theme& theme)
-{
-    renderer.text(label, Rect{ row.left, row.top, row.centerX(), row.bottom }, TextRole::Small, theme.textDim);
-    const bool known = available && model.store.hasValue(id) && model.store.value(id) > 0.0;
-    renderer.text(known ? wideMetric(id, model.store.value(id)) : L"нет данных",
-        Rect{ row.centerX(), row.top, row.right, row.bottom }, TextRole::Body,
-        known ? theme.text : theme.textFaint, TextAlign::Right);
 }
 
 void drawTemperaturesCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card)
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
-    const float top = drawCardHeader(renderer, card, L"Температуры", L"что отдают датчики без драйвера", theme);
+    const float top = drawCardHeader(renderer, card, L"Температуры", L"что отдают датчики", theme);
 
-    float rowTop = top + 6.0f;
-    const std::array<std::pair<std::wstring_view, MetricId>, 4> rows{
-        std::pair<std::wstring_view, MetricId>{ L"Процессор", MetricId::CpuTemp },
-        { L"Видеокарта", MetricId::GpuTemp },
-        { L"Hotspot GPU", MetricId::GpuHotspot },
-        { L"NVMe", MetricId::DiskTemp },
+    struct Row {
+        std::wstring_view label;
+        MetricId id;
+        bool available;
     };
 
-    for (const auto& [label, id] : rows) {
-        if (rowTop + 16.0f > inner.bottom) {
+    const std::array<Row, 4> rows{ Row{ L"Процессор", MetricId::CpuTemp, model.availability.cpuTemperature },
+        { L"Видеокарта", MetricId::GpuTemp, model.availability.gpuTemperature },
+        { L"Hotspot GPU", MetricId::GpuHotspot, model.availability.gpuTemperature },
+        { L"NVMe", MetricId::DiskTemp, model.availability.disk } };
+
+    float rowTop = top + 2.0f;
+    for (const Row& row : rows) {
+        if (rowTop + 15.0f > inner.bottom) {
             break;
         }
-        bool available = true;
-        if (id == MetricId::CpuTemp) {
-            available = model.availability.cpuTemperature;
-        } else if (id == MetricId::GpuTemp || id == MetricId::GpuHotspot) {
-            available = model.availability.gpuTemperature;
-        } else if (id == MetricId::DiskTemp) {
-            available = model.availability.disk;
-        }
-        drawTemperatureRow(renderer, Rect{ inner.left, rowTop, inner.right, rowTop + 16.0f }, label, id, available,
-            model, theme);
-        rowTop += 22.0f;
+        const bool known = row.available && model.store.hasValue(row.id) && model.store.value(row.id) > 0.0;
+        renderer.text(row.label, Rect{ inner.left, rowTop, inner.centerX(), rowTop + 15.0f }, TextRole::Small,
+            theme.textDim);
+        renderer.text(known ? wideMetric(row.id, model.store.value(row.id)) : L"нет данных",
+            Rect{ inner.centerX(), rowTop, inner.right, rowTop + 15.0f }, TextRole::Body,
+            known ? theme.text : theme.textFaint, TextAlign::Right);
+        rowTop += 20.0f;
     }
 }
 
@@ -452,14 +495,14 @@ void drawAlertsCard(Renderer& renderer, const AppModel& model, const Theme& them
             hasLow ? (model.fps.frameTimeMs > budgetMs ? 1 : 0) : -1 },
     };
 
-    float rowTop = top + 8.0f;
+    float rowTop = top + 2.0f;
     for (const Rule& rule : rules) {
-        if (rowTop + 16.0f > inner.bottom) {
+        if (rowTop + 15.0f > inner.bottom) {
             break;
         }
-        drawRuleRow(renderer, Rect{ inner.left, rowTop, inner.right, rowTop + 16.0f }, rule.label, rule.state,
+        drawRuleRow(renderer, Rect{ inner.left, rowTop, inner.right, rowTop + 15.0f }, rule.label, rule.state,
             rule.severity, theme);
-        rowTop += 22.0f;
+        rowTop += 20.0f;
     }
 }
 
@@ -471,10 +514,10 @@ void drawDashboard(Renderer& renderer, const AppModel& model, const Theme& theme
     const Columns columns{ area };
 
     const float usable = area.height() - kGap * 3.0f;
-    const float first = std::max(150.0f, usable * 0.30f);
+    const float first = std::max(160.0f, usable * 0.31f);
     const float second = std::max(140.0f, usable * 0.27f);
-    const float third = std::max(120.0f, usable * 0.24f);
-    const float fourth = std::max(96.0f, usable - first - second - third);
+    const float third = std::max(110.0f, usable * 0.22f);
+    const float fourth = std::max(90.0f, usable - first - second - third);
 
     const float row1 = area.top;
     const float row2 = row1 + first + kGap;

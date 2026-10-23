@@ -24,7 +24,7 @@ float drawCardHeader(Renderer& renderer, const Rect& card, std::wstring_view tit
         renderer.text(subtitle, Rect{ inner.left, inner.top + 18.0f, inner.right, inner.top + 34.0f }, TextRole::Tiny,
             theme.textFaint);
     }
-    return inner.top + 42.0f;
+    return inner.top + 34.0f;
 }
 
 void drawSwitchRow(Renderer& renderer, const Rect& row, std::wstring_view label, std::wstring_view note, bool on,
@@ -46,6 +46,17 @@ void drawSwitchRow(Renderer& renderer, const Rect& row, std::wstring_view label,
     }
 }
 
+std::wstring clipRight(Renderer& renderer, std::wstring text, TextRole role, float maxWidth)
+{
+    if (renderer.measureText(text, role) <= maxWidth) {
+        return text;
+    }
+    while (!text.empty() && renderer.measureText(text + L"…", role) > maxWidth) {
+        text.pop_back();
+    }
+    return text + L"…";
+}
+
 void drawFieldLabel(Renderer& renderer, const Rect& rect, std::wstring_view label, std::wstring_view value,
     const Theme& theme)
 {
@@ -63,34 +74,37 @@ void drawCaptureCard(Renderer& renderer, const AppModel& model, const Theme& the
     const Rect inner = card.inset(kCardPadding);
     float top = drawCardHeader(renderer, card, L"Сбор данных", L"как часто и что именно измеряем", theme);
 
-    drawFieldLabel(renderer, Rect{ inner.left, top, inner.right, top + 16.0f }, L"Интервал опроса", L"", theme);
-    top += 22.0f;
+    renderer.text(L"Интервал опроса", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small,
+        theme.textDim);
+    top += 18.0f;
     const float intervalWidth = (inner.width() - 2.0f * 8.0f) / 3.0f;
     for (std::size_t index = 0; index < kIntervals.size(); ++index) {
         const Rect chip{ inner.left + static_cast<float>(index) * (intervalWidth + 8.0f), top,
-            inner.left + static_cast<float>(index) * (intervalWidth + 8.0f) + intervalWidth, top + 30.0f };
+            inner.left + static_cast<float>(index) * (intervalWidth + 8.0f) + intervalWidth, top + 26.0f };
         drawChip(renderer, chip, wideText(std::to_string(kIntervals[index]) + " мс"),
             model.settings.capture.intervalMs == kIntervals[index], theme);
         hits.push_back(UiHit{ chip, ActionKind::SetInterval, kIntervals[index] });
     }
 
-    top += 42.0f;
-    drawFieldLabel(renderer, Rect{ inner.left, top, inner.right, top + 16.0f }, L"Цель кадра", L"для бюджета", theme);
-    top += 22.0f;
+    top += 36.0f;
+    renderer.text(L"Цель кадра", Rect{ inner.left, top, inner.left + 90.0f, top + 16.0f }, TextRole::Small,
+        theme.textDim);
+    renderer.text(L"для бюджета кадра", Rect{ inner.left + 96.0f, top, inner.right, top + 16.0f }, TextRole::Tiny,
+        theme.textFaint);
+    top += 18.0f;
     const float targetWidth = (inner.width() - 3.0f * 8.0f) / 4.0f;
     for (std::size_t index = 0; index < kTargets.size(); ++index) {
         const Rect chip{ inner.left + static_cast<float>(index) * (targetWidth + 8.0f), top,
-            inner.left + static_cast<float>(index) * (targetWidth + 8.0f) + targetWidth, top + 30.0f };
+            inner.left + static_cast<float>(index) * (targetWidth + 8.0f) + targetWidth, top + 26.0f };
         drawChip(renderer, chip, wideText(std::to_string(kTargets[index]) + " Гц"),
             model.settings.capture.targetHz == kTargets[index], theme);
         hits.push_back(UiHit{ chip, ActionKind::SetTargetHz, kTargets[index] });
     }
 
-    top += 44.0f;
-    const float rowHeight = 36.0f;
+    top += 36.0f;
     const std::array<std::array<std::wstring_view, 2>, 3> toggles{ std::array<std::wstring_view, 2>{
                                                                       L"Сбор кадров через ETW",
-                                                                      L"без прав администратора, через DXGI-провайдер" },
+                                                                      L"без прав администратора, провайдер DXGI" },
         { L"Останавливать опрос вне игры", L"экономит ресурсы в простое" },
         { L"Показывать диски и сеть", L"скрывает карточку и строки в датчиках" } };
     const std::array<bool, 3> states{ model.settings.capture.etwEnabled, model.settings.capture.pauseWhenIdle,
@@ -99,13 +113,13 @@ void drawCaptureCard(Renderer& renderer, const AppModel& model, const Theme& the
         ActionKind::ToggleDiskNet };
 
     for (std::size_t index = 0; index < toggles.size(); ++index) {
-        if (top + 32.0f > inner.bottom) {
+        if (top + 30.0f > inner.bottom) {
             break;
         }
-        const Rect row{ inner.left, top, inner.right, top + 32.0f };
+        const Rect row{ inner.left, top, inner.right, top + 30.0f };
         drawSwitchRow(renderer, row, toggles[index][0], toggles[index][1], states[index], theme);
         hits.push_back(UiHit{ row, actions[index], 0 });
-        top += rowHeight;
+        top += 32.0f;
     }
 }
 
@@ -116,38 +130,43 @@ void drawAppearanceCard(Renderer& renderer, const AppModel& model, const Theme& 
     const Rect inner = card.inset(kCardPadding);
     float top = drawCardHeader(renderer, card, L"Внешний вид", L"акцент меняет весь интерфейс и оверлей", theme);
 
-    drawFieldLabel(renderer, Rect{ inner.left, top, inner.right, top + 16.0f }, L"Акцент", L"", theme);
-    top += 22.0f;
+    renderer.text(L"Акцент", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
+    top += 20.0f;
 
     const float chipWidth = (inner.width() - 4.0f * 8.0f) / 5.0f;
     for (std::size_t index = 0; index < kAccentNames.size(); ++index) {
         const Rect chip{ inner.left + static_cast<float>(index) * (chipWidth + 8.0f), top,
-            inner.left + static_cast<float>(index) * (chipWidth + 8.0f) + chipWidth, top + 30.0f };
+            inner.left + static_cast<float>(index) * (chipWidth + 8.0f) + chipWidth, top + 28.0f };
         const bool active = static_cast<std::size_t>(model.settings.ui.accent) == index;
         renderer.fillRoundRect(chip, 9.0f, active ? theme.accentSoft : theme.panelSoft);
         if (active) {
             renderer.strokeRoundRect(chip, 9.0f, theme.accentGlow, 1.0f);
         }
-        renderer.fillCircle(chip.left + 14.0f, chip.centerY(), 4.0f, fromRgba(kAccentRgba[index]));
-        renderer.text(kAccentNames[index], Rect{ chip.left + 24.0f, chip.top, chip.right - 4.0f, chip.bottom },
+        renderer.fillCircle(chip.left + 13.0f, chip.centerY(), 4.0f, fromRgba(kAccentRgba[index]));
+        renderer.text(kAccentNames[index], Rect{ chip.left + 22.0f, chip.top, chip.right - 4.0f, chip.bottom },
             TextRole::Tiny, active ? theme.accent : theme.textDim);
         hits.push_back(UiHit{ chip, ActionKind::SetAccent, static_cast<int>(index) });
     }
 
-    top += 42.0f;
-    drawFieldLabel(renderer, Rect{ inner.left, top, inner.right, top + 16.0f }, L"Плотность интерфейса",
-        L"компактная умещает больше карточек", theme);
-    top += 22.0f;
-    const Rect normal{ inner.left, top, inner.left + inner.width() * 0.5f - 4.0f, top + 30.0f };
-    const Rect compact{ inner.left + inner.width() * 0.5f + 4.0f, top, inner.right, top + 30.0f };
+    top += 40.0f;
+    renderer.text(L"Плотность интерфейса", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small,
+        theme.textDim);
+    renderer.text(L"компактная умещает больше карточек", Rect{ inner.left, top + 16.0f, inner.right, top + 30.0f },
+        TextRole::Tiny, theme.textFaint);
+    top += 34.0f;
+    const Rect normal{ inner.left, top, inner.left + inner.width() * 0.5f - 4.0f, top + 26.0f };
+    const Rect compact{ inner.left + inner.width() * 0.5f + 4.0f, top, inner.right, top + 26.0f };
     drawChip(renderer, normal, L"Обычная", !model.settings.ui.compactDensity, theme);
     drawChip(renderer, compact, L"Компактная", model.settings.ui.compactDensity, theme);
     hits.push_back(UiHit{ normal, ActionKind::SetDensity, 0 });
     hits.push_back(UiHit{ compact, ActionKind::SetDensity, 1 });
 
-    top += 44.0f;
-    const Rect tray{ inner.left, top, inner.right, top + 32.0f };
-    drawSwitchRow(renderer, tray, L"Сворачивать в трей при закрытии", L"окно остаётся в трее, опрос продолжается",
+    top += 38.0f;
+    if (top + 30.0f > inner.bottom) {
+        return;
+    }
+    const Rect tray{ inner.left, top, inner.right, top + 30.0f };
+    drawSwitchRow(renderer, tray, L"Сворачивать в трей при закрытии", L"опрос продолжается в фоне",
         model.settings.ui.closeToTray, theme);
     hits.push_back(UiHit{ tray, ActionKind::ToggleTray, 0 });
 }
@@ -172,9 +191,9 @@ void drawPortableCard(Renderer& renderer, const AppModel& model, const Theme& th
     }
 
     top += 6.0f;
-    renderer.text(wideText(model.settingsPath), Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Mono,
-        theme.textFaint);
-    top += 26.0f;
+    renderer.text(clipRight(renderer, wideText(model.settingsPath), TextRole::Mono, inner.width()),
+        Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Mono, theme.textFaint);
+    top += 24.0f;
 
     if (top + 30.0f > inner.bottom) {
         return;
@@ -248,31 +267,30 @@ void drawSourcesCard(Renderer& renderer, const AppModel& model, const Theme& the
             L"без прав администратора" },
         { L"PDH · загрузка GPU", L"GPU Engine, движок 3D активного адаптера", availability.gpuLoad,
             L"Windows 10 1709 и новее" },
-        { L"DXGI · адаптеры и видеопамять", L"LUID, объём, бюджет QueryVideoMemoryInfo", availability.gpuMemory,
+        { L"DXGI · адаптеры и видеопамять", L"LUID, объём, QueryVideoMemoryInfo", availability.gpuMemory,
             L"ядро драйвера, без установки" },
         { L"NVML · температура и питание GPU", L"nvml.dll из драйвера NVIDIA", availability.gpuTemperature,
             L"только NVIDIA" },
-        { L"Датчики CPU и чипсета", L"нужен драйвер доступа к MSR и SMBus", availability.cpuTemperature,
-            L"не ставим драйвер ради безопасности" } };
+        { L"Датчики CPU и чипсета", L"нужен драйвер доступа к MSR", availability.cpuTemperature,
+            L"драйвер не ставим" } };
 
-    float rowTop = top + 4.0f;
-    const float rowHeight = std::max(26.0f, std::min(38.0f, (inner.bottom - rowTop) / 6.0f));
-
-    for (const Source& source : sources) {
-        if (rowTop + 24.0f > inner.bottom) {
+    // Две колонки по три источника: шесть строк в одну не помещаются на 1040x790.
+    const float columnWidth = (inner.width() - 24.0f) / 2.0f;
+    for (std::size_t index = 0; index < sources.size(); ++index) {
+        const Source& source = sources[index];
+        const float left = inner.left + static_cast<float>(index / 3) * (columnWidth + 24.0f);
+        const float rowTop = top + static_cast<float>(index % 3) * 36.0f;
+        if (rowTop + 30.0f > inner.bottom) {
             break;
         }
-        renderer.text(source.name, Rect{ inner.left, rowTop, inner.left + 240.0f, rowTop + 18.0f }, TextRole::Small,
-            theme.text);
-        renderer.text(source.detail, Rect{ inner.left + 248.0f, rowTop, inner.right - 220.0f, rowTop + 18.0f },
-            TextRole::Tiny, theme.textFaint);
 
-        const std::wstring_view state = source.available ? L"работает" : L"нет данных";
-        renderer.text(state, Rect{ inner.right - 210.0f, rowTop, inner.right - 110.0f, rowTop + 18.0f },
-            TextRole::Tiny, source.available ? theme.accent : theme.textFaint, TextAlign::Right);
-        renderer.text(source.note, Rect{ inner.right - 104.0f, rowTop, inner.right, rowTop + 18.0f }, TextRole::Tiny,
-            theme.textFaint, TextAlign::Right);
-        rowTop += rowHeight;
+        renderer.text(source.name, Rect{ left, rowTop, left + columnWidth, rowTop + 15.0f }, TextRole::Small,
+            theme.text);
+        renderer.text(source.detail, Rect{ left, rowTop + 14.0f, left + columnWidth - 74.0f, rowTop + 29.0f },
+            TextRole::Tiny, theme.textFaint);
+        renderer.text(source.available ? L"работает" : L"нет данных",
+            Rect{ left + columnWidth - 70.0f, rowTop, left + columnWidth, rowTop + 15.0f }, TextRole::Tiny,
+            source.available ? theme.accent : theme.textFaint, TextAlign::Right);
     }
 }
 
@@ -283,8 +301,8 @@ void drawSettings(Renderer& renderer, const AppModel& model, const Theme& theme,
 {
     const float column = (area.width() - kGap) / 2.0f;
     const float usable = area.height() - kGap * 2.0f;
-    const float first = std::max(180.0f, usable * 0.44f);
-    const float second = std::max(140.0f, usable * 0.30f);
+    const float first = std::max(190.0f, usable * 0.42f);
+    const float second = std::max(140.0f, usable * 0.28f);
     const float third = std::max(120.0f, usable - first - second);
 
     const Rect leftTop{ area.left, area.top, area.left + column, area.top + first };

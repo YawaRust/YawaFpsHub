@@ -139,43 +139,44 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
     renderer.text(L"Настройка оверлея", Rect{ inner.left, inner.top, inner.right, inner.top + 22.0f },
         TextRole::Heading, theme.text);
     renderer.text(L"изменения сразу видны в предпросмотре",
-        Rect{ inner.left, inner.top + 20.0f, inner.right, inner.top + 38.0f }, TextRole::Tiny, theme.textFaint);
+        Rect{ inner.left, inner.top + 20.0f, inner.right, inner.top + 36.0f }, TextRole::Tiny, theme.textFaint);
 
-    float top = inner.top + 48.0f;
+    float top = inner.top + 44.0f;
 
-    renderer.text(L"Стиль", Rect{ inner.left, top, inner.left + 90.0f, top + 16.0f }, TextRole::Small, theme.textDim);
-    top += 20.0f;
+    // Стиль: три варианта в первом ряду и два во втором, чтобы подписи не сжимались.
+    renderer.text(L"Стиль", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
+    top += 18.0f;
     const float styleWidth = (inner.width() - 2.0f * 8.0f) / 3.0f;
     for (std::size_t index = 0; index < kStyleNames.size(); ++index) {
         const Rect chip{ inner.left + static_cast<float>(index) * (styleWidth + 8.0f), top,
-            inner.left + static_cast<float>(index) * (styleWidth + 8.0f) + styleWidth, top + 28.0f };
+            inner.left + static_cast<float>(index) * (styleWidth + 8.0f) + styleWidth, top + 26.0f };
         drawChip(renderer, chip, kStyleNames[index], static_cast<std::size_t>(overlay.style) == index, theme);
         hits.push_back(UiHit{ chip, ActionKind::SetStyle, static_cast<int>(index) });
     }
 
     const float tailWidth = (inner.width() - 8.0f) / 2.0f;
     for (std::size_t index = 0; index < kStyleNamesTail.size(); ++index) {
-        const Rect chip{ inner.left + static_cast<float>(index) * (tailWidth + 8.0f), top + 34.0f,
-            inner.left + static_cast<float>(index) * (tailWidth + 8.0f) + tailWidth, top + 62.0f };
+        const Rect chip{ inner.left + static_cast<float>(index) * (tailWidth + 8.0f), top + 32.0f,
+            inner.left + static_cast<float>(index) * (tailWidth + 8.0f) + tailWidth, top + 58.0f };
         drawChip(renderer, chip, kStyleNamesTail[index], static_cast<std::size_t>(overlay.style) == index + 3, theme);
         hits.push_back(UiHit{ chip, ActionKind::SetStyle, static_cast<int>(index + 3) });
     }
-    top += 74.0f;
+    top += 70.0f;
 
-    renderer.text(L"Положение", Rect{ inner.left, top, inner.left + 90.0f, top + 16.0f }, TextRole::Small,
+    renderer.text(L"Положение", Rect{ inner.left, top + 3.0f, inner.left + 84.0f, top + 19.0f }, TextRole::Small,
         theme.textDim);
     for (std::size_t index = 0; index < kPositionNames.size(); ++index) {
-        const Rect chip{ inner.left + 96.0f + static_cast<float>(index) * 40.0f, top - 4.0f,
-            inner.left + 128.0f + static_cast<float>(index) * 40.0f, top + 22.0f };
-        drawChip(renderer, chip, kPositionNames[index],
-            static_cast<std::size_t>(overlay.position) == index, theme);
+        const Rect chip{ inner.left + 88.0f + static_cast<float>(index) * 40.0f, top,
+            inner.left + 120.0f + static_cast<float>(index) * 40.0f, top + 26.0f };
+        drawChip(renderer, chip, kPositionNames[index], static_cast<std::size_t>(overlay.position) == index, theme);
         hits.push_back(UiHit{ chip, ActionKind::SetPosition, static_cast<int>(index) });
     }
+    top += 34.0f;
 
-    renderer.text(L"Вид", Rect{ inner.left + 268.0f, top, inner.left + 298.0f, top + 16.0f }, TextRole::Small,
+    renderer.text(L"Вид", Rect{ inner.left, top + 3.0f, inner.left + 84.0f, top + 19.0f }, TextRole::Small,
         theme.textDim);
-    const Rect plates{ inner.left + 304.0f, top - 4.0f, inner.left + 372.0f, top + 22.0f };
-    const Rect line{ inner.left + 378.0f, top - 4.0f, inner.left + 434.0f, top + 22.0f };
+    const Rect plates{ inner.left + 88.0f, top, inner.left + 196.0f, top + 26.0f };
+    const Rect line{ inner.left + 204.0f, top, inner.left + 300.0f, top + 26.0f };
     drawChip(renderer, plates, L"Плитки", overlay.layout == OverlayLayout::Plates, theme);
     drawChip(renderer, line, L"Строка", overlay.layout == OverlayLayout::Line, theme);
     hits.push_back(UiHit{ plates, ActionKind::SetLayout, static_cast<int>(OverlayLayout::Plates) });
@@ -187,29 +188,28 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
     top += 50.0f;
     drawSlider(renderer, Rect{ inner.left, top, inner.right, top + 36.0f }, overlay.opacityPercent, 0, 100,
         L"Прозрачность фона", theme, hits, ActionKind::SetOpacity);
-    top += 54.0f;
+    top += 52.0f;
 
-    renderer.text(L"Смещение", Rect{ inner.left, top, inner.left + 90.0f, top + 18.0f }, TextRole::Small,
+    renderer.text(L"Смещение", Rect{ inner.left, top, inner.left + 84.0f, top + 18.0f }, TextRole::Small,
         theme.textDim);
     const auto drawOffset = [&](float left, ActionKind action, int value, std::wstring_view axis) {
         const Rect minus{ left, top - 4.0f, left + 28.0f, top + 22.0f };
-        const Rect plus{ left + 96.0f, top - 4.0f, left + 124.0f, top + 22.0f };
+        const Rect plus{ left + 92.0f, top - 4.0f, left + 120.0f, top + 22.0f };
         drawChip(renderer, minus, L"−", false, theme);
         drawChip(renderer, plus, L"+", false, theme);
+        renderer.text(wideText(std::to_string(value) + " px"), Rect{ minus.left, top + 20.0f, plus.right, top + 36.0f },
+            TextRole::Tiny, theme.textDim, TextAlign::Center);
         renderer.text(axis, Rect{ minus.right + 2.0f, top, plus.left - 2.0f, top + 18.0f }, TextRole::Small,
             theme.textFaint, TextAlign::Center);
-        renderer.text(wideText(std::to_string(value) + " px"),
-            Rect{ minus.left, top + 22.0f, plus.right, top + 38.0f }, TextRole::Tiny, theme.textDim,
-            TextAlign::Center);
         hits.push_back(UiHit{ minus, action, -10 });
         hits.push_back(UiHit{ plus, action, 10 });
     };
-    drawOffset(inner.left + 96.0f, ActionKind::OffsetX, overlay.offsetX, L"X");
-    drawOffset(inner.left + 236.0f, ActionKind::OffsetY, overlay.offsetY, L"Y");
-    top += 46.0f;
+    drawOffset(inner.left + 88.0f, ActionKind::OffsetX, overlay.offsetX, L"X");
+    drawOffset(inner.left + 232.0f, ActionKind::OffsetY, overlay.offsetY, L"Y");
+    top += 44.0f;
 
     renderer.text(L"Состав", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
-    top += 22.0f;
+    top += 20.0f;
     const float metricWidth = (inner.width() - 8.0f) / 2.0f;
     for (std::size_t index = 0; index < kMetricNames.size(); ++index) {
         const float column = static_cast<float>(index % 2);
@@ -232,7 +232,7 @@ void drawLabelsCard(Renderer& renderer, const AppModel& model, const Theme& them
     renderer.text(L"свои названия вместо CPU и GPU, пустое поле скрывает строку",
         Rect{ inner.left, inner.top + 20.0f, inner.right, inner.top + 36.0f }, TextRole::Tiny, theme.textFaint);
 
-    float top = inner.top + 46.0f;
+    float top = inner.top + 42.0f;
     for (std::size_t index = 0; index < kLabelFields.size(); ++index) {
         if (top + 26.0f > inner.bottom - 22.0f) {
             break;
@@ -253,7 +253,7 @@ void drawLabelsCard(Renderer& renderer, const AppModel& model, const Theme& them
             editing ? theme.accent : (value.empty() ? theme.textFaint : theme.text), TextAlign::Right);
 
         hits.push_back(UiHit{ row, ActionKind::SelectLabel, static_cast<int>(index) });
-        top += 32.0f;
+        top += 28.0f;
     }
 
     if (top + 26.0f <= inner.bottom) {
