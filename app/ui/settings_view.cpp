@@ -36,6 +36,21 @@ void drawChip(Renderer& renderer, const Rect& rect, std::wstring_view label, boo
     renderer.text(label, rect, TextRole::Small, isActive ? theme.accent : theme.textDim, TextAlign::Center);
 }
 
+// Длинный путь не влезает в карточку: оставляем хвост, начало заменяем многоточием,
+// чтобы пользователь всё равно видел, где лежит файл.
+std::wstring clipPathLeft(Renderer& renderer, std::wstring value, float maxWidth)
+{
+    if (renderer.measureText(value, TextRole::Mono) <= maxWidth) {
+        return value;
+    }
+
+    const std::wstring prefix = L"…";
+    while (!value.empty() && renderer.measureText(prefix + value, TextRole::Mono) > maxWidth) {
+        value.erase(0, 1);
+    }
+    return prefix + value;
+}
+
 Rect chipRow(float left, float top, float width, float height)
 {
     return Rect{ left, top, left + width, top + height };
@@ -176,8 +191,8 @@ void drawPortableCard(Renderer& renderer, const AppModel& model, const Theme& th
     for (const auto& [label, value] : rows) {
         renderer.text(label, Rect{ inner.left, top, inner.left + 92.0f, top + 18.0f }, TextRole::Small,
             theme.textDim);
-        renderer.text(value, Rect{ inner.left + 96.0f, top, inner.right, top + 18.0f }, TextRole::Mono,
-            theme.textFaint);
+        renderer.text(clipPathLeft(renderer, value, inner.right - inner.left - 96.0f),
+            Rect{ inner.left + 96.0f, top, inner.right, top + 18.0f }, TextRole::Mono, theme.textFaint);
         top += 26.0f;
     }
 

@@ -59,8 +59,8 @@ void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
         TextRole::Small, theme.textFaint);
 
     const float statsTop = inner.top + 42.0f;
-    const float statsLeft = inner.left + 250.0f;
-    const float columnWidth = 96.0f;
+    const float statsLeft = inner.left + std::max(inner.width() * 0.38f, 210.0f);
+    const float columnWidth = (inner.right - statsLeft) / 4.0f;
     const std::pair<std::wstring, std::wstring> stats[] = {
         { L"1% LOW", wideNumber(model.fps.low1Fps, MetricUnit::Count, 0) },
         { L"0.1% LOW", wideNumber(model.fps.low01Fps, MetricUnit::Count, 0) },
@@ -85,6 +85,11 @@ void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
         maximum = std::max(maximum, model.historyScratch[index]);
     }
     maximum *= 1.15f;
+
+    for (int step = 1; step < 4; ++step) {
+        const float y = chart.top + chart.height() * static_cast<float>(step) / 4.0f;
+        renderer.drawLine(chart.left, y, chart.right, y, theme.line.withAlpha(0.5f), 1.0f);
+    }
 
     const float targetMs = 1000.0f / static_cast<float>(std::max(model.settings.capture.targetHz, 30));
     if (targetMs < maximum) {
@@ -213,7 +218,7 @@ void drawGraphicsCard(Renderer& renderer, const AppModel& model, const Theme& th
         top += 23.0f;
     }
 
-    const float vramTop = inner.bottom - 30.0f;
+    const float vramTop = inner.bottom - 32.0f;
     renderer.text(L"Видеопамять", Rect{ inner.left, vramTop, inner.left + 120.0f, vramTop + 16.0f }, TextRole::Small,
         theme.textFaint);
 
@@ -223,7 +228,7 @@ void drawGraphicsCard(Renderer& renderer, const AppModel& model, const Theme& th
                 + wideNumber(vramTotal, MetricUnit::Gigabytes, 1),
             Rect{ inner.left + 120.0f, vramTop, inner.right, vramTop + 16.0f }, TextRole::Small, theme.text,
             TextAlign::Right);
-        drawBar(renderer, Rect{ inner.left, inner.bottom - 9.0f, inner.right, inner.bottom - 4.0f },
+        drawBar(renderer, Rect{ inner.left, inner.bottom - 11.0f, inner.right, inner.bottom - 5.0f },
             static_cast<float>(vramUsed / vramTotal), theme.gpu, theme.line);
     } else {
         renderer.text(L"нет данных", Rect{ inner.left + 120.0f, vramTop, inner.right, vramTop + 16.0f },
@@ -369,7 +374,7 @@ void drawDashboard(Renderer& renderer, const AppModel& model, const Theme& theme
     const Rect rightColumn{ leftColumn.right + kGap, area.top, area.right, area.bottom };
 
     const float topRow = std::clamp(area.height() * 0.34f, 190.0f, 228.0f);
-    const float middleRow = std::clamp(area.height() * 0.28f, 176.0f, 200.0f);
+    const float middleRow = std::clamp(area.height() * 0.28f, 182.0f, 204.0f);
 
     drawFpsCard(renderer, model, theme, Rect{ leftColumn.left, leftColumn.top, leftColumn.right,
                                                 leftColumn.top + topRow });
