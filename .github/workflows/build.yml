@@ -218,14 +218,16 @@ jobs:
         if: hashFiles('screenshot-*.png') != ''
         shell: bash
         run: |
+          # Сначала убираем свежие PNG из рабочего дерева: в ветке ci-logs они уже есть,
+          # и checkout отказывается перезаписывать неотслеживаемые файлы.
+          mkdir -p /tmp/shots
+          mv screenshot-*.png /tmp/shots/ 2>/dev/null || true
+          if [ -d shots ]; then mv shots/*.png /tmp/shots/ 2>/dev/null || true; fi
           git config user.email "ci@yawafpshub.local"
           git config user.name "ci"
           git checkout -B ci-logs
-          git add -f screenshot-*.png
-          if [ -d shots ]; then
-            cp shots/*.png .
-            git add -f overlay-*.png
-          fi
+          cp /tmp/shots/*.png .
+          git add -f ./*.png
           git commit -m "screenshots" || true
           git push -f origin ci-logs
 
