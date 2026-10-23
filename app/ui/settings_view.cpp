@@ -79,21 +79,22 @@ void drawOverlayCard(Renderer& renderer, const AppModel& model, const Theme& the
     hits.push_back(UiHit{ line, ActionKind::SetLayout, static_cast<int>(OverlayLayout::Line) });
 
     top += 40.0f;
-    renderer.text(L"Интервал опроса", Rect{ inner.left, top, inner.left + 130.0f, top + 20.0f }, TextRole::Small,
+    renderer.text(L"Интервал опроса", Rect{ inner.left, top, inner.left + 100.0f, top + 20.0f }, TextRole::Small,
         theme.textFaint);
     for (std::size_t index = 0; index < kIntervals.size(); ++index) {
-        const Rect button{ inner.left + 132.0f + static_cast<float>(index) * 78.0f, top, inner.left + 202.0f
-                + static_cast<float>(index) * 78.0f, top + 24.0f };
+        const Rect button{ inner.left + 104.0f + static_cast<float>(index) * 82.0f, top, inner.left + 180.0f
+                + static_cast<float>(index) * 82.0f, top + 24.0f };
         drawChip(renderer, button, wideText(std::to_string(kIntervals[index]) + " мс"),
             model.settings.capture.intervalMs == kIntervals[index], theme);
         hits.push_back(UiHit{ button, ActionKind::SetInterval, kIntervals[index] });
     }
 
-    renderer.text(L"Цель", Rect{ inner.left + 380.0f, top, inner.left + 420.0f, top + 20.0f }, TextRole::Small,
+    top += 36.0f;
+    renderer.text(L"Цель кадра", Rect{ inner.left, top, inner.left + 100.0f, top + 20.0f }, TextRole::Small,
         theme.textFaint);
     for (std::size_t index = 0; index < kTargets.size(); ++index) {
-        const Rect button{ inner.left + 424.0f + static_cast<float>(index) * 56.0f, top, inner.left + 476.0f
-                + static_cast<float>(index) * 56.0f, top + 24.0f };
+        const Rect button{ inner.left + 104.0f + static_cast<float>(index) * 60.0f, top, inner.left + 158.0f
+                + static_cast<float>(index) * 60.0f, top + 24.0f };
         drawChip(renderer, button, wideText(std::to_string(kTargets[index]) + " Гц"),
             model.settings.capture.targetHz == kTargets[index], theme);
         hits.push_back(UiHit{ button, ActionKind::SetInterval, kTargets[index] });
@@ -140,7 +141,7 @@ void drawGpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
     drawSectionHeader(renderer, inner, L"Видеокарта",
-        model.gpuNames.size() > 1 ? L"в системе несколько адаптеров — переключение по клику" : L"адаптер выбран автоматически",
+        model.gpuNames.size() > 1 ? L"несколько адаптеров — выбор по клику" : L"адаптер выбран автоматически",
         theme);
 
     float top = inner.top + 46.0f;
@@ -165,8 +166,23 @@ void drawPortableCard(Renderer& renderer, const AppModel& model, const Theme& th
     const Rect inner = card.inset(kCardPadding);
     drawSectionHeader(renderer, inner, L"Портативность", L"реестр и сеть не используются", theme);
 
-    renderer.text(wideText(model.settingsPath), Rect{ inner.left, inner.top + 46.0f, inner.right, inner.top + 66.0f },
-        TextRole::Mono, theme.textFaint);
+    const std::pair<std::wstring, std::wstring> rows[] = {
+        { L"Настройки", wideText(model.settingsPath) },
+        { L"Журнал", wideText(model.logPath) },
+        { L"Сессии", wideText(model.sessionsPath) },
+    };
+
+    float top = inner.top + 46.0f;
+    for (const auto& [label, value] : rows) {
+        renderer.text(label, Rect{ inner.left, top, inner.left + 92.0f, top + 18.0f }, TextRole::Small,
+            theme.textDim);
+        renderer.text(value, Rect{ inner.left + 96.0f, top, inner.right, top + 18.0f }, TextRole::Mono,
+            theme.textFaint);
+        top += 26.0f;
+    }
+
+    renderer.text(L"ini пишется атомарно рядом с exe, реестр и сеть не используются",
+        Rect{ inner.left, top + 6.0f, inner.right, top + 24.0f }, TextRole::Tiny, theme.textFaint);
 
     const Rect compact{ inner.left, inner.bottom - 32.0f, inner.left + 150.0f, inner.bottom - 4.0f };
     drawChip(renderer, compact, L"Компактный вид", model.settings.ui.compactDensity, theme);
@@ -190,7 +206,7 @@ void drawSettings(Renderer& renderer, const AppModel& model, const Theme& theme,
     const Rect left{ area.left, area.top, area.left + leftWidth - kGap, area.bottom };
     const Rect right{ left.right + kGap, area.top, area.right, area.bottom };
 
-    const float overlayHeight = 196.0f;
+    const float overlayHeight = 232.0f;
     drawOverlayCard(renderer, model, theme, Rect{ left.left, left.top, left.right, left.top + overlayHeight }, hits);
     drawPortableCard(renderer, model, theme,
         Rect{ left.left, left.top + overlayHeight + kGap, left.right, left.bottom }, hits);

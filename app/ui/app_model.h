@@ -54,6 +54,8 @@ struct AppModel {
     bool overlayVisible = false;
     int editingLabel = -1;
     std::string settingsPath;
+    std::string logPath;
+    std::string sessionsPath;
 
     // Буфер под историю для графиков: mutable, чтобы отрисовка оставалась константной
     // и при этом не аллоцировала память на каждом кадре.

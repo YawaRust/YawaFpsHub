@@ -119,6 +119,10 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
         m_overlay.setSettings(m_model.settings.overlay);
     }
 
+    m_model.settingsPath = settingsPath();
+    m_model.logPath = logPath();
+    m_model.sessionsPath = sessionsDirectory();
+
     createTrayIcon();
     registerHotkeys();
 
