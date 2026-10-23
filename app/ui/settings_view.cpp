@@ -250,7 +250,7 @@ void drawSourcesCard(Renderer& renderer, const AppModel& model, const Theme& the
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
     const float top = drawCardHeader(renderer, card, L"Источники данных",
-        L"доступность проверяется при запуске, недоступное честно помечается", theme);
+        L"доступность проверяется при запуске, недоступное честно помечается", theme) + 10.0f;
 
     struct Source {
         std::wstring_view name;
@@ -279,7 +279,7 @@ void drawSourcesCard(Renderer& renderer, const AppModel& model, const Theme& the
     for (std::size_t index = 0; index < sources.size(); ++index) {
         const Source& source = sources[index];
         const float left = inner.left + static_cast<float>(index / 3) * (columnWidth + 24.0f);
-        const float rowTop = top + static_cast<float>(index % 3) * 30.0f;
+        const float rowTop = top + static_cast<float>(index % 3) * 28.0f;
         if (rowTop + 30.0f > inner.bottom) {
             break;
         }

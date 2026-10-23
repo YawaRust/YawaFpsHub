@@ -170,11 +170,11 @@ void drawSessionCard(Renderer& renderer, const AppModel& model, const Theme& the
     };
 
     for (const auto& [label, value] : rows) {
-        if (rowTop + 16.0f > inner.bottom - 44.0f) {
+        if (rowTop + 16.0f > inner.bottom - 38.0f) {
             return;
         }
         drawLabelValue(renderer, Rect{ inner.left, rowTop, inner.right, rowTop + 16.0f }, label, value, theme);
-        rowTop += 22.0f;
+        rowTop += 21.0f;
     }
 
     const double budgetMs = 1000.0 / static_cast<double>(std::max(model.settings.capture.targetHz, 30));
@@ -398,22 +398,30 @@ void drawDiskNetCard(Renderer& renderer, const AppModel& model, const Theme& the
         return;
     }
 
-    const std::array<MetricId, 4> ids{ MetricId::DiskRead, MetricId::DiskWrite, MetricId::NetDown, MetricId::NetUp };
-    float rowTop = top + 4.0f;
-    const float step = std::max(20.0f, (inner.bottom - rowTop) / 4.0f);
+    struct Cell {
+        std::wstring_view label;
+        MetricId id;
+    };
 
-    for (MetricId id : ids) {
-        if (rowTop + 16.0f > inner.bottom) {
+    const std::array<Cell, 4> cells{ Cell{ L"Диск: чтение", MetricId::DiskRead },
+        { L"Диск: запись", MetricId::DiskWrite }, { L"Сеть: входящий", MetricId::NetDown },
+        { L"Сеть: исходящий", MetricId::NetUp } };
+
+    const float cellWidth = (inner.width() - 12.0f) / 2.0f;
+    float rowTop = top + 2.0f;
+
+    for (std::size_t index = 0; index < cells.size(); ++index) {
+        const float left = inner.left + static_cast<float>(index % 2) * (cellWidth + 12.0f);
+        const float current = rowTop + static_cast<float>(index / 2) * 22.0f;
+        if (current + 18.0f > inner.bottom) {
             break;
         }
-        const MetricInfo& info = metricInfo(id);
-        renderer.text(wideText(info.label), Rect{ inner.left, rowTop, inner.centerX(), rowTop + 16.0f },
-            TextRole::Small, theme.textDim);
-        const bool known = model.store.hasValue(id);
-        renderer.text(known ? wideMetric(id, model.store.value(id)) : L"нет данных",
-            Rect{ inner.centerX(), rowTop, inner.right, rowTop + 16.0f }, TextRole::Body,
+        const bool known = model.store.hasValue(cells[index].id);
+        renderer.text(cells[index].label, Rect{ left, current, left + cellWidth * 0.55f, current + 18.0f },
+            TextRole::Tiny, theme.textDim);
+        renderer.text(known ? wideMetric(cells[index].id, model.store.value(cells[index].id)) : L"—",
+            Rect{ left + cellWidth * 0.5f, current, left + cellWidth, current + 18.0f }, TextRole::Small,
             known ? theme.text : theme.textFaint, TextAlign::Right);
-        rowTop += step;
     }
 }
 
@@ -514,9 +522,9 @@ void drawDashboard(Renderer& renderer, const AppModel& model, const Theme& theme
     const Columns columns{ area };
 
     const float usable = area.height() - kGap * 3.0f;
-    const float first = std::max(170.0f, usable * 0.34f);
-    const float second = std::max(132.0f, usable * 0.26f);
-    const float third = std::max(104.0f, usable * 0.19f);
+    const float first = std::max(168.0f, usable * 0.33f);
+    const float second = std::max(128.0f, usable * 0.245f);
+    const float third = std::max(100.0f, usable * 0.21f);
     const float fourth = std::max(90.0f, usable - first - second - third);
 
     const float row1 = area.top;
