@@ -106,10 +106,6 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
     const MARGINS glass{ -1, -1, -1, -1 };
     DwmExtendFrameIntoClientArea(m_window, &glass);
 
-    if (m_initialWidth > 0 && m_initialHeight > 0) {
-        SetWindowPos(m_window, nullptr, CW_USEDEFAULT, CW_USEDEFAULT, m_initialWidth, m_initialHeight,
-            SWP_NOZORDER | SWP_NOACTIVATE);
-    }
 
     if (!m_renderer.initialize(error)) {
         return false;
@@ -252,6 +248,16 @@ void MainWindow::toggleOverlay()
     InvalidateRect(m_window, nullptr, FALSE);
     if (m_log != nullptr) {
         m_log->info(std::string("оверлей ") + (m_model.overlayVisible ? "включён" : "выключен"));
+    }
+}
+
+void MainWindow::setInitialSize(int width, int height)
+{
+    m_initialWidth = width;
+    m_initialHeight = height;
+    // Окно уже создано: меняем размер сразу, чтобы CI снял кадр нужного размера.
+    if (m_window != nullptr && width > 0 && height > 0) {
+        SetWindowPos(m_window, nullptr, 0, 0, width, height, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
 }
 

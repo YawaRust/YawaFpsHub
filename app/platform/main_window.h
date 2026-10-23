@@ -35,11 +35,7 @@ public:
 
     // CI снимает экраны при фиксированном размере: иначе размер окна зависит от
     // разрешения раннера и сравнивать со скриншотом прототипа нечем.
-    void setInitialSize(int width, int height)
-    {
-        m_initialWidth = width;
-        m_initialHeight = height;
-    }
+    void setInitialSize(int width, int height);
     // Стартовый стиль оверлея: нужен CI, чтобы снять все пять стилей одного экрана.
     // Вызывается после create(), поэтому применяем сразу, а не через флаг.
     void setInitialStyle(OverlayStyle style)
