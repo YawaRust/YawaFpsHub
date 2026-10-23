@@ -6,8 +6,8 @@
 #include "platform/nvml_sensors.h"
 #include "platform/pdh_query.h"
 
-#include <cstddef>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
