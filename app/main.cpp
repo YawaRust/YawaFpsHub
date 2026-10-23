@@ -6,6 +6,7 @@
 #include <windows.h>
 
 #include <string>
+#include <string_view>
 
 namespace {
 
@@ -26,8 +27,9 @@ bool isAlreadyRunning()
 
 } // namespace
 
-int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t*, int)
+int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
 {
+    const bool smoke = commandLine != nullptr && std::wstring_view(commandLine).find(L"--smoke") != std::wstring_view::npos;
     // Монитор FPS не должен влиять на картинку в игре: сначала сообщаем Windows, что
     // приложение само управляет масштабом, и только потом создаём окна.
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -51,7 +53,7 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t*, int)
         return 1;
     }
 
-    const int result = window.run();
+    const int result = window.run(smoke ? 3 : 0);
     log.info("остановка");
     return result;
 }

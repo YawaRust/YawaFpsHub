@@ -30,7 +30,8 @@ public:
     MainWindow& operator=(const MainWindow&) = delete;
 
     bool create(HINSTANCE instance, Log& log, std::string& error);
-    int run();
+    // smokeSeconds > 0 — самопроверка для CI: окно живёт заданное время и закрывается само.
+    int run(int smokeSeconds = 0);
 
 private:
     static LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);

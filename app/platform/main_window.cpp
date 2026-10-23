@@ -127,12 +127,26 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
     return true;
 }
 
-int MainWindow::run()
+int MainWindow::run(int smokeSeconds)
 {
+    std::thread smoke;
+    if (smokeSeconds > 0) {
+        smoke = std::thread([this, smokeSeconds]() {
+            std::this_thread::sleep_for(std::chrono::seconds(smokeSeconds));
+            if (m_window != nullptr) {
+                PostMessageW(m_window, WM_CLOSE, 0, 0);
+            }
+        });
+    }
+
     MSG message{};
     while (GetMessageW(&message, nullptr, 0, 0) > 0) {
         TranslateMessage(&message);
         DispatchMessageW(&message);
+    }
+
+    if (smoke.joinable()) {
+        smoke.join();
     }
     return static_cast<int>(message.wParam);
 }
@@ -322,8 +336,8 @@ void MainWindow::paint()
     std::lock_guard<std::mutex> guard(m_modelMutex);
     m_renderer.clear(m_theme.background);
 
-    drawTitleBar(m_renderer, m_model, m_theme);
     m_hits = buildHits();
+    drawTitleBar(m_renderer, m_model, m_theme, m_hits);
     drawStatusBar(m_renderer, m_model, m_theme);
 
     m_renderer.end();
@@ -360,7 +374,9 @@ void MainWindow::applyAction(const UiHit& hit)
         }
         if (hit.value == 500 || hit.value == 1000 || hit.value == 2000) {
             m_model.settings.capture.intervalMs = hit.value;
-            std::lock_guard<std::mutex> guard(m_wakeMutex);
+            // Сборщик спит до следующего опроса — будим его, чтобы новый интервал
+            // применялся сразу, а не через старую задержку.
+            m_wake.notify_all();
         }
         saveSettings();
         break;
@@ -435,6 +451,11 @@ void MainWindow::applyAction(const UiHit& hit)
 
     case ActionKind::ToggleOverlay:
         m_overlay.toggle();
+        m_model.overlayVisible = m_overlay.isVisible();
+        break;
+
+    case ActionKind::TogglePause:
+        m_model.paused = !m_model.paused;
         break;
 
     case ActionKind::None:
@@ -500,6 +521,17 @@ void MainWindow::samplingLoop()
             break;
         }
 
+        bool paused = false;
+        {
+            std::lock_guard<std::mutex> guard(m_modelMutex);
+            paused = m_model.paused;
+        }
+        if (paused) {
+            // На паузе счётчики не опрашиваются: приложение не тратит CPU вхолостую.
+            previous = std::chrono::steady_clock::now();
+            continue;
+        }
+
         const auto now = std::chrono::steady_clock::now();
         const double elapsed = std::chrono::duration<double>(now - previous).count();
         previous = now;
@@ -537,6 +569,7 @@ void MainWindow::onTick()
         std::lock_guard<std::mutex> guard(m_modelMutex);
         m_model.elapsedMs = static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::milliseconds>(now - started).count());
+        m_model.overlayVisible = m_overlay.isVisible();
         m_overlay.setContent(m_model.store, m_model.fps,
             m_model.activeGpu < m_model.gpuNames.size() ? m_model.gpuNames[m_model.activeGpu] : L"");
     }

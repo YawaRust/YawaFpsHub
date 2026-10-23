@@ -25,6 +25,7 @@ enum class ActionKind : std::uint8_t {
     SetAccent,
     CycleGpu,
     ToggleOverlay,
+    TogglePause,
     SelectLabel,
     ResetLabels,
     ToggleCompact,
@@ -50,6 +51,7 @@ struct AppModel {
     std::uint64_t elapsedMs = 0;
     bool etwRunning = false;
     bool paused = false;
+    bool overlayVisible = false;
     int editingLabel = -1;
     std::string settingsPath;
 

@@ -36,30 +36,64 @@ std::string_view viewTitle(View view)
     return "Обзор";
 }
 
-void drawTitleBar(Renderer& renderer, const AppModel& model, const Theme& theme)
+void drawTitleBar(Renderer& renderer, const AppModel& model, const Theme& theme, std::vector<UiHit>& hits)
 {
     renderer.fillRect(Rect{ 0.0f, 0.0f, renderer.width(), kTitleBarHeight }, theme.panel.withAlpha(0.55f));
     renderer.drawLine(0.0f, kTitleBarHeight - 1.0f, renderer.width(), kTitleBarHeight - 1.0f, theme.line, 1.0f);
 
     drawBrand(renderer, theme);
 
-    const float right = renderer.width();
-    const Rect live{ right - 300.0f, 13.0f, right - 190.0f, 33.0f };
+    // Правая часть шапки собирается справа налево: так кнопки не разъезжаются
+    // при длинных подписях и любом масштабе.
+    const float top = 13.0f;
+    const float bottom = 33.0f;
+    float right = renderer.width() - 14.0f;
+
+    const Rect pause{ right - 82.0f, top, right, bottom };
+    renderer.fillRoundRect(pause, 10.0f, theme.panelSoft);
+    renderer.text(model.paused ? L"Продолжить" : L"Пауза", pause, TextRole::Tiny,
+        model.paused ? theme.warn : theme.textDim, TextAlign::Center);
+    hits.push_back(UiHit{ pause, ActionKind::TogglePause, 0 });
+    right = pause.left - 8.0f;
+
+    const Rect overlayButton{ right - 104.0f, top, right, bottom };
+    renderer.fillRoundRect(overlayButton, 10.0f, model.overlayVisible ? theme.accentSoft : theme.panelSoft);
+    renderer.fillCircle(overlayButton.left + 12.0f, overlayButton.centerY(), 3.0f,
+        model.overlayVisible ? theme.accent : theme.textFaint);
+    renderer.text(L"Оверлей", Rect{ overlayButton.left + 22.0f, overlayButton.top, overlayButton.right - 6.0f,
+                         overlayButton.bottom },
+        TextRole::Tiny, model.overlayVisible ? theme.accent : theme.textDim);
+    hits.push_back(UiHit{ overlayButton, ActionKind::ToggleOverlay, 0 });
+    right = overlayButton.left - 12.0f;
+
+    constexpr std::array<std::uint32_t, 5> kAccentRgba{ 0xFF5EF29B, 0xFF6AA8FF, 0xFFB47BFF, 0xFFFFB347, 0xFFFF6F6F };
+    for (std::size_t index = kAccentRgba.size(); index-- > 0;) {
+        const float centerX = right - 8.0f;
+        const Color color = fromRgba(kAccentRgba[index]);
+        const bool isActive = static_cast<std::size_t>(model.settings.ui.accent) == index;
+        renderer.fillCircle(centerX, (top + bottom) * 0.5f, 8.0f, isActive ? color : color.withAlpha(0.35f));
+        if (isActive) {
+            renderer.fillCircle(centerX, (top + bottom) * 0.5f, 3.0f, theme.background);
+        }
+        hits.push_back(UiHit{ Rect{ centerX - 9.0f, top, centerX + 9.0f, bottom }, ActionKind::SetAccent,
+            static_cast<int>(index) });
+        right = centerX - 8.0f - 6.0f;
+    }
+    right -= 4.0f;
+
+    const Rect interval{ right - 92.0f, top, right, bottom };
+    renderer.fillRoundRect(interval, 10.0f, theme.panelSoft);
+    renderer.text(wideText("опрос " + std::to_string(model.settings.capture.intervalMs) + " мс"), interval,
+        TextRole::Tiny, theme.textDim, TextAlign::Center);
+    right = interval.left - 8.0f;
+
+    const Rect live{ right - 168.0f, top, right, bottom };
     renderer.fillRoundRect(live, 10.0f, model.etwRunning ? theme.accentSoft : theme.panelSoft);
     renderer.fillCircle(live.left + 12.0f, live.centerY(), 3.0f,
         model.etwRunning ? theme.accent : theme.textFaint);
     renderer.text(model.etwRunning ? L"ETW · кадры" : L"ETW выключен",
         Rect{ live.left + 22.0f, live.top, live.right - 6.0f, live.bottom }, TextRole::Tiny,
         model.etwRunning ? theme.accent : theme.textFaint);
-
-    const Rect interval{ right - 182.0f, 13.0f, right - 96.0f, 33.0f };
-    renderer.fillRoundRect(interval, 10.0f, theme.panelSoft);
-    renderer.text(wideText("опрос " + std::to_string(model.settings.capture.intervalMs) + " мс"), interval,
-        TextRole::Tiny, theme.textDim, TextAlign::Center);
-
-    const Rect pause{ right - 88.0f, 13.0f, right - 14.0f, 33.0f };
-    renderer.fillRoundRect(pause, 10.0f, theme.panelSoft);
-    renderer.text(model.paused ? L"Продолжить" : L"Пауза", pause, TextRole::Tiny, theme.textDim, TextAlign::Center);
 }
 
 void drawTabs(Renderer& renderer, const AppModel& model, const Theme& theme, std::vector<UiHit>& hits)

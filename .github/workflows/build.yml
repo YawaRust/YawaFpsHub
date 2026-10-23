@@ -66,6 +66,22 @@ jobs:
       - name: Тесты
         run: ctest --test-dir build -C Release --output-on-failure
 
+      - name: Самопроверка приложения
+        shell: pwsh
+        run: |
+          $exe = ".\build\Release\YawaFpsHub.exe"
+          if (-not (Test-Path $exe)) { throw "нет $exe" }
+          $process = Start-Process -FilePath $exe -ArgumentList "--smoke" -PassThru -Wait
+          if ($process.ExitCode -ne 0) { throw "приложение завершилось с кодом $($process.ExitCode)" }
+          $log = Get-Content ".\build\Release\YawaFpsHub.log" -Raw
+          $ini = ".\build\Release\YawaFpsHub.ini"
+          if (-not (Test-Path $ini)) { throw "не создан YawaFpsHub.ini" }
+          Write-Output "::notice title=YawaFpsHub::самопроверка ок, ini создан"
+          foreach ($line in ($log -split "`n")) {
+            if ($line.Trim().Length -eq 0) { continue }
+            Write-Output "::notice title=YawaFpsHub.log::$line"
+          }
+
       - name: Прогон диагностики
         shell: pwsh
         run: |
