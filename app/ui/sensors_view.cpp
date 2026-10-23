@@ -79,7 +79,7 @@ void drawColumnHeader(Renderer& renderer, const Rect& inner, const Theme& theme)
     const struct {
         const wchar_t* title;
         float right;
-    } columns[]{ { L"Значение", 0.58f }, { L"Мин", 0.70f }, { L"Среднее", 0.83f }, { L"Макс", 0.95f } };
+    } columns[]{ { L"Значение", 0.62f }, { L"Мин", 0.73f }, { L"Среднее", 0.84f }, { L"Макс", 0.95f } };
 
     for (const auto& column : columns) {
         const float right = inner.left + inner.width() * column.right;
@@ -94,34 +94,23 @@ float drawRow(Renderer& renderer, MetricId id, const AppModel& model, const Them
     const MetricInfo& info = metricInfo(id);
     const MetricSlot& slot = model.store.slot(id);
     const bool known = valueKnown(id, model);
-    const float rowHeight = 22.0f;
+    const float rowHeight = 20.0f;
     const float width = inner.width();
 
     renderer.text(wideText(info.label), Rect{ inner.left, top, inner.left + width * 0.40f, top + rowHeight },
         TextRole::Small, theme.textDim);
     renderer.text(known ? wideMetric(id, slot.stats.current) : L"—",
-        Rect{ inner.left + width * 0.44f, top, inner.left + width * 0.58f, top + rowHeight }, TextRole::Small,
+        Rect{ inner.left + width * 0.40f, top, inner.left + width * 0.62f, top + rowHeight }, TextRole::Small,
         known ? theme.text : theme.textFaint, TextAlign::Right);
 
+    // Мин/среднее/макс без единиц: единица стоит в колонке «Значение».
     const std::array<double, 3> values{ slot.stats.minimum, slot.stats.average, slot.stats.maximum };
-    const std::array<float, 3> rights{ 0.70f, 0.83f, 0.95f };
+    const std::array<float, 3> rights{ 0.73f, 0.84f, 0.95f };
     for (std::size_t index = 0; index < values.size(); ++index) {
         const float right = inner.left + width * rights[index];
-        renderer.text(known ? wideNumber(values[index], info.unit, info.decimals) : L"—",
-            Rect{ right - 70.0f, top, right, top + rowHeight }, TextRole::Tiny,
+        renderer.text(known ? wideText(formatValue(values[index], info.decimals)) : L"—",
+            Rect{ right - 44.0f, top, right, top + rowHeight }, TextRole::Tiny,
             known ? theme.textDim : theme.textFaint, TextAlign::Right);
-    }
-
-    const Rect spark{ inner.left + width * 0.57f, top + 6.0f, inner.right, top + rowHeight - 6.0f };
-    std::array<float, kHistoryCapacity> history{};
-    const std::size_t count = model.store.copyHistory(id, history.data(), history.size());
-    if (known && count >= 2 && spark.width() > 20.0f) {
-        float maximum = 0.01f;
-        for (std::size_t index = 0; index < count; ++index) {
-            maximum = std::max(maximum, history[index]);
-        }
-        renderer.drawSeries(ChartSeries{ history.data(), count, theme.accent.withAlpha(0.75f), false }, spark, 0.0f,
-            maximum, 1.2f);
     }
 
     return top + rowHeight;
@@ -136,22 +125,22 @@ void drawColumn(Renderer& renderer, const std::vector<Group>& groups, const AppM
     drawColumnHeader(renderer, inner, theme);
     renderer.drawLine(inner.left, inner.top + 18.0f, inner.right, inner.top + 18.0f, theme.line, 1.0f);
 
-    float top = inner.top + 26.0f;
+    float top = inner.top + 22.0f;
     for (std::size_t index = 0; index < groups.size(); ++index) {
-        if (top + 18.0f > inner.bottom) {
+        if (top + 16.0f > inner.bottom) {
             return;
         }
-        renderer.text(groups[index].title, Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small,
+        renderer.text(groups[index].title, Rect{ inner.left, top, inner.right, top + 14.0f }, TextRole::Small,
             theme.accent);
-        top += 20.0f;
+        top += 18.0f;
 
         for (MetricId id : groups[index].ids) {
-            if (top + 22.0f > inner.bottom) {
+            if (top + 20.0f > inner.bottom) {
                 return;
             }
             top = drawRow(renderer, id, model, theme, inner, top);
         }
-        top += 6.0f;
+        top += 4.0f;
     }
 }
 

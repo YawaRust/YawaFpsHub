@@ -279,7 +279,7 @@ void drawSourcesCard(Renderer& renderer, const AppModel& model, const Theme& the
     for (std::size_t index = 0; index < sources.size(); ++index) {
         const Source& source = sources[index];
         const float left = inner.left + static_cast<float>(index / 3) * (columnWidth + 24.0f);
-        const float rowTop = top + static_cast<float>(index % 3) * 36.0f;
+        const float rowTop = top + static_cast<float>(index % 3) * 30.0f;
         if (rowTop + 30.0f > inner.bottom) {
             break;
         }
@@ -301,7 +301,7 @@ void drawSettings(Renderer& renderer, const AppModel& model, const Theme& theme,
 {
     const float column = (area.width() - kGap) / 2.0f;
     const float usable = area.height() - kGap * 2.0f;
-    const float first = std::max(190.0f, usable * 0.42f);
+    const float first = std::max(200.0f, usable * 0.46f);
     const float second = std::max(140.0f, usable * 0.28f);
     const float third = std::max(120.0f, usable - first - second);
 

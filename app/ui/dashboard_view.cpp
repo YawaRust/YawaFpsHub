@@ -85,13 +85,13 @@ void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
     drawCardHeader(renderer, card, L"Кадры в секунду", subtitle, theme);
     drawTag(renderer, card, model.etwRunning ? L"LIVE" : L"НЕТ ДАННЫХ", model.etwRunning, theme);
 
-    const float numberTop = inner.top + 30.0f;
+    const float numberTop = inner.top + 24.0f;
     const std::wstring value = wideNumber(model.fps.currentFps, MetricUnit::Count, 0);
     const float valueWidth = renderer.measureText(value, TextRole::Display);
-    renderer.text(value, Rect{ inner.left - 2.0f, numberTop, inner.left + valueWidth + 8.0f, numberTop + 60.0f },
+    renderer.text(value, Rect{ inner.left - 2.0f, numberTop, inner.left + valueWidth + 8.0f, numberTop + 58.0f },
         TextRole::Display, model.etwRunning ? theme.accent : theme.textFaint);
     renderer.text(L"fps", Rect{ inner.left + valueWidth + 2.0f, numberTop + 40.0f, inner.left + valueWidth + 44.0f,
-                            numberTop + 60.0f },
+                            numberTop + 58.0f },
         TextRole::Small, theme.textFaint);
 
     if (model.fps.averageFps > 0.1) {
@@ -102,12 +102,12 @@ void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
         const Color color = delta >= 0.0 ? theme.accent : theme.warn;
         renderer.fillRoundRect(chip, 9.0f, color.withAlpha(0.16f));
         renderer.text(text, chip, TextRole::Tiny, color, TextAlign::Center);
-        renderer.text(L"к среднему за сессию", Rect{ chip.right + 8.0f, chip.top, inner.left + 260.0f, chip.bottom },
+        renderer.text(L"к среднему за сессию", Rect{ chip.right + 8.0f, chip.top, inner.left + 240.0f, chip.bottom },
             TextRole::Tiny, theme.textFaint);
     }
 
-    // Статистика кадров — сетка 2x2, как в прототипе: подписи не наезжают друг на друга.
-    const float statsLeft = inner.left + std::max(inner.width() * 0.44f, 240.0f);
+    // Статистика кадров — сетка 2x2 справа, как в прототипе.
+    const float statsLeft = inner.left + std::max(inner.width() * 0.42f, 220.0f);
     const float columnWidth = (inner.right - statsLeft) / 2.0f;
     const std::array<std::array<std::wstring, 2>, 4> stats{ std::array<std::wstring, 2>{ L"1% LOW",
                                                                                        wideNumber(model.fps.low1Fps,
@@ -116,19 +116,22 @@ void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
         { L"FRAME TIME", wideNumber(model.fps.frameTimeMs, MetricUnit::Milliseconds, 2) },
         { L"ПРОПУЩЕНО", wideNumber(model.fps.droppedShare * 100.0, MetricUnit::Percent, 1) } };
 
+    const float statsTop = inner.top + 26.0f;
     for (std::size_t index = 0; index < stats.size(); ++index) {
         const float left = statsLeft + static_cast<float>(index % 2) * columnWidth;
-        const float top = numberTop + (index < 2 ? 0.0f : 30.0f);
-        drawStatBlock(renderer, Rect{ left, top, left + columnWidth - 12.0f, top + 38.0f }, stats[index][0],
+        const float top = statsTop + (index < 2 ? 0.0f : 44.0f);
+        drawStatBlock(renderer, Rect{ left, top, left + columnWidth - 16.0f, top + 36.0f }, stats[index][0],
             stats[index][1], theme);
     }
 
-    const float chartTop = numberTop + 84.0f;
-    const Rect chart{ inner.left, chartTop + 8.0f, inner.right, inner.bottom };
-    if (chart.height() < 20.0f) {
+    const float chartTop = numberTop + 88.0f;
+    const Rect chart{ inner.left, chartTop, inner.right, inner.bottom };
+    if (chart.height() < 22.0f) {
         return;
     }
     renderer.drawLine(chart.left, chart.bottom, chart.right, chart.bottom, theme.line, 1.0f);
+    renderer.drawLine(chart.left, chart.top + chart.height() * 0.5f, chart.right, chart.top + chart.height() * 0.5f,
+        theme.line.withAlpha(0.5f), 1.0f);
 
     const double budget = 1000.0 / static_cast<double>(std::max(model.settings.capture.targetHz, 30));
     float maximum = static_cast<float>(budget) * 1.8f;
@@ -141,7 +144,7 @@ void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
     const float budgetY = chart.bottom - std::clamp(static_cast<float>(budget) / maximum, 0.0f, 1.0f) * chart.height();
     renderer.drawDashedLine(chart.left, budgetY, chart.right, budgetY, theme.lineStrong, 1.0f);
     renderer.text(L"бюджет " + wideNumber(budget, MetricUnit::Milliseconds, 1),
-        Rect{ chart.left, chartTop - 6.0f, chart.right, chartTop + 8.0f }, TextRole::Tiny, theme.textFaint,
+        Rect{ chart.left, chart.bottom - 14.0f, chart.right, chart.bottom }, TextRole::Tiny, theme.textFaint,
         TextAlign::Right);
 
     if (count < 2) {
@@ -321,14 +324,22 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
         return;
     }
     float left = legend.left;
-    drawLegendChip(renderer, Rect{ left, legend.top, left + 120.0f, legend.bottom },
-        L"Приложения " + wideNumber(used, MetricUnit::Gigabytes, 1), theme.ram, theme);
-    left += 128.0f;
-    drawLegendChip(renderer, Rect{ left, legend.top, left + 100.0f, legend.bottom },
-        L"Кэш " + wideNumber(cache, MetricUnit::Gigabytes, 1), theme.disk, theme);
-    left += 96.0f;
-    drawLegendChip(renderer, Rect{ left, legend.top, left + 110.0f, legend.bottom },
-        L"Свободно " + wideNumber(free, MetricUnit::Gigabytes, 1), theme.lineStrong, theme);
+    const std::array<std::array<std::wstring, 1>, 3> legendLabels{ std::array<std::wstring, 1>{
+                                                                      L"Приложения "
+                                                                          + wideNumber(used, MetricUnit::Gigabytes, 1) },
+        { L"Кэш " + wideNumber(cache, MetricUnit::Gigabytes, 1) },
+        { L"Свободно " + wideNumber(free, MetricUnit::Gigabytes, 1) } };
+    const std::array<Color, 3> legendColors{ theme.ram, theme.disk, theme.lineStrong };
+
+    for (std::size_t index = 0; index < legendLabels.size(); ++index) {
+        const float width = renderer.measureText(legendLabels[index][0], TextRole::Tiny) + 18.0f;
+        if (left + width > legend.right) {
+            break;
+        }
+        drawLegendChip(renderer, Rect{ left, legend.top, left + width, legend.bottom }, legendLabels[index][0],
+            legendColors[index], theme);
+        left += width + 10.0f;
+    }
 
     float rowTop = legend.bottom + 8.0f;
     const std::array<std::pair<std::wstring, std::wstring>, 2> rows{
@@ -424,7 +435,9 @@ void drawTemperaturesCard(Renderer& renderer, const AppModel& model, const Theme
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
-    const float top = drawCardHeader(renderer, card, L"Температуры", L"что отдают датчики", theme);
+    renderer.text(L"Температуры", Rect{ inner.left, inner.top, inner.right, inner.top + 18.0f }, TextRole::Heading,
+        theme.text);
+    const float top = inner.top + 30.0f;
 
     struct Row {
         std::wstring_view label;
@@ -467,7 +480,9 @@ void drawAlertsCard(Renderer& renderer, const AppModel& model, const Theme& them
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
-    const float top = drawCardHeader(renderer, card, L"Уведомления", L"правила считаются по живым значениям", theme);
+    renderer.text(L"Уведомления", Rect{ inner.left, inner.top, inner.right, inner.top + 18.0f }, TextRole::Heading,
+        theme.text);
+    const float top = inner.top + 30.0f;
 
     const double gpuTemp = model.store.value(MetricId::GpuTemp);
     const bool hasGpuTemp = model.availability.gpuTemperature && model.store.hasValue(MetricId::GpuTemp);
@@ -514,9 +529,9 @@ void drawDashboard(Renderer& renderer, const AppModel& model, const Theme& theme
     const Columns columns{ area };
 
     const float usable = area.height() - kGap * 3.0f;
-    const float first = std::max(160.0f, usable * 0.31f);
+    const float first = std::max(180.0f, usable * 0.36f);
     const float second = std::max(140.0f, usable * 0.27f);
-    const float third = std::max(110.0f, usable * 0.22f);
+    const float third = std::max(110.0f, usable * 0.20f);
     const float fourth = std::max(90.0f, usable - first - second - third);
 
     const float row1 = area.top;
