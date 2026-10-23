@@ -260,8 +260,9 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
     hits.push_back(UiHit{ bold, ActionKind::ToggleOverlayBold, 0 });
     hits.push_back(UiHit{ italic, ActionKind::ToggleOverlayItalic, 0 });
 
-    const Rect outlineMinus{ inner.left + 60.0f, top, inner.left + 86.0f, top + 24.0f };
-    const Rect outlinePlus{ inner.left + 168.0f, top, inner.left + 194.0f, top + 24.0f };
+    // Между «К» и «−» нужен зазор: раньше чипы обводки наезжали на начертание.
+    const Rect outlineMinus{ inner.left + 76.0f, top, inner.left + 102.0f, top + 24.0f };
+    const Rect outlinePlus{ inner.left + 184.0f, top, inner.left + 210.0f, top + 24.0f };
     drawChip(renderer, outlineMinus, L"−", false, theme, TextRole::Small, isHovered(model, outlineMinus));
     drawChip(renderer, outlinePlus, L"+", false, theme, TextRole::Small, isHovered(model, outlinePlus));
     renderer.text(L"Обводка " + std::to_wstring(overlay.textOutline) + L" px",
