@@ -57,34 +57,29 @@ void testIdleTicksLargerThanTotalDoNotOverflow()
     CHECK(deltas.cpuLoadPercent <= 100.0);
 }
 
-void testDiskAndNetworkRates()
+void testDiskAndNetworkRatesPassThrough()
 {
-    SystemSampler sampler;
-    sampler.compute(baseSnapshot(), 1.0);
+    SystemSnapshot snapshot = baseSnapshot();
+    snapshot.diskReadBytesPerSecond = 500.0 * 1024 * 1024;
+    snapshot.diskWriteBytesPerSecond = 100.0 * 1024 * 1024;
+    snapshot.netReceivedBytesPerSecond = 2'500'000.0;
+    snapshot.netSentBytesPerSecond = 1'250'000.0;
 
-    SystemSnapshot next = baseSnapshot();
-    next.diskReadBytes = 500ull * 1024 * 1024;
-    next.diskWriteBytes = 100ull * 1024 * 1024;
-    next.netReceivedBytes = 2'500'000;
-    next.netSentBytes = 1'250'000;
-
-    const SystemSampler::Deltas deltas = sampler.compute(next, 1.0);
-    CHECK_NEAR(deltas.diskReadMBps, 500.0, 1e-6);
-    CHECK_NEAR(deltas.diskWriteMBps, 100.0, 1e-6);
-    CHECK_NEAR(deltas.netDownMbps, 20.0, 1e-6);
-    CHECK_NEAR(deltas.netUpMbps, 10.0, 1e-6);
+    const DerivedValues values = deriveValues(snapshot, SystemSampler::Deltas{});
+    CHECK_NEAR(values.diskRead, 500.0, 1e-6);
+    CHECK_NEAR(values.diskWrite, 100.0, 1e-6);
+    CHECK_NEAR(values.netDown, 20.0, 1e-6);
+    CHECK_NEAR(values.netUp, 10.0, 1e-6);
 }
 
-void testRatesScaleWithInterval()
+void testRatesIgnoreNegativeValues()
 {
-    SystemSampler sampler;
-    sampler.compute(baseSnapshot(), 1.0);
+    SystemSnapshot snapshot = baseSnapshot();
+    snapshot.diskReadBytesPerSecond = -5.0;
+    snapshot.netSentBytesPerSecond = 0.0;
 
-    SystemSnapshot next = baseSnapshot();
-    next.diskReadBytes = 250ull * 1024 * 1024;
-
-    const SystemSampler::Deltas deltas = sampler.compute(next, 0.5);
-    CHECK_NEAR(deltas.diskReadMBps, 500.0, 1e-6);
+    const DerivedValues values = deriveValues(snapshot, SystemSampler::Deltas{});
+    CHECK_NEAR(values.diskRead, 0.0, 1e-9);
 }
 
 void testSelfLoad()
@@ -130,10 +125,10 @@ void testApplySnapshotFillsStore()
     snapshot.cpuTemperature = 64.0;
     snapshot.gpuTemperature = 71.0;
     snapshot.gpuFanRpm = 1940;
+    snapshot.diskReadBytesPerSecond = 184.0 * 1024 * 1024;
 
     SystemSampler::Deltas deltas;
     deltas.cpuLoadPercent = 44.0;
-    deltas.diskReadMBps = 184.0;
     deltas.selfCpuPercent = 0.3;
 
     FpsSummary fps;
@@ -161,8 +156,8 @@ void runSystemSamplerTests()
     testFirstSampleHasNoBaseline();
     testCpuLoadFromTicks();
     testIdleTicksLargerThanTotalDoNotOverflow();
-    testDiskAndNetworkRates();
-    testRatesScaleWithInterval();
+    testDiskAndNetworkRatesPassThrough();
+    testRatesIgnoreNegativeValues();
     testSelfLoad();
     testDerivedMemory();
     testDerivedVramUsesBudget();

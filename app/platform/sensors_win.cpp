@@ -221,10 +221,10 @@ void SystemSensors::sampleDiskAndNetwork(SystemSnapshot& snapshot)
         const bool readOk = m_diskRead.collect();
         const bool writeOk = m_diskWrite.collect();
         if (readOk) {
-            snapshot.diskReadBytes = static_cast<std::uint64_t>(std::max(0.0, m_diskRead.value()));
+            snapshot.diskReadBytesPerSecond = std::max(0.0, m_diskRead.value());
         }
         if (writeOk) {
-            snapshot.diskWriteBytes = static_cast<std::uint64_t>(std::max(0.0, m_diskWrite.value()));
+            snapshot.diskWriteBytesPerSecond = std::max(0.0, m_diskWrite.value());
         }
     }
 
@@ -239,7 +239,7 @@ void SystemSensors::sampleDiskAndNetwork(SystemSnapshot& snapshot)
                 total += std::max(0.0, value);
             }
         }
-        snapshot.netReceivedBytes = static_cast<std::uint64_t>(total);
+        snapshot.netReceivedBytesPerSecond = total;
     }
 
     if (m_netSent.collect()) {
@@ -249,7 +249,7 @@ void SystemSensors::sampleDiskAndNetwork(SystemSnapshot& snapshot)
                 total += std::max(0.0, value);
             }
         }
-        snapshot.netSentBytes = static_cast<std::uint64_t>(total);
+        snapshot.netSentBytesPerSecond = total;
     }
 }
 

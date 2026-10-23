@@ -20,10 +20,12 @@ struct SystemSnapshot {
     std::uint64_t memoryCacheBytes = 0;
     std::uint64_t pageFileUsedBytes = 0;
 
-    std::uint64_t diskReadBytes = 0;
-    std::uint64_t diskWriteBytes = 0;
-    std::uint64_t netReceivedBytes = 0;
-    std::uint64_t netSentBytes = 0;
+    // PDH отдаёт уже готовые скорости за интервал, поэтому это не накопительные счётчики:
+    // дельту по ним брать нельзя, иначе значения уезжают в миллиарды.
+    double diskReadBytesPerSecond = 0.0;
+    double diskWriteBytesPerSecond = 0.0;
+    double netReceivedBytesPerSecond = 0.0;
+    double netSentBytesPerSecond = 0.0;
 
     std::uint64_t selfCpuTicks = 0;
     std::uint64_t selfWorkingSetBytes = 0;
@@ -54,10 +56,6 @@ class SystemSampler {
 public:
     struct Deltas {
         double cpuLoadPercent = 0.0;
-        double diskReadMBps = 0.0;
-        double diskWriteMBps = 0.0;
-        double netDownMbps = 0.0;
-        double netUpMbps = 0.0;
         double selfCpuPercent = 0.0;
         bool hasBaseline = false;
     };

@@ -43,25 +43,11 @@ SystemSampler::Deltas SystemSampler::compute(const SystemSnapshot& snapshot, dou
         deltas.cpuLoadPercent = ratioPercent(totalTicks - std::min(idleTicks, totalTicks), totalTicks);
     }
 
-    const double bytesPerSecondToMegabytes = 1.0 / (kBytesInMegabyte * elapsedSeconds);
-    deltas.diskReadMBps = static_cast<double>(snapshot.diskReadBytes - m_previous.diskReadBytes)
-        * bytesPerSecondToMegabytes;
-    deltas.diskWriteMBps = static_cast<double>(snapshot.diskWriteBytes - m_previous.diskWriteBytes)
-        * bytesPerSecondToMegabytes;
-    deltas.netDownMbps = static_cast<double>(snapshot.netReceivedBytes - m_previous.netReceivedBytes) * 8.0
-        / (kBitsInMegabit * elapsedSeconds);
-    deltas.netUpMbps = static_cast<double>(snapshot.netSentBytes - m_previous.netSentBytes) * 8.0
-        / (kBitsInMegabit * elapsedSeconds);
-
     if (totalTicks > 0) {
         const std::uint64_t selfTicks = snapshot.selfCpuTicks - m_previous.selfCpuTicks;
         deltas.selfCpuPercent = ratioPercent(selfTicks, totalTicks);
     }
 
-    deltas.diskReadMBps = std::max(0.0, deltas.diskReadMBps);
-    deltas.diskWriteMBps = std::max(0.0, deltas.diskWriteMBps);
-    deltas.netDownMbps = std::max(0.0, deltas.netDownMbps);
-    deltas.netUpMbps = std::max(0.0, deltas.netUpMbps);
     deltas.hasBaseline = true;
 
     m_previous = snapshot;
@@ -72,10 +58,10 @@ DerivedValues deriveValues(const SystemSnapshot& snapshot, const SystemSampler::
 {
     DerivedValues values;
     values.cpuLoad = deltas.cpuLoadPercent;
-    values.diskRead = deltas.diskReadMBps;
-    values.diskWrite = deltas.diskWriteMBps;
-    values.netDown = deltas.netDownMbps;
-    values.netUp = deltas.netUpMbps;
+    values.diskRead = std::max(0.0, snapshot.diskReadBytesPerSecond) / kBytesInMegabyte;
+    values.diskWrite = std::max(0.0, snapshot.diskWriteBytesPerSecond) / kBytesInMegabyte;
+    values.netDown = std::max(0.0, snapshot.netReceivedBytesPerSecond) * 8.0 / kBitsInMegabit;
+    values.netUp = std::max(0.0, snapshot.netSentBytesPerSecond) * 8.0 / kBitsInMegabit;
     values.selfCpu = deltas.selfCpuPercent;
 
     const std::uint64_t usedBytes = snapshot.memoryFreeBytes < snapshot.memoryTotalBytes
