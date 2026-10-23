@@ -184,7 +184,7 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
     renderer.text(L"изменения сразу видны в предпросмотре",
         Rect{ inner.left, inner.top + 20.0f, inner.right, inner.top + 36.0f }, TextRole::Tiny, theme.textFaint);
 
-    float top = inner.top + 44.0f;
+    float top = inner.top + 40.0f;
 
     renderer.text(L"Положение", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
     top += 18.0f;
@@ -196,7 +196,7 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
             TextRole::Tiny);
         hits.push_back(UiHit{ chip, ActionKind::SetPosition, static_cast<int>(index) });
     }
-    top += 34.0f;
+    top += 30.0f;
 
     renderer.text(L"Вид", Rect{ inner.left, top, inner.left + 40.0f, top + 16.0f }, TextRole::Small, theme.textDim);
     const Rect plates{ inner.left + 44.0f, top - 4.0f, inner.left + 120.0f, top + 20.0f };
@@ -205,11 +205,11 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
     drawChip(renderer, line, L"Строка", overlay.layout == OverlayLayout::Line, theme, TextRole::Tiny);
     hits.push_back(UiHit{ plates, ActionKind::SetLayout, static_cast<int>(OverlayLayout::Plates) });
     hits.push_back(UiHit{ line, ActionKind::SetLayout, static_cast<int>(OverlayLayout::Line) });
-    top += 34.0f;
+    top += 30.0f;
 
     drawSlider(renderer, Rect{ inner.left, top, inner.right, top + 34.0f }, overlay.scalePercent, 70, 160,
         L"Масштаб", theme, hits, ActionKind::SetScale, L" %");
-    top += 48.0f;
+    top += 44.0f;
     drawSlider(renderer, Rect{ inner.left, top, inner.right, top + 34.0f }, overlay.opacityPercent, 0, 100,
         L"Прозрачность", theme, hits, ActionKind::SetOpacity, L" %");
     top += 42.0f;
@@ -232,7 +232,7 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
             isHovered(model, chip));
         hits.push_back(UiHit{ chip, switchActions[index], 0 });
     }
-    top += 32.0f;
+    top += 30.0f;
 
     const int radiusValue = overlay.cornerRadius >= 0 ? overlay.cornerRadius : 8;
     drawSlider(renderer, Rect{ inner.left, top, inner.right, top + 34.0f }, radiusValue, 0, 24, L"Углы", theme, hits,
@@ -251,7 +251,7 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
             TextRole::Tiny, isHovered(model, chip));
         hits.push_back(UiHit{ chip, ActionKind::SetOverlayFont, static_cast<int>(index) });
     }
-    top += 30.0f;
+    top += 28.0f;
 
     const Rect bold{ inner.left, top, inner.left + 30.0f, top + 24.0f };
     const Rect italic{ bold.right + 6.0f, top, bold.right + 36.0f, top + 24.0f };
@@ -269,7 +269,7 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
         TextAlign::Center);
     hits.push_back(UiHit{ outlineMinus, ActionKind::ChangeOverlayOutline, -1 });
     hits.push_back(UiHit{ outlinePlus, ActionKind::ChangeOverlayOutline, 1 });
-    top += 30.0f;
+    top += 28.0f;
 
     renderer.text(L"Смещение", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
     top += 20.0f;
@@ -288,17 +288,17 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
     };
     drawOffset(inner.left, ActionKind::OffsetX, overlay.offsetX, L"X");
     drawOffset(inner.left + 148.0f, ActionKind::OffsetY, overlay.offsetY, L"Y");
-    top += 40.0f;
+    top += 38.0f;
 
     renderer.text(L"Состав", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
-    top += 20.0f;
+    top += 18.0f;
     for (std::size_t index = 0; index < kFieldNames.size(); ++index) {
         if (top + 24.0f > inner.bottom) {
             break;
         }
         drawToggleRow(renderer, Rect{ inner.left, top, inner.right, top + 24.0f }, kFieldNames[index],
             overlay.visible[index], theme, hits, ActionKind::ToggleMetric, static_cast<int>(index));
-        top += 26.0f;
+        top += 25.0f;
     }
 }
 
