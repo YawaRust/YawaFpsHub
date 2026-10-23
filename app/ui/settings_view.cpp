@@ -172,7 +172,7 @@ void drawPortableCard(Renderer& renderer, const AppModel& model, const Theme& th
     }
 
     top += 6.0f;
-    renderer.text(model.settingsPath, Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Mono,
+    renderer.text(wideText(model.settingsPath), Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Mono,
         theme.textFaint);
     top += 26.0f;
 

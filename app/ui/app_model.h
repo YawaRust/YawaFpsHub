@@ -72,7 +72,10 @@ struct AppModel {
     int editingLabel = -1;
     // -1 — все группы, иначе номер группы датчиков из списка экрана «Датчики».
     int sensorFilter = -1;
-    std::wstring settingsPath;
+    // Пути и имя программы хранятся в UTF-8, как и остальные строки настроек.
+    std::string settingsPath;
+    std::string logPath;
+    std::string sessionsPath;
     std::wstring foregroundApp;
 };
 
