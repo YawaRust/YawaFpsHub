@@ -756,7 +756,8 @@ body.is-compact .chart-wrap--frames canvas { height: 96px; }
   font-size: 10.5px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: var(--text-faint);
+  color: var(--accent);
+  opacity: 0.85;
 }
 
 .sensor-viewport { overflow-y: auto; max-height: min(58vh, 620px); scrollbar-gutter: stable; }

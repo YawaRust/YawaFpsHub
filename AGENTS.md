@@ -83,6 +83,7 @@
 | Форматтер | `clang-format -i --style=file` (конфиг `.clang-format` в корне; в песочнице clang-format не установлен) |
 | Прототип | `python3 -m http.server 8000 --directory ui-prototype` |
 | Иконка | `python3 tools/make_icon.py` — пересобирает `app/resources/yawa.ico` из кода без зависимостей |
+| Демо-прототип | `python3 -m http.server 8000 --bind 0.0.0.0 --directory ui-prototype` — HTML-эталон интерфейса |
 <!-- PROFILE:END:КОМАНДЫ -->
 
 <!-- PROFILE:BEGIN:СТИЛЬ -->

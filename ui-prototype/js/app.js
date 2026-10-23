@@ -101,7 +101,7 @@
     style: "frosted",
     scale: 100,
     opacity: 72,
-    radius: 8,
+    radius: null,
     background: true,
     border: true,
     shadow: true,
@@ -503,7 +503,9 @@
     osd.dataset.style = overlayState.style;
     osd.style.setProperty("--osd-scale", (overlayState.scale / 100).toFixed(2));
     osd.style.setProperty("--osd-bg", (overlayState.opacity / 100).toFixed(2));
-    osd.style.setProperty("--osd-radius", `${overlayState.radius}px`);
+    // -1/null — радиус берётся из пресета; число — как в приложении.
+    if (overlayState.radius === null) osd.style.removeProperty("--osd-radius");
+    else osd.style.setProperty("--osd-radius", `${overlayState.radius}px`);
     osd.style.setProperty("--osd-shift-x", `${overlayState.offsetX}px`);
     osd.style.setProperty("--osd-shift-y", `${overlayState.offsetY}px`);
     osd.classList.toggle("no-background", !overlayState.background);
@@ -511,13 +513,14 @@
     osd.classList.toggle("no-shadow", !overlayState.shadow);
 
     const radiusValue = $("#osdRadiusValue");
-    if (radiusValue) radiusValue.textContent = `${overlayState.radius} px`;
+    if (radiusValue) radiusValue.textContent = `${overlayState.radius === null ? 8 : overlayState.radius} px`;
     const offsetValue = $("#osdOffsetValue");
     if (offsetValue) offsetValue.textContent = `${overlayState.offsetX} / ${overlayState.offsetY} px`;
     const radius = $("#osdRadius");
     if (radius) {
-      radius.value = String(overlayState.radius);
-      radius.style.setProperty("--fill", `${(overlayState.radius / 24) * 100}%`);
+      const shown = overlayState.radius === null ? 8 : overlayState.radius;
+      radius.value = String(shown);
+      radius.style.setProperty("--fill", `${(shown / 24) * 100}%`);
     }
   }
 

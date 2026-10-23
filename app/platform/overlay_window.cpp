@@ -340,7 +340,9 @@ bool OverlayWindow::render()
     }
     const UINT width = static_cast<UINT>(m_monitorRect.right - m_monitorRect.left);
     const UINT height = static_cast<UINT>(m_monitorRect.bottom - m_monitorRect.top);
-    if (m_target == nullptr && !ensureRenderTarget(width, height)) {
+    // ensureRenderTarget сам решает, нужно ли пересоздавать битмап: при смене разрешения
+    // иначе остался бы старый размер и картинка поплыла бы.
+    if (!ensureRenderTarget(width, height)) {
         return false;
     }
 

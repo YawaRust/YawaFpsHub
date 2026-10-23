@@ -281,8 +281,10 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
     }
 
     // Высота содержимого: заголовок группы на каждую непустую группу.
+    // Между группами нужен воздух: иначе подсветка строки липнет к следующему заголовку.
+    const float groupGap = 6.0f;
     const float contentHeight = static_cast<float>(entries.size()) * kRowHeight
-        + static_cast<float>(groupStarts.size()) * kGroupHeight;
+        + static_cast<float>(groupStarts.size()) * (kGroupHeight + groupGap);
 
     // Низ таблицы освобождает строку под сноску: раньше она висела под карточкой.
     const Rect viewport{ inner.left, inner.top + 26.0f, inner.right, inner.bottom - 24.0f };
@@ -305,7 +307,7 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
                     Rect{ inner.left + 14.0f, top, inner.right, top + kGroupHeight - 4.0f }, TextRole::Small,
                     theme.accent);
             }
-            top += kGroupHeight;
+            top += kGroupHeight + groupGap;
             ++nextGroupStart;
         }
 
