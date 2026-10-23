@@ -87,30 +87,38 @@ void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
 
     // Заголовок карточки занимает 36 px: крупное число начинается ниже, иначе
     // подзаголовок «игра · цель 60 Гц» проступал сквозь цифры.
-    const float numberTop = inner.top + 38.0f;
+    const float numberTop = inner.top + 54.0f;
     const std::wstring value = wideNumber(model.fps.currentFps, MetricUnit::Count, 0);
     const float valueWidth = renderer.measureText(value, TextRole::Display);
-    renderer.text(value, Rect{ inner.left - 2.0f, numberTop, inner.left + valueWidth + 8.0f, numberTop + 58.0f },
+    renderer.text(value, Rect{ inner.left - 2.0f, numberTop, inner.left + valueWidth + 8.0f, numberTop + 84.0f },
         TextRole::Display, model.etwRunning ? theme.accent : theme.textFaint);
-    renderer.text(L"fps", Rect{ inner.left + valueWidth + 2.0f, numberTop + 40.0f, inner.left + valueWidth + 44.0f,
-                            numberTop + 58.0f },
+    renderer.text(L"fps", Rect{ inner.left + valueWidth + 2.0f, numberTop + 56.0f, inner.left + valueWidth + 44.0f,
+                            numberTop + 76.0f },
         TextRole::Small, theme.textFaint);
 
     if (model.fps.averageFps > 0.1) {
         const double delta = (model.fps.currentFps - model.fps.averageFps) / model.fps.averageFps * 100.0;
         const std::wstring text = signedPercent(delta);
         const float width = renderer.measureText(text, TextRole::Tiny) + 16.0f;
-        const Rect chip{ inner.left, numberTop + 54.0f, inner.left + width, numberTop + 72.0f };
+        const Rect chip{ inner.left, numberTop + 76.0f, inner.left + width, numberTop + 94.0f };
         const Color color = delta >= 0.0 ? theme.accent : theme.warn;
         renderer.fillRoundRect(chip, 9.0f, color.withAlpha(0.16f));
         renderer.text(text, chip, TextRole::Tiny, color, TextAlign::Center);
-        renderer.text(L"к среднему за сессию", Rect{ chip.right + 8.0f, chip.top, chip.right + 150.0f, chip.bottom },
+        renderer.text(L"к среднему за сессию", Rect{ inner.left, chip.bottom + 4.0f, inner.left + 150.0f,
+                                                  chip.bottom + 20.0f },
             TextRole::Tiny, theme.textFaint);
     }
 
-    // Статистика кадров — сетка 2x2 справа, как в прототипе.
-    const float statsLeft = inner.left + std::max(inner.width() * 0.66f, 220.0f);
-    const float columnWidth = (inner.right - statsLeft) / 2.0f;
+    // Статистика кадров — панель 2x2 справа, как в прототипе: своя рамка и разделители.
+    const float statsLeft = inner.left + std::max(inner.width() * 0.72f, 236.0f);
+    const Rect statsPanel{ statsLeft, inner.top + 58.0f, inner.right, inner.top + 166.0f };
+    renderer.fillRoundRect(statsPanel, 12.0f, theme.panelSoft.withAlpha(0.5f));
+    renderer.strokeRoundRect(statsPanel, 12.0f, theme.line, 1.0f);
+    renderer.drawLine(statsPanel.centerX(), statsPanel.top + 10.0f, statsPanel.centerX(), statsPanel.bottom - 10.0f,
+        theme.line, 1.0f);
+    renderer.drawLine(statsPanel.left + 12.0f, statsPanel.centerY(), statsPanel.right - 12.0f, statsPanel.centerY(),
+        theme.line, 1.0f);
+    const float columnWidth = statsPanel.width() / 2.0f;
     const std::array<std::array<std::wstring, 2>, 4> stats{ std::array<std::wstring, 2>{ L"1% LOW",
                                                                                        wideNumber(model.fps.low1Fps,
                                                                                                   MetricUnit::Count, 0) },
@@ -118,11 +126,11 @@ void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
         { L"FRAME TIME", wideNumber(model.fps.frameTimeMs, MetricUnit::Milliseconds, 2) },
         { L"ПРОПУЩЕНО", wideNumber(model.fps.droppedShare * 100.0, MetricUnit::Percent, 1) } };
 
-    const float statsTop = inner.top + 26.0f;
+    const float statsTop = statsPanel.top + 14.0f;
     for (std::size_t index = 0; index < stats.size(); ++index) {
-        const float left = statsLeft + static_cast<float>(index % 2) * columnWidth;
-        const float top = statsTop + (index < 2 ? 0.0f : 44.0f);
-        drawStatBlock(renderer, Rect{ left, top, left + columnWidth - 16.0f, top + 36.0f }, stats[index][0],
+        const float left = statsLeft + 14.0f + static_cast<float>(index % 2) * columnWidth;
+        const float top = statsTop + (index < 2 ? 0.0f : 50.0f);
+        drawStatBlock(renderer, Rect{ left, top, left + columnWidth - 18.0f, top + 40.0f }, stats[index][0],
             stats[index][1], theme);
     }
 

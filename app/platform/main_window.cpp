@@ -697,7 +697,7 @@ Rect MainWindow::contentArea() const
 {
     const float top = kTitleBarHeight + kTopBarHeight + 8.0f;
     const float bottom = m_renderer.height() - kStatusBarHeight - 10.0f;
-    return Rect{ kRailWidth + 20.0f, top, m_renderer.width() - 20.0f, bottom };
+    return Rect{ kRailWidth + 30.0f, top, m_renderer.width() - 22.0f, bottom };
 }
 
 float MainWindow::contentDesignHeight() const
