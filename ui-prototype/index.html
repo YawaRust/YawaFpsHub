@@ -899,6 +899,56 @@
           </article>
 
 
+
+          <article class="card span-12">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Источники данных</h2>
+                <p class="card__sub">Проверка выполняется при запуске, недоступное честно помечается</p>
+              </div>
+              <span class="tag tag--live"><i></i>проверено</span>
+            </header>
+
+            <ul class="sources">
+              <li class="source">
+                <span class="source__name">ETW · кадры</span>
+                <span class="source__detail">Microsoft-Windows-DXGI и D3D9, Present_Start</span>
+                <span class="source__state source__state--ok">работает</span>
+                <span class="source__note">нужны права администратора</span>
+              </li>
+              <li class="source">
+                <span class="source__name">PDH · процессор, диски, сеть</span>
+                <span class="source__detail">те же счётчики, что у диспетчера задач</span>
+                <span class="source__state source__state--ok">работает</span>
+                <span class="source__note">без прав администратора</span>
+              </li>
+              <li class="source">
+                <span class="source__name">PDH · загрузка GPU</span>
+                <span class="source__detail">GPU Engine, движок 3D активного адаптера</span>
+                <span class="source__state source__state--ok">работает</span>
+                <span class="source__note">Windows 10 1709 и новее</span>
+              </li>
+              <li class="source">
+                <span class="source__name">DXGI · адаптеры и видеопамять</span>
+                <span class="source__detail">LUID, объём, бюджет QueryVideoMemoryInfo</span>
+                <span class="source__state source__state--ok">работает</span>
+                <span class="source__note">ядро драйвера, без установки</span>
+              </li>
+              <li class="source">
+                <span class="source__name">NVML · температура и питание GPU</span>
+                <span class="source__detail">nvml.dll из драйвера NVIDIA</span>
+                <span class="source__state source__state--ok">работает</span>
+                <span class="source__note">только NVIDIA</span>
+              </li>
+              <li class="source">
+                <span class="source__name">Датчики CPU и чипсета</span>
+                <span class="source__detail">нужен драйвер доступа к MSR и SMBus</span>
+                <span class="source__state source__state--off">нет данных</span>
+                <span class="source__note">не ставим драйвер ради безопасности</span>
+              </li>
+            </ul>
+          </article>
+
           <article class="card span-12">
             <header class="card__head">
               <div>

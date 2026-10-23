@@ -19,7 +19,7 @@
 
 - этап 1 — дизайн-система, прототип интерфейса, профиль проекта в `AGENTS.md`;
 - этап 2 — ядро метрик на C++ и тесты, стили оверлея, свои подписи полей, выбор GPU;
-- этап 3 — ETW-сессия кадров и платформенные счётчики Windows.
+- этап 3 — ETW-сессия кадров, платформенные сенсоры, диагностика `yawa-probe`.
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DYAWA_WARNINGS_AS_ERRORS=ON
@@ -39,6 +39,20 @@ python3 -m http.server 8000 --directory ui-prototype
 
 Открыть `http://localhost:8000`. Данные в прототипе имитируются, интерфейс полностью интерактивный.
 
+## Диагностика датчиков (Windows)
+
+`yawa-probe` показывает, какие источники поднялись на конкретной машине, и печатает значения
+в том же виде, в каком их увидит интерфейс:
+
+```powershell
+cmake -S . -B build -A x64
+cmake --build build --config Release
+.\build\tools\probe\Release\yawa-probe.exe --seconds 10 --interval 1000
+```
+
+Ключи: `--seconds`, `--interval`, `--gpu <индекс>`, `--no-etw`, `--log <путь>`.
+Подробнее об источниках и лицензиях — `docs/sensors.md`.
+
 ## Сборка приложения (Windows, MSVC)
 
 ```bash
@@ -52,7 +66,8 @@ cmake --build build --config Release
 
 ```
 app/metrics/    ядро показателей: буферы, статистика, единицы, реестр GPU (без windows.h)
-app/platform/   Win32: окно, трей, хоткеи, логгер, ETW-сессия
+app/platform/   Win32: ETW-сессия кадров, PDH/DXGI/NVML-сенсоры, логгер
+tools/probe/    yawa-probe, консольная диагностика датчиков
 app/render/     Direct2D: темы, шрифты, графики
 app/ui/         экраны и настройки
 tests/          тесты портируемой части, без фреймворков
