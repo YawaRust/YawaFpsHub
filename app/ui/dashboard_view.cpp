@@ -316,22 +316,27 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
             total > 0.0 ? static_cast<float>(used / total) : 0.0f, theme.ram, theme);
     }
 
-    const Rect legend{ inner.left, barTop + 14.0f, inner.right, barTop + 30.0f };
+    const Rect legend{ inner.left, barTop + 12.0f, inner.right, barTop + 28.0f };
     if (legend.bottom > inner.bottom) {
         return;
     }
-    std::wstring legendText = L"Приложения " + wideNumber(used, MetricUnit::Gigabytes, 1) + L"  ·  Кэш "
-        + wideNumber(cache, MetricUnit::Gigabytes, 1) + L"  ·  Свободно " + wideNumber(free, MetricUnit::Gigabytes, 1);
-    while (!legendText.empty() && renderer.measureText(legendText, TextRole::Tiny) > legend.width()) {
-        const std::size_t cut = legendText.find_last_of(L'·');
-        legendText = cut == std::wstring::npos ? std::wstring{} : legendText.substr(0, cut);
-        while (!legendText.empty() && legendText.back() == L' ') {
-            legendText.pop_back();
+
+    // Легенда собирается из частей и обрезается по ширине, а не пропадает целиком.
+    const std::array<std::pair<std::wstring, Color>, 3> parts{
+        std::pair<std::wstring, Color>{ L"Приложения " + wideNumber(used, MetricUnit::Gigabytes, 1), theme.ram },
+        { L"Кэш " + wideNumber(cache, MetricUnit::Gigabytes, 1), theme.disk },
+        { L"Свободно " + wideNumber(free, MetricUnit::Gigabytes, 1), theme.lineStrong } };
+
+    float x = legend.left;
+    for (const auto& [text, color] : parts) {
+        const float width = renderer.measureText(text, TextRole::Tiny) + 16.0f;
+        if (x + width > legend.right) {
+            break;
         }
+        renderer.fillCircle(x + 3.0f, legend.centerY(), 3.0f, color);
+        renderer.text(text, Rect{ x + 11.0f, legend.top, x + width, legend.bottom }, TextRole::Tiny, theme.textDim);
+        x += width + 6.0f;
     }
-    renderer.fillCircle(legend.left + 4.0f, legend.centerY(), 3.0f, theme.ram);
-    renderer.text(legendText, Rect{ legend.left + 12.0f, legend.top, legend.right, legend.bottom }, TextRole::Tiny,
-        theme.textDim);
 
     float rowTop = legend.bottom + 8.0f;
     const std::array<std::pair<std::wstring, std::wstring>, 2> rows{
@@ -413,21 +418,21 @@ void drawDiskNetCard(Renderer& renderer, const AppModel& model, const Theme& the
         { L"Диск: запись", MetricId::DiskWrite }, { L"Сеть: входящий", MetricId::NetDown },
         { L"Сеть: исходящий", MetricId::NetUp } };
 
-    const float cellWidth = (inner.width() - 24.0f) / 2.0f;
+    // Карточка узкая: одна колонка, иначе подпись и значение наезжают друг на друга.
+    const float rowHeight = std::clamp((inner.bottom - top - 2.0f) / 4.0f, 18.0f, 24.0f);
     float rowTop = top + 2.0f;
 
     for (std::size_t index = 0; index < cells.size(); ++index) {
-        const float left = inner.left + static_cast<float>(index % 2) * (cellWidth + 24.0f);
-        const float current = rowTop + static_cast<float>(index / 2) * 22.0f;
-        if (current + 18.0f > inner.bottom) {
+        if (rowTop + rowHeight > inner.bottom) {
             break;
         }
         const bool known = model.store.hasValue(cells[index].id);
-        renderer.text(cells[index].label, Rect{ left, current, left + cellWidth * 0.48f, current + 18.0f },
+        renderer.text(cells[index].label, Rect{ inner.left, rowTop, inner.centerX(), rowTop + rowHeight },
             TextRole::Tiny, theme.textDim);
         renderer.text(known ? wideMetric(cells[index].id, model.store.value(cells[index].id)) : L"—",
-            Rect{ left + cellWidth * 0.48f, current, left + cellWidth, current + 18.0f }, TextRole::Small,
+            Rect{ inner.centerX(), rowTop, inner.right, rowTop + rowHeight }, TextRole::Small,
             known ? theme.text : theme.textFaint, TextAlign::Right);
+        rowTop += rowHeight;
     }
 }
 

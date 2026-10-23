@@ -301,9 +301,15 @@ void drawSettings(Renderer& renderer, const AppModel& model, const Theme& theme,
 {
     const float column = (area.width() - kGap) / 2.0f;
     const float usable = area.height() - kGap * 2.0f;
-    const float first = std::max(200.0f, usable * 0.46f);
-    const float second = std::max(140.0f, usable * 0.28f);
-    const float third = std::max(120.0f, usable - first - second);
+    float first = std::max(200.0f, usable * 0.44f);
+    float second = std::max(140.0f, usable * 0.27f);
+    // Нижней карточке с источниками нужен минимум: иначе строки наползают на заголовок.
+    const float minimumBottom = 112.0f;
+    while (first + second + minimumBottom > usable && first > 180.0f) {
+        first -= 6.0f;
+        second = std::max(130.0f, second - 4.0f);
+    }
+    const float third = std::max(96.0f, usable - first - second);
 
     const Rect leftTop{ area.left, area.top, area.left + column, area.top + first };
     const Rect rightTop{ leftTop.right + kGap, area.top, area.right, area.top + first };
