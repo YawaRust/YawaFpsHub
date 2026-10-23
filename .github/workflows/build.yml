@@ -70,7 +70,10 @@ jobs:
         shell: pwsh
         run: |
           $diagnostics = New-Object System.Collections.Generic.List[string]
-          $exe = ".\build\Release\YawaFpsHub.exe"
+          $found = Get-ChildItem -Path .\build -Recurse -Filter YawaFpsHub.exe | Select-Object -First 1
+          $exe = if ($found) { $found.FullName } else { "" }
+          $outDir = if ($found) { $found.DirectoryName } else { "" }
+          $diagnostics.Add("exe path: " + $exe)
           $diagnostics.Add("exe: " + (Test-Path $exe))
           $fail = $null
           if (-not (Test-Path $exe)) {
@@ -86,7 +89,7 @@ jobs:
             }
           }
 
-          $logPath = ".\build\Release\YawaFpsHub.log"
+          $logPath = Join-Path $outDir "YawaFpsHub.log"
           if (Test-Path $logPath) {
             foreach ($line in (Get-Content $logPath)) {
               if ($line.Trim().Length -eq 0) { continue }
@@ -96,7 +99,7 @@ jobs:
             $diagnostics.Add("log: нет файла")
           }
 
-          $ini = ".\build\Release\YawaFpsHub.ini"
+          $ini = Join-Path $outDir "YawaFpsHub.ini"
           $diagnostics.Add("ini: " + (Test-Path $ini))
           if (-not (Test-Path $ini) -and -not $fail) { $fail = "не создан YawaFpsHub.ini" }
 
@@ -122,5 +125,6 @@ jobs:
         with:
           name: YawaFpsHub-win64
           path: |
-            build/Release/YawaFpsHub.exe
+            build/**/YawaFpsHub.exe
+            build/**/YawaFpsHub.ini
             build/tools/probe/Release/yawa-probe.exe
