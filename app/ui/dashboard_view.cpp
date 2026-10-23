@@ -109,7 +109,7 @@ void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
     }
 
     // Статистика кадров — сетка 2x2 справа, как в прототипе.
-    const float statsLeft = inner.left + std::max(inner.width() * 0.42f, 220.0f);
+    const float statsLeft = inner.left + std::max(inner.width() * 0.66f, 220.0f);
     const float columnWidth = (inner.right - statsLeft) / 2.0f;
     const std::array<std::array<std::wstring, 2>, 4> stats{ std::array<std::wstring, 2>{ L"1% LOW",
                                                                                        wideNumber(model.fps.low1Fps,
@@ -618,20 +618,9 @@ void drawAlertsCard(Renderer& renderer, const AppModel& model, const Theme& them
 void drawDashboard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area,
     std::vector<UiHit>& hits)
 {
+    // Раскладка как в прототипе: карточки идут одной колонкой, высоты сняты с демо.
+    // Экран получает демо-высоту целиком, а окно показывает его часть и прокручивает.
     const Columns columns{ area };
-
-    // Доли без жёстких минимумов: раньше сумма минимумов превышала высоту окна,
-    // и нижний ряд уезжал под статус-бар.
-    const float usable = std::max(area.height() - kGap * 3.0f, 120.0f);
-    const float first = usable * 0.315f;
-    const float second = usable * 0.25f;
-    const float third = usable * 0.205f;
-    const float fourth = usable - first - second - third;
-
-    const float row1 = area.top;
-    const float row2 = row1 + first + kGap;
-    const float row3 = row2 + second + kGap;
-    const float row4 = row3 + third + kGap;
 
     const auto drawClipped = [&](const Rect& card, const auto& draw) {
         renderer.pushClip(card);
@@ -639,23 +628,23 @@ void drawDashboard(Renderer& renderer, const AppModel& model, const Theme& theme
         renderer.popClip();
     };
 
-    drawClipped(columns.span(0.0f, 8.0f, row1, first),
-        [&](const Rect& card) { drawFpsCard(renderer, model, theme, card); });
-    drawClipped(columns.span(8.0f, 4.0f, row1, first),
-        [&](const Rect& card) { drawSessionCard(renderer, model, theme, card); });
-    drawClipped(columns.span(0.0f, 4.0f, row2, second),
-        [&](const Rect& card) { drawCpuCard(renderer, model, theme, card); });
-    drawClipped(columns.span(4.0f, 4.0f, row2, second),
-        [&](const Rect& card) { drawGpuCard(renderer, model, theme, card, hits); });
-    drawClipped(columns.span(8.0f, 4.0f, row2, second),
-        [&](const Rect& card) { drawMemoryCard(renderer, model, theme, card); });
-    drawClipped(columns.span(0.0f, 8.0f, row3, third),
-        [&](const Rect& card) { drawPerformanceCard(renderer, model, theme, card); });
-    drawClipped(columns.span(8.0f, 4.0f, row3, third),
-        [&](const Rect& card) { drawDiskNetCard(renderer, model, theme, card); });
-    drawClipped(columns.span(0.0f, 6.0f, row4, fourth),
+    float top = area.top;
+    const auto place = [&](float height) {
+        const Rect card{ area.left, top, area.right, top + height };
+        top += height + kGap;
+        return card;
+    };
+
+    drawClipped(place(344.0f), [&](const Rect& card) { drawFpsCard(renderer, model, theme, card); });
+    drawClipped(place(350.0f), [&](const Rect& card) { drawSessionCard(renderer, model, theme, card); });
+    drawClipped(place(280.0f), [&](const Rect& card) { drawCpuCard(renderer, model, theme, card); });
+    drawClipped(place(246.0f), [&](const Rect& card) { drawGpuCard(renderer, model, theme, card, hits); });
+    drawClipped(place(286.0f), [&](const Rect& card) { drawMemoryCard(renderer, model, theme, card); });
+    drawClipped(place(288.0f), [&](const Rect& card) { drawPerformanceCard(renderer, model, theme, card); });
+    drawClipped(place(347.0f), [&](const Rect& card) { drawDiskNetCard(renderer, model, theme, card); });
+    drawClipped(columns.span(0.0f, 6.0f, top, 286.0f),
         [&](const Rect& card) { drawTemperaturesCard(renderer, model, theme, card); });
-    drawClipped(columns.span(6.0f, 6.0f, row4, fourth),
+    drawClipped(columns.span(6.0f, 6.0f, top, 286.0f),
         [&](const Rect& card) { drawAlertsCard(renderer, model, theme, card); });
 }
 

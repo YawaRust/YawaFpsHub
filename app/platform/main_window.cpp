@@ -13,6 +13,7 @@
 #include <shellapi.h>
 
 #include <algorithm>
+#include <cmath>
 #include <array>
 #include <chrono>
 
@@ -551,12 +552,19 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         return 0;
 
     case WM_MOUSEWHEEL: {
-        if (m_model.view != View::Sensors) {
-            break;
-        }
         const int delta = GET_WHEEL_DELTA_WPARAM(wParam);
-        m_model.sensorScroll = std::clamp(m_model.sensorScroll - delta / WHEEL_DELTA * 3, 0, 4096);
-        InvalidateRect(m_window, nullptr, FALSE);
+        const float steps = static_cast<float>(delta) / static_cast<float>(WHEEL_DELTA);
+        // На экране датчиков список внутри карточки прокручивается, пока есть что:
+        // это привычнее, чем уезжающая страница.
+        if (m_model.view == View::Sensors) {
+            const int previous = m_model.sensorScroll;
+            m_model.sensorScroll = std::clamp(previous - static_cast<int>(steps) * 3, 0, 4096);
+            if (m_model.sensorScroll != previous) {
+                InvalidateRect(m_window, nullptr, FALSE);
+                return 0;
+            }
+        }
+        scrollContent(-steps * 64.0f);
         return 0;
     }
 
@@ -692,13 +700,65 @@ Rect MainWindow::contentArea() const
     return Rect{ kRailWidth + 20.0f, top, m_renderer.width() - 20.0f, bottom };
 }
 
+float MainWindow::contentDesignHeight() const
+{
+    switch (m_model.view) {
+    case View::Dashboard:
+        return kDashboardHeight;
+    case View::Sensors:
+        return contentArea().height();
+    case View::Overlay:
+        return contentArea().height();
+    case View::Settings:
+        return contentArea().height();
+    }
+    return kDashboardHeight;
+}
+
+void MainWindow::scrollContent(float delta)
+{
+    const float viewport = contentArea().height();
+    const float limit = std::max(contentDesignHeight() - viewport, 0.0f);
+    const float next = std::clamp(m_model.contentScroll + delta, 0.0f, limit);
+    if (std::abs(next - m_model.contentScroll) < 0.5f) {
+        return;
+    }
+    m_model.contentScroll = next;
+    InvalidateRect(m_window, nullptr, FALSE);
+}
+
+void MainWindow::drawScrollBar(const Rect& viewport)
+{
+    const float limit = contentDesignHeight() - viewport.height();
+    if (limit <= 1.0f) {
+        return;
+    }
+    const float trackTop = viewport.top + 2.0f;
+    const float trackBottom = viewport.bottom - 2.0f;
+    const float trackHeight = trackBottom - trackTop;
+    const float thumbHeight = std::max(40.0f, trackHeight * viewport.height() / contentDesignHeight());
+    const float travel = trackHeight - thumbHeight;
+    const float fraction = std::clamp(m_model.contentScroll / limit, 0.0f, 1.0f);
+    const Rect thumb{ viewport.right + 6.0f, trackTop + travel * fraction, viewport.right + 9.0f,
+        trackTop + travel * fraction + thumbHeight };
+    m_renderer.fillRoundRect(thumb, 2.0f, m_theme.lineStrong.withAlpha(0.85f));
+}
+
 std::vector<UiHit> MainWindow::buildHits()
 {
     std::vector<UiHit> hits;
 
-    const Rect area = contentArea();
+    const Rect viewport = contentArea();
+    // Экран рисуется в демо-высоте и прокручивается: на маленьком окне видно меньше
+    // карточек, но их размеры те же, что в прототипе.
+    m_model.contentHeight = std::max(viewport.height(), contentDesignHeight());
+    const Rect area{ viewport.left, viewport.top, viewport.right, viewport.top + m_model.contentHeight };
     // Клип по рабочей области: содержимое карточек не может вылезти в статус-бар.
-    m_renderer.pushClip(area);
+    m_renderer.pushClip(viewport);
+    const bool scrolled = m_model.contentScroll > 0.5f;
+    if (scrolled) {
+        m_renderer.pushTranslate(0.0f, -m_model.contentScroll);
+    }
     switch (m_model.view) {
     case View::Dashboard:
         drawDashboard(m_renderer, m_model, m_theme, area, hits);
@@ -713,7 +773,11 @@ std::vector<UiHit> MainWindow::buildHits()
         drawSettings(m_renderer, m_model, m_theme, area, hits);
         break;
     }
+    if (scrolled) {
+        m_renderer.popTranslate();
+    }
     m_renderer.popClip();
+    drawScrollBar(viewport);
     return hits;
 }
 
@@ -879,6 +943,9 @@ void MainWindow::applyAction(const UiHit& hit)
 {
     switch (hit.action) {
     case ActionKind::SwitchView:
+        if (m_model.view != static_cast<View>(hit.value)) {
+            m_model.contentScroll = 0.0f;
+        }
         m_model.view = static_cast<View>(hit.value);
         break;
 

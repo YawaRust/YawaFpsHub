@@ -81,6 +81,10 @@ private:
     void selectGpu(std::size_t index);
 
     Rect contentArea() const;
+    // Экран рисуется целиком в «демо-высоте», а окно показывает его часть со сдвигом.
+    float contentDesignHeight() const;
+    void scrollContent(float delta);
+    void drawScrollBar(const Rect& viewport);
     std::vector<UiHit> buildHits();
     void paintView();
 
