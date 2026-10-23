@@ -240,15 +240,16 @@ void OverlayWindow::setAccent(Accent accent)
 void OverlayWindow::setSettings(const OverlaySettings& settings)
 {
     // Плавный переход считаем от текущего видимого состояния, а не от нового:
-    // иначе анимировать было бы нечего. Сдвиг и подписи анимировать не нужно — при
+    // иначе анимировать было бы нечего. Сдвиг и подписи не анимируем — при
     // перетаскивании setSettings приходит на каждое движение мыши.
-    const bool geometryChanged = settings.scalePercent != m_settings.scalePercent
-        || settings.opacityPercent != m_settings.opacityPercent || settings.cornerRadius != m_settings.cornerRadius;
     const OverlaySettings previous = animatedSettings();
     m_settings = settings;
-    if (geometryChanged) {
-        startAnimation(previous);
+    const bool movedOnly = settings.offsetX != previous.offsetX || settings.offsetY != previous.offsetY;
+    if (movedOnly) {
+        repaint();
+        return;
     }
+    startAnimation(previous);
     repaint();
 }
 
@@ -309,6 +310,7 @@ void OverlayWindow::startAnimation(const OverlaySettings& from)
     m_animToOpacity = static_cast<float>(m_settings.opacityPercent) / 100.0f;
     m_animToRadius = static_cast<float>(m_settings.cornerRadius);
     m_animProgress = 0.0f;
+    m_fade = 0.0f;
     m_animating = true;
     if (m_window != nullptr) {
         SetTimer(m_window, 1, 16, nullptr);
@@ -326,6 +328,8 @@ void OverlayWindow::tickAnimation()
     }
 
     m_animProgress = std::min(1.0f, m_animProgress + 0.14f);
+    // Появление считаем по той же кривой: содержимое не «щёлкает» при смене стиля.
+    m_fade = 1.0f - (1.0f - m_animProgress) * (1.0f - m_animProgress);
     if (m_animProgress >= 1.0f) {
         m_animating = false;
         if (m_window != nullptr) {
@@ -401,6 +405,7 @@ void OverlayWindow::hide()
     }
     m_visible = false;
     m_animating = false;
+    m_fade = 1.0f;
     KillTimer(m_window, 1);
     ShowWindow(m_window, SW_HIDE);
 }
@@ -545,7 +550,9 @@ bool OverlayWindow::render()
         return false;
     }
 
-    const OverlaySettings animated = animatedSettings();
+    OverlaySettings animated = animatedSettings();
+    // Прозрачность при появлении и смене стиля: всё содержимое проявляется целиком.
+    animated.opacityPercent = static_cast<int>(std::lround(static_cast<double>(animated.opacityPercent) * m_fade));
     const OverlaySettings saved = m_settings;
     m_settings = animated;
     drawScene(static_cast<float>(std::clamp(animated.scalePercent, 70, 160)) / 100.0f);

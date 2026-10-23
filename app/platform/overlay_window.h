@@ -104,6 +104,8 @@ private:
     int m_dragOffsetY = 0;
     bool m_animating = false;
     float m_animProgress = 1.0f;
+    // Появление содержимого: при смене стиля оверлей проявляется, а не «щёлкает».
+    float m_fade = 1.0f;
     // Значения, между которыми идёт переход.
     float m_animFromScale = 1.0f;
     float m_animToScale = 1.0f;
