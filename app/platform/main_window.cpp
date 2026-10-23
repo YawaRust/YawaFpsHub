@@ -93,6 +93,12 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
     constexpr COLORREF kDwmColorNone = 0xFFFFFFFE;
     DwmSetWindowAttribute(m_window, kDwmBorderColor, &kDwmColorNone, sizeof(kDwmColorNone));
 
+    // На Windows 10 атрибута 34 нет, и DWM дорисовывает вокруг окна светлую кромку.
+    // Растянутая рамка (лист стекла) убирает её и на десятке: клиентскую область
+    // окно рисует само, поэтому negative margins ничего не портят.
+    const MARGINS glass{ -1, -1, -1, -1 };
+    DwmExtendFrameIntoClientArea(m_window, &glass);
+
     if (!m_renderer.initialize(error)) {
         return false;
     }
@@ -315,6 +321,11 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     case WM_NCACTIVATE:
         // Рамку рисуем сами: без этого DWM на миг показывает светлую полосу при активации.
         return TRUE;
+
+    case WM_NCPAINT:
+        // Нестандартную рамку не отдаём DWM: иначе при активации окна по краям
+        // появляется белая кромка, которую видно на тёмном интерфейсе.
+        return 0;
 
     case WM_NCCALCSIZE:
         // Заголовок убираем полностью: клиентская область занимает всё окно.
