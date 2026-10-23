@@ -406,10 +406,10 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         // Перерисовка нужна только когда курсор перешёл на другой элемент:
         // иначе WM_MOUSEMOVE вызывал бы перерисовку всего окна на каждое движение.
         int hovered = -1;
-        for (std::size_t index = 0; index < m_hits.size(); ++index) {
+        for (std::size_t index = m_hits.size(); index > 0; --index) {
             // Учитываем и строки таблиц с ActionKind::None: у них есть подсветка при наведении.
-            if (m_hits[index].rect.contains(cursorX, cursorY)) {
-                hovered = static_cast<int>(index);
+            if (m_hits[index - 1].rect.contains(cursorX, cursorY)) {
+                hovered = static_cast<int>(index - 1);
                 break;
             }
         }
@@ -480,6 +480,36 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             m_dragAction = ActionKind::None;
             ReleaseCapture();
             saveSettings();
+            return 0;
+        }
+        break;
+
+    case WM_KEYDOWN:
+        if (m_model.hotkeyEditing >= 0) {
+            // Esc — отмена, Delete — отключить клавишу, всё остальное становится хоткеем.
+            unsigned int* slot = nullptr;
+            if (m_model.hotkeyEditing == 0) {
+                slot = &m_model.settings.hotkeys.overlay;
+            } else if (m_model.hotkeyEditing == 1) {
+                slot = &m_model.settings.hotkeys.position;
+            } else if (m_model.hotkeyEditing == 2) {
+                slot = &m_model.settings.hotkeys.window;
+            }
+
+            if (wParam == VK_ESCAPE || slot == nullptr) {
+                m_model.hotkeyEditing = -1;
+            } else if (wParam == VK_DELETE) {
+                *slot = 0;
+                m_model.hotkeyEditing = -1;
+                registerHotkeys();
+                saveSettings();
+            } else if (wParam < 0x100) {
+                *slot = static_cast<unsigned int>(wParam);
+                m_model.hotkeyEditing = -1;
+                registerHotkeys();
+                saveSettings();
+            }
+            InvalidateRect(m_window, nullptr, FALSE);
             return 0;
         }
         break;
@@ -613,8 +643,11 @@ void MainWindow::handleClick(float x, float y)
         m_model.editingLabel = -1;
     }
     m_model.sensorSearchActive = false;
+    // Любой клик вне списка адаптеров закрывает его: открытие снова включит нужный обработчик.
+    m_model.gpuMenuOpen = false;
 
-    for (const UiHit& hit : m_hits) {
+    for (auto iterator = m_hits.rbegin(); iterator != m_hits.rend(); ++iterator) {
+        const UiHit& hit = *iterator;
         if (!hit.rect.contains(x, y)) {
             continue;
         }
@@ -631,6 +664,24 @@ void MainWindow::dragSlider(float x)
     applySlider(m_dragAction, m_dragRect, x);
 }
 
+void MainWindow::selectGpu(std::size_t index)
+{
+    if (index >= m_model.gpuNames.size()) {
+        return;
+    }
+
+    m_sensors.selectGpu(index);
+    m_model.activeGpu = m_sensors.activeGpu();
+    const GpuAdapter* adapter = m_sensors.gpus().byIndex(m_model.activeGpu);
+    if (adapter != nullptr) {
+        m_model.settings.gpu.hasSelection = true;
+        m_model.settings.gpu.luidLow = adapter->luidLow;
+        m_model.settings.gpu.luidHigh = adapter->luidHigh;
+    }
+    saveSettings();
+    InvalidateRect(m_window, nullptr, FALSE);
+}
+
 void MainWindow::applySlider(ActionKind action, const Rect& rect, float x)
 {
     if (rect.width() <= 0.0f) {
@@ -643,6 +694,8 @@ void MainWindow::applySlider(ActionKind action, const Rect& rect, float x)
     if (action == ActionKind::SetScale) {
         // Шаг 5 %: значения остаются ровными и хорошо читаются в ini.
         hit.value = 70 + static_cast<int>(std::lround(fraction * 90.0f / 5.0f)) * 5;
+    } else if (action == ActionKind::SetOverlayRadius) {
+        hit.value = static_cast<int>(std::lround(fraction * 24.0f));
     } else {
         hit.value = static_cast<int>(std::lround(fraction * 100.0f));
     }
@@ -737,7 +790,37 @@ void MainWindow::applyAction(const UiHit& hit)
         break;
 
     case ActionKind::SetStyle:
-        m_model.settings.overlay.style = static_cast<OverlayStyle>(hit.value);
+        // Пресет приносит свои переключатели: у RTSS нет фона и рамки, у стекла есть.
+        applyStyleDefaults(m_model.settings.overlay, static_cast<OverlayStyle>(hit.value));
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        InvalidateRect(m_window, nullptr, FALSE);
+        break;
+
+    case ActionKind::CaptureHotkey:
+        m_model.hotkeyEditing = std::clamp(hit.value, 0, 2);
+        break;
+
+    case ActionKind::ToggleOverlayBackground:
+        m_model.settings.overlay.showBackground = !m_model.settings.overlay.showBackground;
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
+    case ActionKind::ToggleOverlayBorder:
+        m_model.settings.overlay.showBorder = !m_model.settings.overlay.showBorder;
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
+    case ActionKind::ToggleOverlayShadow:
+        m_model.settings.overlay.showShadow = !m_model.settings.overlay.showShadow;
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
+    case ActionKind::SetOverlayRadius:
+        m_model.settings.overlay.cornerRadius = std::clamp(hit.value, 0, 24);
         m_overlay.setSettings(m_model.settings.overlay);
         saveSettings();
         break;
@@ -761,23 +844,19 @@ void MainWindow::applyAction(const UiHit& hit)
         saveSettings();
         break;
 
-    case ActionKind::CycleGpu: {
-        const std::size_t count = m_model.gpuNames.size();
-        if (count == 0) {
-            break;
-        }
-        const std::size_t next = hit.value > 0 ? static_cast<std::size_t>(hit.value) : (m_model.activeGpu + 1) % count;
-        m_sensors.selectGpu(next);
-        m_model.activeGpu = m_sensors.activeGpu();
-        const GpuAdapter* adapter = m_sensors.gpus().byIndex(m_model.activeGpu);
-        if (adapter != nullptr) {
-            m_model.settings.gpu.hasSelection = true;
-            m_model.settings.gpu.luidLow = adapter->luidLow;
-            m_model.settings.gpu.luidHigh = adapter->luidHigh;
-        }
-        saveSettings();
+    case ActionKind::CycleGpu:
+        selectGpu((m_model.activeGpu + 1) % std::max<std::size_t>(m_model.gpuNames.size(), 1));
         break;
-    }
+
+    case ActionKind::ToggleGpuMenu:
+        // hit.value хранит состояние на момент отрисовки: клик по открытому списку закрывает его.
+        m_model.gpuMenuOpen = hit.value == 0;
+        break;
+
+    case ActionKind::SelectGpu:
+        selectGpu(static_cast<std::size_t>(std::max(hit.value, 0)));
+        m_model.gpuMenuOpen = false;
+        break;
 
     case ActionKind::SelectLabel: {
         const LabelField field = static_cast<LabelField>(std::clamp(hit.value, 0, static_cast<int>(kLabelCount) - 1));
@@ -1135,9 +1214,20 @@ void MainWindow::toggleVisibilityFromTray()
 
 void MainWindow::registerHotkeys()
 {
-    RegisterHotKey(m_window, kHotkeyOverlay, 0, VK_F10);
-    RegisterHotKey(m_window, kHotkeyPosition, 0, VK_F11);
-    RegisterHotKey(m_window, kHotkeyWindow, 0, VK_F12);
+    UnregisterHotKey(m_window, kHotkeyOverlay);
+    UnregisterHotKey(m_window, kHotkeyPosition);
+    UnregisterHotKey(m_window, kHotkeyWindow);
+
+    // Коды из настроек: ноль означает «клавиша отключена». MOD_NOREPEAT не даёт
+    // автоповтору удерживаемой клавиши переключать оверлей десятки раз в секунду.
+    const auto bind = [this](int id, unsigned int key) {
+        if (key != 0 && RegisterHotKey(m_window, id, MOD_NOREPEAT, key) == FALSE && m_log != nullptr) {
+            m_log->warning("хоткей " + std::to_string(key) + " занят другой программой");
+        }
+    };
+    bind(kHotkeyOverlay, m_model.settings.hotkeys.overlay);
+    bind(kHotkeyPosition, m_model.settings.hotkeys.position);
+    bind(kHotkeyWindow, m_model.settings.hotkeys.window);
 }
 
 } // namespace yawa

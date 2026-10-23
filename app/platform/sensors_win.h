@@ -20,6 +20,7 @@ struct SensorAvailability {
     bool cpu = false;
     bool cpuClock = false;
     bool cpuTemperature = false;
+    bool gameThread = false;
     bool memory = false;
     bool disk = false;
     bool network = false;
@@ -52,6 +53,7 @@ private:
     void initializeCpu(Log& log);
     bool initializeGpu(Log& log, std::string& error);
     void sampleCpu(SystemSnapshot& snapshot);
+    void sampleGameThread(SystemSnapshot& snapshot);
     void sampleMemory(SystemSnapshot& snapshot);
     void sampleDiskAndNetwork(SystemSnapshot& snapshot);
     void sampleGpu(SystemSnapshot& snapshot);
@@ -72,6 +74,11 @@ private:
     std::size_t m_activeGpu = 0;
     std::uint32_t m_nominalCpuMhz = 0;
     double m_gpuLoad = 0.0;
+
+    // Поток игры: главный поток активного окна. Считаем по разнице времён, как диспетчер задач.
+    std::uint32_t m_gameThreadId = 0;
+    std::uint64_t m_gameThreadTicks = 0;
+    std::uint64_t m_gameQueryTime = 0;
 };
 
 } // namespace yawa

@@ -286,9 +286,31 @@ void drawGpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
     }
 
     if (model.gpuNames.size() > 1 && inner.bottom - rowTop >= 24.0f) {
+        // Выпадающий список адаптеров: кнопка-заголовок и раскрытый список с галочкой.
         const Rect picker{ rowsLeft, inner.bottom - 26.0f, inner.right, inner.bottom };
-        drawChip(renderer, picker, L"сменить адаптер", false, theme, TextRole::Tiny);
-        hits.push_back(UiHit{ picker, ActionKind::CycleGpu, 0 });
+        drawChip(renderer, picker, model.gpuMenuOpen ? L"скрыть список" : L"выбрать адаптер",
+            model.gpuMenuOpen, theme, TextRole::Tiny, isHovered(model, picker));
+        hits.push_back(UiHit{ picker, ActionKind::ToggleGpuMenu, model.gpuMenuOpen ? 1 : 0 });
+
+        if (model.gpuMenuOpen) {
+            const float listTop = inner.top + 34.0f;
+            for (std::size_t index = 0; index < model.gpuNames.size(); ++index) {
+                const float top = listTop + static_cast<float>(index) * 26.0f;
+                if (top + 24.0f > inner.bottom - 30.0f) {
+                    break;
+                }
+                const Rect row{ inner.left, top, inner.right, top + 24.0f };
+                const bool active = index == model.activeGpu;
+                renderer.fillRoundRect(row, 7.0f, active ? theme.accentSoft : theme.panelSoft);
+                renderer.text(std::to_wstring(index + 1) + L". " + model.gpuNames[index],
+                    Rect{ row.left + 8.0f, row.top, row.right - 24.0f, row.bottom }, TextRole::Tiny,
+                    active ? theme.accent : theme.textDim);
+                if (active) {
+                    renderer.fillCircle(row.right - 12.0f, row.centerY(), 3.0f, theme.accent);
+                }
+                hits.push_back(UiHit{ row, ActionKind::SelectGpu, static_cast<int>(index) });
+            }
+        }
     }
 }
 

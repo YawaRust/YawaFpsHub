@@ -1,6 +1,7 @@
 #include "render/overlay_painter.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <cwctype>
 
@@ -90,16 +91,78 @@ std::wstring tracked(std::wstring_view value, float letterSpacing)
     return result;
 }
 
+// Копия формата с другим размером шрифта. Раньше масштаб двигал только рамку:
+// текст оставался прежним, и оверлей выглядел сломанным.
+IDWriteTextFormat* scaledFormat(IDWriteFactory* factory, IDWriteTextFormat* base, float factor)
+{
+    if (factory == nullptr || base == nullptr || factor <= 0.0f) {
+        return nullptr;
+    }
+
+    const UINT32 length = base->GetFontFamilyNameLength();
+    std::wstring family(length + 1, L'\0');
+    if (FAILED(base->GetFontFamilyName(family.data(), length + 1))) {
+        return nullptr;
+    }
+    family.resize(length);
+
+    IDWriteTextFormat* format = nullptr;
+    if (FAILED(factory->CreateTextFormat(family.c_str(), nullptr, base->GetFontWeight(), base->GetFontStyle(),
+            base->GetFontStretch(), base->GetFontSize() * factor, L"ru-ru", &format))) {
+        return nullptr;
+    }
+
+    format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+    return format;
+}
+
+struct OverlayChrome {
+    bool background = true;
+    bool border = true;
+    bool shadow = true;
+    // -1 — радиус из пресета.
+    float radius = -1.0f;
+};
+
 class Painter {
 public:
-    Painter(ID2D1RenderTarget* target, const Theme& theme, const OverlayFormats& formats, float scale, float opacity)
+    Painter(ID2D1RenderTarget* target, const Theme& theme, const OverlayFormats& formats, float scale, float opacity,
+        const OverlayChrome& chrome)
         : m_target(target)
         , m_theme(theme)
         , m_formats(formats)
         , m_scale(scale)
         , m_opacity(opacity)
+        , m_chrome(chrome)
     {
     }
+
+    // Подложка оверлея: уважает переключатель «Фон» и пользовательский радиус углов.
+    void plate(const Rect& rect, float radius, const Color& color, float alphaScale = 1.0f)
+    {
+        if (!m_chrome.background) {
+            return;
+        }
+        fillRound(rect, chromeRadius(radius), color, alphaScale);
+    }
+
+    void outline(const Rect& rect, float radius, const Color& color, float thickness, float alphaScale = 1.0f)
+    {
+        if (!m_chrome.border) {
+            return;
+        }
+        strokeRound(rect, chromeRadius(radius), color, thickness, alphaScale);
+    }
+
+    void dropShadow(const Rect& rect, float radius, const Color& color, float alphaScale)
+    {
+        if (!m_chrome.shadow) {
+            return;
+        }
+        fillRound(rect, chromeRadius(radius), color, alphaScale);
+    }
+
+    float textSize() const { return m_scale; }
 
     void fillRect(const Rect& rect, const Color& color, float alphaScale = 1.0f)
     {
@@ -195,6 +258,11 @@ public:
     const Theme& theme() const { return m_theme; }
 
 private:
+    float chromeRadius(float presetRadius) const
+    {
+        return m_chrome.radius >= 0.0f ? m_chrome.radius * m_scale : presetRadius;
+    }
+
     IDWriteTextFormat* formatFor(TextRole role) const
     {
         switch (role) {
@@ -216,6 +284,7 @@ private:
     OverlayFormats m_formats;
     float m_scale = 1.0f;
     float m_opacity = 1.0f;
+    OverlayChrome m_chrome;
 };
 
 // Полный визуальный набор стиля: палитра, форма, типографика. Раньше стили отличались
@@ -488,8 +557,8 @@ StyleSpec styleSpec(const OverlaySettings& settings, const OverlayText& text, fl
 void drawShadow(Painter& painter, const Rect& frame, float radius)
 {
     const float scale = painter.scale();
-    painter.fillRound(Rect{ frame.left + 2.0f * scale, frame.top + 4.0f * scale, frame.right + 3.0f * scale,
-                             frame.bottom + 5.0f * scale },
+    painter.dropShadow(Rect{ frame.left + 2.0f * scale, frame.top + 4.0f * scale, frame.right + 3.0f * scale,
+                               frame.bottom + 5.0f * scale },
         radius, styleColor(0x000000u), 0.28f);
 }
 
@@ -501,8 +570,8 @@ void drawFrosted(Painter& painter, const OverlayText& text, const Rect& frame, c
     const std::array<std::wstring, kLabelCount> values = rowValues(text);
 
     drawShadow(painter, frame, look.radius * scale);
-    painter.fillRound(frame, look.radius * scale, look.background, 0.16f * (0.4f + painter.opacity()));
-    painter.strokeRound(frame, look.radius * scale, look.border, 1.0f, 0.35f);
+    painter.plate(frame, look.radius * scale, look.background, 0.16f * (0.4f + painter.opacity()));
+    painter.outline(frame, look.radius * scale, look.border, 1.0f, 0.35f);
 
     const float left = frame.left + look.padding * scale;
     const float right = frame.right - look.padding * scale;
@@ -547,11 +616,11 @@ void drawNeon(Painter& painter, const OverlayText& text, const Rect& frame, cons
     const std::array<std::wstring, kLabelCount> values = rowValues(text);
 
     drawShadow(painter, frame, look.radius * scale);
-    painter.fillRound(frame, look.radius * scale, look.background, 0.72f * painter.opacity() + 0.18f);
-    painter.strokeRound(Rect{ frame.left - 2.0f * scale, frame.top - 2.0f * scale, frame.right + 2.0f * scale,
-                                frame.bottom + 2.0f * scale },
+    painter.plate(frame, look.radius * scale, look.background, 0.72f * painter.opacity() + 0.18f);
+    painter.outline(Rect{ frame.left - 2.0f * scale, frame.top - 2.0f * scale, frame.right + 2.0f * scale,
+                            frame.bottom + 2.0f * scale },
         (look.radius + 2.0f) * scale, look.accent, 2.0f, 0.18f);
-    painter.strokeRound(frame, look.radius * scale, look.border, 1.0f, 0.35f);
+    painter.outline(frame, look.radius * scale, look.border, 1.0f, 0.35f);
 
     const float left = frame.left + look.padding * scale;
     const float right = frame.right - look.padding * scale;
@@ -597,6 +666,9 @@ void drawRtss(Painter& painter, const OverlayText& text, const Rect& frame, cons
     const std::array<std::wstring, kLabelCount> labels = rowLabels(text, look);
     const std::array<std::wstring, kLabelCount> values = rowValues(text);
 
+    painter.plate(frame, look.radius * scale, look.background, 0.75f);
+    painter.outline(frame, look.radius * scale, look.border, 1.0f, 0.6f);
+
     float y = frame.top + 2.0f * scale;
     for (std::size_t index = 0; index < kLabelCount; ++index) {
         if (!rowShown(text, index)) {
@@ -617,8 +689,8 @@ void drawTerminal(Painter& painter, const OverlayText& text, const Rect& frame, 
     const std::array<std::wstring, kLabelCount> labels = rowLabels(text, look);
     const std::array<std::wstring, kLabelCount> values = rowValues(text);
 
-    painter.fillRound(frame, look.radius * scale, look.background, 0.86f * painter.opacity() + 0.12f);
-    painter.strokeRound(frame, look.radius * scale, look.border, 1.0f, 0.9f);
+    painter.plate(frame, look.radius * scale, look.background, 0.86f * painter.opacity() + 0.12f);
+    painter.outline(frame, look.radius * scale, look.border, 1.0f, 0.9f);
 
     const float left = frame.left + look.padding * scale;
     const float right = frame.right - look.padding * scale;
@@ -649,8 +721,8 @@ void drawCyber(Painter& painter, const OverlayText& text, const Rect& frame, con
     const std::array<std::wstring, kLabelCount> values = rowValues(text);
 
     drawShadow(painter, frame, look.radius * scale);
-    painter.fillRound(frame, look.radius * scale, look.background, 0.78f * painter.opacity() + 0.14f);
-    painter.strokeRound(frame, look.radius * scale, look.border, 1.2f, 0.85f);
+    painter.plate(frame, look.radius * scale, look.background, 0.78f * painter.opacity() + 0.14f);
+    painter.outline(frame, look.radius * scale, look.border, 1.2f, 0.85f);
 
     const float corner = 12.0f * scale;
     const float inset = 3.0f * scale;
@@ -699,7 +771,7 @@ void drawMono(Painter& painter, const OverlayText& text, const Rect& frame, cons
     const std::array<std::wstring, kLabelCount> labels = rowLabels(text, look);
     const std::array<std::wstring, kLabelCount> values = rowValues(text);
 
-    painter.fillRound(frame, look.radius * scale, look.background, 0.28f * painter.opacity() + 0.10f);
+    painter.plate(frame, look.radius * scale, look.background, 0.28f * painter.opacity() + 0.10f);
 
     float y = frame.top + 6.0f * scale;
     for (std::size_t index = 0; index < kLabelCount; ++index) {
@@ -724,8 +796,8 @@ void drawEsport(Painter& painter, const OverlayText& text, const Rect& frame, co
     const std::array<std::wstring, kLabelCount> values = rowValues(text);
 
     drawShadow(painter, frame, look.radius * scale);
-    painter.fillRound(frame, look.radius * scale, look.background, 0.9f * painter.opacity() + 0.10f);
-    painter.strokeRound(frame, look.radius * scale, look.border, 1.0f, 0.9f);
+    painter.plate(frame, look.radius * scale, look.background, 0.9f * painter.opacity() + 0.10f);
+    painter.outline(frame, look.radius * scale, look.border, 1.0f, 0.9f);
 
     float x = frame.left + look.padding * scale;
     const float top = frame.top + look.padding * scale;
@@ -764,10 +836,10 @@ void drawRetro(Painter& painter, const OverlayText& text, const Rect& frame, con
     const std::array<std::wstring, kLabelCount> labels = rowLabels(text, look);
     const std::array<std::wstring, kLabelCount> values = rowValues(text);
 
-    painter.fillRound(frame, look.radius * scale, look.background, 0.82f * painter.opacity() + 0.18f);
-    painter.strokeRound(frame, look.radius * scale, look.border, 1.0f, 0.8f);
-    painter.strokeRound(Rect{ frame.left + 2.0f * scale, frame.top + 2.0f * scale, frame.right - 2.0f * scale,
-                                frame.bottom - 2.0f * scale },
+    painter.plate(frame, look.radius * scale, look.background, 0.82f * painter.opacity() + 0.18f);
+    painter.outline(frame, look.radius * scale, look.border, 1.0f, 0.8f);
+    painter.outline(Rect{ frame.left + 2.0f * scale, frame.top + 2.0f * scale, frame.right - 2.0f * scale,
+                            frame.bottom - 2.0f * scale },
         std::max(look.radius - 1.0f, 0.0f) * scale, look.accent, 1.0f, 0.18f);
 
     // Строки развёртки: тонкие линии через каждые 4 пикселя.
@@ -810,11 +882,9 @@ void drawInline(Painter& painter, const OverlaySettings& settings, const Overlay
         return;
     }
 
-    painter.fillRound(frame, look.radius * scale, look.background, look.shadow ? 0.72f : 0.35f);
-    if (look.borderVisible) {
-        painter.strokeRound(frame, look.radius * scale, look.border, settings.style == OverlayStyle::Neon ? 1.4f : 1.0f,
-            0.85f);
-    }
+    painter.plate(frame, look.radius * scale, look.background, look.shadow ? 0.72f : 0.35f);
+    painter.outline(frame, look.radius * scale, look.border, settings.style == OverlayStyle::Neon ? 1.4f : 1.0f,
+        0.85f);
     painter.text(line, inner, role, look.palette[0]);
 }
 
@@ -887,7 +957,33 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
 
     const float opacity = static_cast<float>(std::clamp(settings.opacityPercent, 0, 100)) / 100.0f;
     const StyleLook look = lookFor(settings.style);
-    Painter measurer(target, theme, formats, scale, opacity);
+
+    // Шрифты масштабируются вместе с рамкой: иначе «Масштаб» растягивал только подложку.
+    std::array<IDWriteTextFormat*, 4> owned{};
+    OverlayFormats scaled = formats;
+    if (scale > 0.0f && (scale < 0.999f || scale > 1.001f) && formats.factory != nullptr) {
+        owned = { scaledFormat(formats.factory, formats.key, scale), scaledFormat(formats.factory, formats.value, scale),
+            scaledFormat(formats.factory, formats.smallText, scale), scaledFormat(formats.factory, formats.mono, scale) };
+        if (owned[0] != nullptr && owned[1] != nullptr && owned[2] != nullptr && owned[3] != nullptr) {
+            scaled = OverlayFormats{ formats.factory, owned[0], owned[1], owned[2], owned[3] };
+        } else {
+            for (IDWriteTextFormat* format : owned) {
+                if (format != nullptr) {
+                    format->Release();
+                }
+            }
+            owned = {};
+            scaled = formats;
+        }
+    }
+
+    OverlayChrome chrome;
+    chrome.background = settings.showBackground;
+    chrome.border = settings.showBorder;
+    chrome.shadow = settings.showShadow;
+    chrome.radius = settings.cornerRadius >= 0 ? static_cast<float>(settings.cornerRadius) : -1.0f;
+
+    Painter measurer(target, theme, scaled, scale, opacity, chrome);
     const float lineWidth = measurer.measure(inlineText(text), look.mono ? TextRole::Mono : TextRole::Small);
     const StyleSpec spec = styleSpec(settings, text, lineWidth);
     const float width = spec.width * scale;
@@ -899,47 +995,54 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
     const bool isTop = settings.position == OverlayPosition::TopLeft
         || settings.position == OverlayPosition::TopRight;
 
-    float left = isLeft ? bounds.left + margin + static_cast<float>(settings.offsetX) * scale
-                        : bounds.right - width - margin + static_cast<float>(settings.offsetX) * scale;
-    float top = isTop ? bounds.top + margin + static_cast<float>(settings.offsetY) * scale
-                      : bounds.bottom - height - margin + static_cast<float>(settings.offsetY) * scale;
+    // Смещение — в экранных пикселях и не зависит от масштаба: раньше смена масштаба
+    // сдвигала оверлей из-за умножения сдвига на коэффициент.
+    float left = isLeft ? bounds.left + margin + static_cast<float>(settings.offsetX)
+                        : bounds.right - width - margin + static_cast<float>(settings.offsetX);
+    float top = isTop ? bounds.top + margin + static_cast<float>(settings.offsetY)
+                      : bounds.bottom - height - margin + static_cast<float>(settings.offsetY);
 
     left = std::clamp(left, bounds.left, std::max(bounds.left, bounds.right - width));
     top = std::clamp(top, bounds.top, std::max(bounds.top, bounds.bottom - height));
 
     const Rect frame{ left, top, left + width, top + height };
-    Painter painter(target, theme, formats, scale, opacity);
+    Painter painter(target, theme, scaled, scale, opacity, chrome);
 
     if (settings.layout == OverlayLayout::Line) {
         drawInline(painter, settings, text, frame, look);
-        return frame;
+    } else {
+        switch (settings.style) {
+        case OverlayStyle::Neon:
+            drawNeon(painter, text, frame, look);
+            break;
+        case OverlayStyle::Rtss:
+            drawRtss(painter, text, frame, look);
+            break;
+        case OverlayStyle::Frosted:
+            drawFrosted(painter, text, frame, look);
+            break;
+        case OverlayStyle::Terminal:
+            drawTerminal(painter, text, frame, look);
+            break;
+        case OverlayStyle::Cyber:
+            drawCyber(painter, text, frame, look);
+            break;
+        case OverlayStyle::Mono:
+            drawMono(painter, text, frame, look);
+            break;
+        case OverlayStyle::Esport:
+            drawEsport(painter, text, frame, look);
+            break;
+        case OverlayStyle::Retro:
+            drawRetro(painter, text, frame, look);
+            break;
+        }
     }
 
-    switch (settings.style) {
-    case OverlayStyle::Neon:
-        drawNeon(painter, text, frame, look);
-        break;
-    case OverlayStyle::Rtss:
-        drawRtss(painter, text, frame, look);
-        break;
-    case OverlayStyle::Frosted:
-        drawFrosted(painter, text, frame, look);
-        break;
-    case OverlayStyle::Terminal:
-        drawTerminal(painter, text, frame, look);
-        break;
-    case OverlayStyle::Cyber:
-        drawCyber(painter, text, frame, look);
-        break;
-    case OverlayStyle::Mono:
-        drawMono(painter, text, frame, look);
-        break;
-    case OverlayStyle::Esport:
-        drawEsport(painter, text, frame, look);
-        break;
-    case OverlayStyle::Retro:
-        drawRetro(painter, text, frame, look);
-        break;
+    for (IDWriteTextFormat* format : owned) {
+        if (format != nullptr) {
+            format->Release();
+        }
     }
 
     return frame;

@@ -245,6 +245,88 @@ void drawAboutCard(Renderer& renderer, const AppModel& model, const Theme& theme
     }
 }
 
+// Имя клавиши для списка хоткеев: F-ряд и буквы читаются, остальное — кодом.
+std::wstring keyName(unsigned int key)
+{
+    if (key == 0) {
+        return L"выключено";
+    }
+    if (key >= VK_F1 && key <= VK_F24) {
+        return L"F" + std::to_wstring(key - VK_F1 + 1);
+    }
+    if ((key >= 'A' && key <= 'Z') || (key >= '0' && key <= '9')) {
+        return std::wstring(1, static_cast<wchar_t>(key));
+    }
+
+    switch (key) {
+    case VK_SPACE:
+        return L"Пробел";
+    case VK_INSERT:
+        return L"Insert";
+    case VK_DELETE:
+        return L"Delete";
+    case VK_HOME:
+        return L"Home";
+    case VK_END:
+        return L"End";
+    case VK_PRIOR:
+        return L"Page Up";
+    case VK_NEXT:
+        return L"Page Down";
+    case VK_SNAPSHOT:
+        return L"Print Screen";
+    case VK_PAUSE:
+        return L"Pause";
+    case VK_SCROLL:
+        return L"Scroll Lock";
+    default:
+        break;
+    }
+
+    wchar_t buffer[16]{};
+    swprintf_s(buffer, L"код %02X", key);
+    return buffer;
+}
+
+void drawHotkeyCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card,
+    std::vector<UiHit>& hits)
+{
+    drawCard(renderer, card, theme);
+    const Rect inner = card.inset(kCardPadding);
+    float top = drawCardHeader(renderer, card, L"Горячие клавиши",
+        L"нажмите на строку и введите клавишу, Delete отключает", theme);
+
+    const std::array<std::wstring_view, 3> names{ L"Оверлей", L"Положение оверлея", L"Окно поверх игр" };
+    const std::array<unsigned int, 3> keys{ model.settings.hotkeys.overlay, model.settings.hotkeys.position,
+        model.settings.hotkeys.window };
+
+    for (std::size_t index = 0; index < names.size(); ++index) {
+        if (top + 32.0f > inner.bottom) {
+            break;
+        }
+        const Rect row{ inner.left, top, inner.right, top + 30.0f };
+        const bool editing = model.hotkeyEditing == static_cast<int>(index);
+        renderer.fillRoundRect(row, 9.0f, editing ? theme.accentSoft : theme.panelSoft);
+        if (editing) {
+            renderer.strokeRoundRect(row, 9.0f, theme.accentGlow, 1.0f);
+        }
+
+        renderer.text(names[index], Rect{ row.left + 10.0f, row.top, row.right - 120.0f, row.bottom },
+            TextRole::Small, editing ? theme.text : theme.textDim);
+
+        const Rect keyChip{ row.right - 108.0f, row.top + 5.0f, row.right - 8.0f, row.bottom - 5.0f };
+        renderer.fillRoundRect(keyChip, 7.0f, editing ? theme.accent : theme.background.withAlpha(0.6f));
+        renderer.text(editing ? L"нажмите клавишу" : keyName(keys[index]), keyChip, TextRole::Tiny,
+            editing ? theme.background : theme.text, TextAlign::Center);
+
+        hits.push_back(UiHit{ row, ActionKind::CaptureHotkey, static_cast<int>(index) });
+        top += 34.0f;
+    }
+
+    renderer.text(L"Esc — отмена, Delete — выключить. Если клавишу занял другой процесс, привязка не сработает.",
+        Rect{ inner.left, inner.bottom - 16.0f, inner.right, inner.bottom }, TextRole::Tiny, theme.textFaint);
+}
+
 void drawSourcesCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card)
 {
     drawCard(renderer, card, theme);
@@ -301,13 +383,13 @@ void drawSettings(Renderer& renderer, const AppModel& model, const Theme& theme,
 {
     const float column = (area.width() - kGap) / 2.0f;
     const float usable = area.height() - kGap * 2.0f;
-    float first = std::max(200.0f, usable * 0.44f);
-    float second = std::max(140.0f, usable * 0.27f);
-    // Нижней карточке с источниками нужен минимум: иначе строки наползают на заголовок.
-    const float minimumBottom = 112.0f;
+    float first = std::max(200.0f, usable * 0.42f);
+    float second = std::max(150.0f, usable * 0.27f);
+    // Нижнему ряду нужен минимум: иначе строки источников наползают на заголовок.
+    const float minimumBottom = 118.0f;
     while (first + second + minimumBottom > usable && first > 180.0f) {
         first -= 6.0f;
-        second = std::max(130.0f, second - 4.0f);
+        second = std::max(136.0f, second - 4.0f);
     }
     const float third = std::max(96.0f, usable - first - second);
 
@@ -315,13 +397,18 @@ void drawSettings(Renderer& renderer, const AppModel& model, const Theme& theme,
     const Rect rightTop{ leftTop.right + kGap, area.top, area.right, area.top + first };
     const Rect leftMiddle{ area.left, leftTop.bottom + kGap, area.left + column, leftTop.bottom + kGap + second };
     const Rect rightMiddle{ leftTop.right + kGap, leftMiddle.top, area.right, leftMiddle.bottom };
-    const Rect bottom{ area.left, leftMiddle.bottom + kGap, area.right, leftMiddle.bottom + kGap + third };
+
+    // Нижний ряд: источники шире, «О программе» — справа.
+    const float bottomWidth = area.width() * 0.62f;
+    const Rect bottomLeft{ area.left, leftMiddle.bottom + kGap, area.left + bottomWidth, leftMiddle.bottom + kGap + third };
+    const Rect bottomRight{ bottomLeft.right + kGap, bottomLeft.top, area.right, bottomLeft.bottom };
 
     drawCaptureCard(renderer, model, theme, leftTop, hits);
     drawAppearanceCard(renderer, model, theme, rightTop, hits);
     drawPortableCard(renderer, model, theme, leftMiddle, hits);
-    drawAboutCard(renderer, model, theme, rightMiddle, hits);
-    drawSourcesCard(renderer, model, theme, bottom);
+    drawHotkeyCard(renderer, model, theme, rightMiddle, hits);
+    drawSourcesCard(renderer, model, theme, bottomLeft);
+    drawAboutCard(renderer, model, theme, bottomRight, hits);
 }
 
 } // namespace yawa

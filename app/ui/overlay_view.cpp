@@ -204,7 +204,32 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
     top += 48.0f;
     drawSlider(renderer, Rect{ inner.left, top, inner.right, top + 34.0f }, overlay.opacityPercent, 0, 100,
         L"Прозрачность", theme, hits, ActionKind::SetOpacity, L" %");
-    top += 48.0f;
+    top += 46.0f;
+
+    // Оформление: то, что нельзя выразить пресетом, но нужно для своей картинки.
+    renderer.text(L"Оформление", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
+    top += 18.0f;
+    const std::array<std::pair<std::wstring_view, bool>, 3> switches{
+        std::pair<std::wstring_view, bool>{ L"Фон", overlay.showBackground },
+        std::pair<std::wstring_view, bool>{ L"Рамка", overlay.showBorder },
+        std::pair<std::wstring_view, bool>{ L"Тень", overlay.showShadow }
+    };
+    const std::array<ActionKind, 3> switchActions{ ActionKind::ToggleOverlayBackground,
+        ActionKind::ToggleOverlayBorder, ActionKind::ToggleOverlayShadow };
+    const float switchWidth = (inner.width() - 2.0f * 6.0f) / 3.0f;
+    for (std::size_t index = 0; index < switches.size(); ++index) {
+        const Rect chip{ inner.left + static_cast<float>(index) * (switchWidth + 6.0f), top,
+            inner.left + static_cast<float>(index) * (switchWidth + 6.0f) + switchWidth, top + 24.0f };
+        drawChip(renderer, chip, switches[index].first, switches[index].second, theme, TextRole::Tiny,
+            isHovered(model, chip));
+        hits.push_back(UiHit{ chip, switchActions[index], 0 });
+    }
+    top += 32.0f;
+
+    const int radiusValue = overlay.cornerRadius >= 0 ? overlay.cornerRadius : 8;
+    drawSlider(renderer, Rect{ inner.left, top, inner.right, top + 34.0f }, radiusValue, 0, 24, L"Углы", theme, hits,
+        ActionKind::SetOverlayRadius, L" px");
+    top += 42.0f;
 
     renderer.text(L"Смещение", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
     top += 20.0f;

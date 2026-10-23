@@ -74,6 +74,7 @@ private:
     void toggleVisibilityFromTray();
     // Единая точка включения/выключения оверлея: логирует причину, если показать не удалось.
     void toggleOverlay();
+    void selectGpu(std::size_t index);
 
     Rect contentArea() const;
     std::vector<UiHit> buildHits();

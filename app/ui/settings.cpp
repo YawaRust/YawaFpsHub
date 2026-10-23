@@ -132,6 +132,34 @@ void setLabel(OverlaySettings& overlay, LabelField field, std::string value)
     overlay.labels[static_cast<std::size_t>(field)] = sanitizeLabel(value);
 }
 
+void applyStyleDefaults(OverlaySettings& overlay, OverlayStyle style)
+{
+    overlay.style = style;
+    switch (style) {
+    case OverlayStyle::Rtss:
+        overlay.showBackground = false;
+        overlay.showBorder = false;
+        overlay.showShadow = false;
+        break;
+    case OverlayStyle::Mono:
+        overlay.showBackground = true;
+        overlay.showBorder = false;
+        overlay.showShadow = false;
+        break;
+    case OverlayStyle::Neon:
+        overlay.showBackground = true;
+        overlay.showBorder = true;
+        overlay.showShadow = true;
+        break;
+    default:
+        overlay.showBackground = true;
+        overlay.showBorder = true;
+        overlay.showShadow = true;
+        break;
+    }
+    overlay.cornerRadius = -1;
+}
+
 std::string_view overlayStyleKey(OverlayStyle style)
 {
     for (const StyleKey& item : kStyles) {
@@ -319,6 +347,14 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                 target.overlay.offsetX = std::clamp(parseInt(value, target.overlay.offsetX), -400, 400);
             } else if (key == "offset_y") {
                 target.overlay.offsetY = std::clamp(parseInt(value, target.overlay.offsetY), -400, 400);
+            } else if (key == "background") {
+                target.overlay.showBackground = parseBool(value, target.overlay.showBackground);
+            } else if (key == "border") {
+                target.overlay.showBorder = parseBool(value, target.overlay.showBorder);
+            } else if (key == "shadow") {
+                target.overlay.showShadow = parseBool(value, target.overlay.showShadow);
+            } else if (key == "corner") {
+                target.overlay.cornerRadius = std::clamp(parseInt(value, target.overlay.cornerRadius), -1, 24);
             } else if (key.size() > 5 && key.substr(0, 5) == "show_") {
                 for (std::size_t index = 0; index < kLabelCount; ++index) {
                     const auto field = static_cast<LabelField>(index);
@@ -326,6 +362,14 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                         target.overlay.visible[index] = parseBool(value, target.overlay.visible[index]);
                     }
                 }
+            }
+        } else if (section == "hotkeys") {
+            if (key == "overlay") {
+                target.hotkeys.overlay = static_cast<unsigned int>(std::clamp(parseInt(value, 0), 0, 254));
+            } else if (key == "position") {
+                target.hotkeys.position = static_cast<unsigned int>(std::clamp(parseInt(value, 0), 0, 254));
+            } else if (key == "window") {
+                target.hotkeys.window = static_cast<unsigned int>(std::clamp(parseInt(value, 0), 0, 254));
             }
         } else if (section == "labels") {
             for (std::size_t index = 0; index < kLabelCount; ++index) {
@@ -383,6 +427,10 @@ std::string serializeSettings(const Settings& settings)
     text += "opacity = " + std::to_string(settings.overlay.opacityPercent) + "\n";
     text += "offset_x = " + std::to_string(settings.overlay.offsetX) + "\n";
     text += "offset_y = " + std::to_string(settings.overlay.offsetY) + "\n";
+    text += std::string("background = ") + (settings.overlay.showBackground ? "1" : "0") + "\n";
+    text += std::string("border = ") + (settings.overlay.showBorder ? "1" : "0") + "\n";
+    text += std::string("shadow = ") + (settings.overlay.showShadow ? "1" : "0") + "\n";
+    text += "corner = " + std::to_string(settings.overlay.cornerRadius) + "\n";
     for (std::size_t index = 0; index < kLabelCount; ++index) {
         const auto field = static_cast<LabelField>(index);
         text += std::string("show_") + std::string(labelKey(field)) + " = "
@@ -396,6 +444,11 @@ std::string serializeSettings(const Settings& settings)
         text += std::string(labelKey(field)) + " = " + labelValue(settings.overlay, field) + "\n";
     }
     text += "\n";
+
+    text += "[hotkeys]\n";
+    text += "overlay = " + std::to_string(settings.hotkeys.overlay) + "\n";
+    text += "position = " + std::to_string(settings.hotkeys.position) + "\n";
+    text += "window = " + std::to_string(settings.hotkeys.window) + "\n\n";
 
     text += "[ui]\n";
     text += "accent = " + std::string(accentKey(settings.ui.accent)) + "\n";

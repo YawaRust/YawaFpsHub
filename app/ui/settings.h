@@ -38,6 +38,12 @@ struct OverlaySettings {
     // независимо от разрешения и рамок экрана.
     int offsetX = 0;
     int offsetY = 0;
+    // Оформление поверх пресета: то, что пользователь может убрать или подкрутить.
+    bool showBackground = true;
+    bool showBorder = true;
+    bool showShadow = true;
+    // -1 — радиус из пресета, иначе 0…24 в тех же единицах, что и стиль.
+    int cornerRadius = -1;
     // Состав: какие строки вообще показывать (fps, cpu, gpu, ram, vram).
     std::array<bool, kLabelCount> visible{ true, true, true, true, true };
     std::array<std::string, kLabelCount> labels{ "FPS", "CPU", "GPU", "RAM", "VRAM" };
@@ -56,11 +62,20 @@ struct GpuSelection {
     std::int32_t luidHigh = 0;
 };
 
+// Горячие клавиши хранятся как виртуальные коды Windows: F10 = 0x79, F11 = 0x7A, F12 = 0x7B.
+// Ноль означает «выключено» — клавиша не регистрируется.
+struct HotkeySettings {
+    unsigned int overlay = 0x79;
+    unsigned int position = 0x7A;
+    unsigned int window = 0x7B;
+};
+
 struct Settings {
     CaptureSettings capture;
     OverlaySettings overlay;
     UiSettings ui;
     GpuSelection gpu;
+    HotkeySettings hotkeys;
 };
 
 Settings defaultSettings();
@@ -73,6 +88,10 @@ std::string serializeSettings(const Settings& settings);
 std::string_view labelKey(LabelField field);
 const std::string& labelValue(const OverlaySettings& overlay, LabelField field);
 void setLabel(OverlaySettings& overlay, LabelField field, std::string value);
+
+// Ставит переключатели оформления в значения пресета: у RTSS нет ни фона, ни рамки,
+// у фростед-стекла есть и то, и другое.
+void applyStyleDefaults(OverlaySettings& overlay, OverlayStyle style);
 
 std::string_view overlayStyleKey(OverlayStyle style);
 std::string_view overlayPositionKey(OverlayPosition position);

@@ -53,6 +53,13 @@ enum class ActionKind : std::uint8_t {
     WindowClose,
     FocusSensorSearch,
     ToggleOverlayOnly,
+    ToggleOverlayBackground,
+    ToggleOverlayBorder,
+    ToggleOverlayShadow,
+    SetOverlayRadius,
+    SelectGpu,
+    ToggleGpuMenu,
+    CaptureHotkey,
 };
 
 struct UiHit {
@@ -92,6 +99,10 @@ struct AppModel {
     std::string sensorQuery;
     bool sensorSearchActive = false;
     bool overlayOnly = false;
+    // Редактор горячих клавиш: -1 — не редактируем, иначе номер действия (0…2).
+    int hotkeyEditing = -1;
+    // Выпадающий список выбора GPU на обзоре.
+    bool gpuMenuOpen = false;
     int sensorScroll = 0;
     // Состояние окна для своего заголовка: перетаскивание и кнопки рисуются вручную.
     bool maximized = false;

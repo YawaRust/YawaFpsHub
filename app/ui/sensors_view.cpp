@@ -194,7 +194,7 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
     }
 
     // --- Таблица: одна колонка на весь экран, как в демо.
-    const Rect card{ area.left, area.top + kToolbarHeight + 10.0f, area.right, area.bottom - 30.0f };
+    const Rect card{ area.left, area.top + kToolbarHeight + 10.0f, area.right, area.bottom };
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
 
@@ -206,7 +206,8 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
     const float avgRight = inner.left + width * 0.73f;
     const float maxRight = inner.left + width * 0.84f;
     const float sparkLeft = inner.left + width * 0.85f;
-    const float sparkRight = inner.right - 40.0f;
+    // Справа оставляем жёлоб под полосу прокрутки, иначе она наезжает на «глаз».
+    const float sparkRight = inner.right - 46.0f;
 
     renderer.text(L"Датчик", Rect{ nameX, inner.top, inner.left + width * 0.3f, inner.top + 14.0f }, TextRole::Tiny,
         theme.textFaint);
@@ -259,7 +260,8 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
     const float contentHeight = static_cast<float>(entries.size()) * kRowHeight
         + static_cast<float>(groupStarts.size()) * kGroupHeight;
 
-    const Rect viewport{ inner.left, inner.top + 26.0f, inner.right, inner.bottom };
+    // Низ таблицы освобождает строку под сноску: раньше она висела под карточкой.
+    const Rect viewport{ inner.left, inner.top + 26.0f, inner.right, inner.bottom - 24.0f };
     const float maxScroll = std::max(0.0f, contentHeight - viewport.height());
     const float offset = std::clamp(static_cast<float>(model.sensorScroll), 0.0f, maxScroll);
 
@@ -290,7 +292,11 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
             const Rect row{ inner.left, rowTop, inner.right, rowTop + kRowHeight };
             const bool hover = isHovered(model, row);
             if (hover) {
-                renderer.fillRoundRect(row, 6.0f, theme.panelSoft.withAlpha(0.9f));
+                // Подсветка строки была почти не виднее фона карточки — теперь это заметная плашка.
+                renderer.fillRoundRect(row, 6.0f, theme.accentSoft);
+                renderer.fillRoundRect(Rect{ inner.left + 2.0f, rowTop + 4.0f, inner.left + 4.0f,
+                                               rowTop + kRowHeight - 4.0f },
+                    1.0f, theme.accent);
             }
 
             const MetricInfo& info = metricInfo(id);
@@ -341,7 +347,7 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
             // «Глаз»: датчик показан в оверлее. Только у строк, которые туда попадают.
             const int field = overlayField(id);
             if (field >= 0) {
-                const Rect eye{ inner.right - 32.0f, rowTop + 3.0f, inner.right - 6.0f, rowTop + kRowHeight - 3.0f };
+                const Rect eye{ inner.right - 40.0f, rowTop + 3.0f, inner.right - 14.0f, rowTop + kRowHeight - 3.0f };
                 const bool pinned = model.settings.overlay.visible[static_cast<std::size_t>(field)];
                 const bool eyeHover = isHovered(model, eye);
                 if (pinned || eyeHover) {
@@ -370,15 +376,16 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
     if (contentHeight > viewport.height() && viewport.height() > 0.0f && maxScroll > 0.0f) {
         const float thumbHeight = std::max(24.0f, viewport.height() * (viewport.height() / contentHeight));
         const float thumbTop = viewport.top + (viewport.height() - thumbHeight) * (offset / maxScroll);
-        renderer.fillRoundRect(Rect{ inner.right - 6.0f, viewport.top, inner.right - 2.0f, viewport.bottom }, 2.0f,
+        renderer.fillRoundRect(Rect{ inner.right - 9.0f, viewport.top, inner.right - 5.0f, viewport.bottom }, 2.0f,
             theme.line.withAlpha(0.5f));
-        renderer.fillRoundRect(Rect{ inner.right - 6.0f, thumbTop, inner.right - 2.0f, thumbTop + thumbHeight }, 2.0f,
+        renderer.fillRoundRect(Rect{ inner.right - 9.0f, thumbTop, inner.right - 5.0f, thumbTop + thumbHeight }, 2.0f,
             theme.textFaint.withAlpha(0.7f));
     }
 
     renderer.text(L"ETW для кадров, PDH для счётчиков диспетчера задач, DXGI для видеопамяти, NVML для температур"
                   L" NVIDIA, ACPI-термозона для процессора. «—» — источник не отвечает на этом железе.",
-        Rect{ area.left, area.bottom - 24.0f, area.right, area.bottom }, TextRole::Tiny, theme.textFaint);
+        Rect{ inner.left, inner.bottom - 18.0f, inner.right - 14.0f, inner.bottom }, TextRole::Tiny,
+        theme.textFaint);
 }
 
 } // namespace yawa

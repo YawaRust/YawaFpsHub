@@ -196,6 +196,8 @@ void SystemSensors::sampleCpu(SystemSnapshot& snapshot)
         snapshot.cpuClockMhz = static_cast<double>(m_nominalCpuMhz) * percent / 100.0;
     }
 
+    sampleGameThread(snapshot);
+
     if (m_thermalZone.collect()) {
         double hottest = -1000.0;
         for (const auto& [name, value] : m_thermalZone.values()) {
@@ -211,6 +213,59 @@ void SystemSensors::sampleCpu(SystemSnapshot& snapshot)
             m_availability.cpuTemperature = true;
         }
     }
+}
+
+void SystemSensors::sampleGameThread(SystemSnapshot& snapshot)
+{
+    const HWND foreground = GetForegroundWindow();
+    if (foreground == nullptr) {
+        return;
+    }
+
+    DWORD processId = 0;
+    const DWORD threadId = GetWindowThreadProcessId(foreground, &processId);
+    if (threadId == 0 || processId == GetCurrentProcessId()) {
+        return;
+    }
+
+    HANDLE thread = OpenThread(THREAD_QUERY_LIMITED_INFORMATION, FALSE, threadId);
+    if (thread == nullptr) {
+        return;
+    }
+
+    FILETIME creation{};
+    FILETIME exit{};
+    FILETIME kernel{};
+    FILETIME user{};
+    LARGE_INTEGER counter{};
+    LARGE_INTEGER frequency{};
+    QueryPerformanceCounter(&counter);
+    QueryPerformanceFrequency(&frequency);
+
+    if (GetThreadTimes(thread, &creation, &exit, &kernel, &user)) {
+        const std::uint64_t ticks = fileTimeToTicks(kernel) + fileTimeToTicks(user);
+
+        // Первый замер только запоминает состояние: разницу считать ещё не от чего.
+        if (threadId == m_gameThreadId && ticks > m_gameThreadTicks && m_gameQueryTime != 0 && frequency.QuadPart > 0) {
+            const double seconds = static_cast<double>(counter.QuadPart - m_gameQueryTime)
+                / static_cast<double>(frequency.QuadPart);
+            if (seconds > 0.0) {
+                // 10 000 000 тиков FILETIME — секунда времени потока.
+                const double busy = static_cast<double>(ticks - m_gameThreadTicks) / 10000000.0;
+                snapshot.gameThreadLoad = std::clamp(busy / seconds * 100.0, 0.0, 100.0);
+                m_availability.gameThread = true;
+            }
+        }
+
+        if (threadId != m_gameThreadId) {
+            m_availability.gameThread = false;
+        }
+        m_gameThreadId = threadId;
+        m_gameThreadTicks = ticks;
+        m_gameQueryTime = static_cast<std::uint64_t>(counter.QuadPart);
+    }
+
+    CloseHandle(thread);
 }
 
 void SystemSensors::sampleMemory(SystemSnapshot& snapshot)
