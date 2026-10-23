@@ -673,9 +673,17 @@
   }
 
   function bindGpuPicker() {
+    const sync = () => {
+      const node = $("#activeGpuName");
+      if (node) node.textContent = window.Sim.gpuInfo().name;
+    };
+    sync();
+    window.Sim.subscribe(sync);
+
     $("#gpuSelect").addEventListener("change", (event) => {
       window.Sim.setGpu(Number(event.target.value));
       updateGpuHeader();
+      sync();
       if (lastSnapshot) {
         updateBars(lastSnapshot);
         drawCharts(lastSnapshot);

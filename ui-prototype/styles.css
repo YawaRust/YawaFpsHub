@@ -1666,20 +1666,32 @@ body.is-paused .tag--live { color: var(--warn); border-color: rgba(255, 179, 71,
   .style-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
-.sources { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+/* Две колонки по три источника, как в приложении: одна колонка из шести строк
+   не помещается в нижний ряд сетки настроек. */
+.sources {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 24px;
+  align-content: start;
+}
 
 .source {
   display: grid;
-  grid-template-columns: minmax(200px, 1.3fr) minmax(220px, 1.6fr) 108px minmax(160px, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "name state" "detail state";
   align-items: center;
-  gap: 14px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--line-soft);
+  gap: 2px 10px;
+  padding: 6px 0;
   font-size: 12px;
 }
+.source__name { grid-area: name; }
+.source__detail { grid-area: detail; }
+.source__state { grid-area: state; align-self: center; }
 
-.source:last-child { border-bottom: 0; }
-.source__name { color: var(--text); font-weight: 550; }
+.source__name { color: var(--text); font-weight: 550; font-size: 12px; }
 .source__detail { color: var(--text-faint); font-size: 11px; }
 
 .source__state {
