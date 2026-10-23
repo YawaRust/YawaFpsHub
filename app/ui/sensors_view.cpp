@@ -21,8 +21,8 @@ constexpr std::array<std::wstring_view, 7> kFilterNames{ L"Все", L"Кадры
     L"Диски и сеть", L"Система" };
 
 constexpr float kToolbarHeight = 36.0f;
-constexpr float kRowHeight = 26.0f;
-constexpr float kGroupHeight = 24.0f;
+constexpr float kRowHeight = 42.0f;
+constexpr float kGroupHeight = 34.0f;
 
 std::vector<Group> makeGroups(std::uint32_t cores)
 {
@@ -233,16 +233,16 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
     // Справа оставляем жёлоб под полосу прокрутки, иначе она наезжает на «глаз».
     const float sparkRight = inner.right - 46.0f;
 
-    renderer.text(L"Датчик", Rect{ nameX, inner.top, inner.left + width * 0.3f, inner.top + 14.0f }, TextRole::Tiny,
+    renderer.text(L"ДАТЧИК", Rect{ nameX, inner.top, inner.left + width * 0.3f, inner.top + 14.0f }, TextRole::Tiny,
         theme.textFaint);
     const std::array<std::pair<std::wstring_view, float>, 4> headers{
-        std::pair<std::wstring_view, float>{ L"Значение", valueRight }, { L"Мин", minRight },
-        { L"Среднее", avgRight }, { L"Макс", maxRight } };
+        std::pair<std::wstring_view, float>{ L"ЗНАЧЕНИЕ", valueRight }, { L"МИН", minRight },
+        { L"СРЕДНЕЕ", avgRight }, { L"МАКС", maxRight } };
     for (const auto& [title, right] : headers) {
         renderer.text(title, Rect{ right - 100.0f, inner.top, right, inner.top + 14.0f }, TextRole::Tiny,
             theme.textFaint, TextAlign::Right);
     }
-    renderer.text(L"60 с", Rect{ sparkLeft, inner.top, sparkRight, inner.top + 14.0f }, TextRole::Tiny,
+    renderer.text(L"60 С", Rect{ sparkLeft, inner.top, sparkRight, inner.top + 14.0f }, TextRole::Tiny,
         theme.textFaint, TextAlign::Right);
     renderer.drawLine(inner.left, inner.top + 20.0f, inner.right, inner.top + 20.0f, theme.line, 1.0f);
 
