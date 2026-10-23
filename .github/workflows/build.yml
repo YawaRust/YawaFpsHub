@@ -68,9 +68,14 @@ jobs:
       - name: Прогон с ETW
         shell: pwsh
         run: |
-          & .\build\tools\probe\Release\yawa-probe.exe --seconds 3 --interval 1000
-          if ($LASTEXITCODE -ne 0) { throw "yawa-probe завершился с кодом $LASTEXITCODE" }
-          Get-Content .\build\tools\probe\Release\yawa-probe.log
+          $output = & .\build\tools\probe\Release\yawa-probe.exe --seconds 3 --interval 1000 2>&1
+          $code = $LASTEXITCODE
+          foreach ($line in $output) {
+            if ("$line".Trim().Length -eq 0) { continue }
+            Write-Host $line
+            Write-Output "::notice title=yawa-probe::$line"
+          }
+          if ($code -ne 0) { throw "yawa-probe завершился с кодом $code" }
 
       - name: Артефакт
         uses: actions/upload-artifact@v4
