@@ -113,7 +113,7 @@ void drawProcessorCard(Renderer& renderer, const AppModel& model, const Theme& t
                      + (model.availability.cpuClock ? "частота есть" : "частота недоступна")),
         Rect{ inner.left, inner.top + 20.0f, inner.right, inner.top + 38.0f }, TextRole::Tiny, theme.textFaint);
 
-    const float load = model.store.value(MetricId::CpuLoad);
+    const float load = static_cast<float>(model.store.value(MetricId::CpuLoad));
     const float radius = 30.0f;
     const float centerX = inner.left + radius + 8.0f;
     const float centerY = inner.top + 84.0f;
@@ -159,7 +159,7 @@ void drawGraphicsCard(Renderer& renderer, const AppModel& model, const Theme& th
         hits.push_back(UiHit{ picker, ActionKind::CycleGpu, 0 });
     }
 
-    const float load = model.store.value(MetricId::GpuLoad);
+    const float load = static_cast<float>(model.store.value(MetricId::GpuLoad));
     const float radius = 30.0f;
     const float centerX = inner.left + radius + 8.0f;
     const float centerY = inner.top + 84.0f;
@@ -182,7 +182,7 @@ void drawGraphicsCard(Renderer& renderer, const AppModel& model, const Theme& th
         top += 26.0f;
     }
 
-    const float vramTotal = std::max(model.store.value(MetricId::VramTotal), 0.001);
+    const float vramTotal = std::max(static_cast<float>(model.store.value(MetricId::VramTotal)), 0.001f);
     const float used = static_cast<float>(model.store.value(MetricId::VramUsed) / vramTotal);
 
     renderer.text(L"Видеопамять", Rect{ inner.left, inner.bottom - 34.0f, inner.left + 120.0f, inner.bottom - 16.0f },
