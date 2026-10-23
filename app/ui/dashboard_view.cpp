@@ -61,9 +61,9 @@ void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
         renderer.drawDashedLine(chart.left, y, chart.right, y, theme.lineStrong, 1.0f);
     }
 
-    renderer.drawSeries(ChartSeries{ model.historyScratch, count, theme.accent.withAlpha(0.16f), true }, chart, 0.0f,
+    renderer.drawSeries(ChartSeries{ model.historyScratch.data(), count, theme.accent.withAlpha(0.16f), true }, chart, 0.0f,
         maximum, 1.0f);
-    renderer.drawSeries(ChartSeries{ model.historyScratch, count, theme.accent, false }, chart, 0.0f, maximum, 1.6f);
+    renderer.drawSeries(ChartSeries{ model.historyScratch.data(), count, theme.accent, false }, chart, 0.0f, maximum, 1.6f);
 }
 
 void drawSessionCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card)
@@ -278,7 +278,7 @@ void drawPerformanceCard(Renderer& renderer, const AppModel& model, const Theme&
             }
         }
 
-        renderer.drawSeries(ChartSeries{ model.historyScratch, count, colors[index], false }, chart, 0.0f, 100.0f,
+        renderer.drawSeries(ChartSeries{ model.historyScratch.data(), count, colors[index], false }, chart, 0.0f, 100.0f,
             1.5f);
     }
 }
@@ -308,7 +308,7 @@ void drawIoCard(Renderer& renderer, const AppModel& model, const Theme& theme, c
             maximum = std::max(maximum, model.historyScratch[index]);
         }
 
-        renderer.drawSeries(ChartSeries{ model.historyScratch, count, theme.disk.withAlpha(0.85f), false },
+        renderer.drawSeries(ChartSeries{ model.historyScratch.data(), count, theme.disk.withAlpha(0.85f), false },
             Rect{ inner.left, top + 18.0f, inner.right, top + rowHeight - 8.0f }, 0.0f, maximum * 1.15f, 1.2f);
         top += rowHeight;
     }

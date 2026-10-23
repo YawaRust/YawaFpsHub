@@ -1,6 +1,7 @@
 #include "ui/settings_view.h"
 #include "ui/layout.h"
 
+#include <algorithm>
 #include <array>
 #include <string>
 
