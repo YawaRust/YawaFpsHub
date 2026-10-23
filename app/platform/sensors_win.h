@@ -87,6 +87,8 @@ private:
     double m_wmiTemperature = 0.0;
     std::uint64_t m_wmiQueriedAt = 0;
     bool m_wmiAvailable = false;
+    // WMI недоступен на этой машине: не повторяем дорогой запрос каждые 15 секунд.
+    bool m_wmiFailed = false;
     double m_gpuLoad = 0.0;
 
     // Поток игры: главный поток активного окна. Считаем по разнице времён, как диспетчер задач.

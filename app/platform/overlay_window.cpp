@@ -272,8 +272,10 @@ void OverlayWindow::updateDrag(int screenX, int screenY)
     }
     // Смещение задаётся в экранных пикселях от выбранного угла: двигаем ровно на столько,
     // на сколько уехал курсор, без множителей масштаба.
-    m_settings.offsetX = std::clamp(m_dragOffsetX + (screenX - m_dragOrigin.x), -2000, 2000);
-    m_settings.offsetY = std::clamp(m_dragOffsetY + (screenY - m_dragOrigin.y), -2000, 2000);
+    const int deltaX = screenX - static_cast<int>(m_dragOrigin.x);
+    const int deltaY = screenY - static_cast<int>(m_dragOrigin.y);
+    m_settings.offsetX = std::clamp(m_dragOffsetX + deltaX, -2000, 2000);
+    m_settings.offsetY = std::clamp(m_dragOffsetY + deltaY, -2000, 2000);
     repaint();
     if (m_onMove) {
         m_onMove(m_settings.offsetX, m_settings.offsetY, false);
