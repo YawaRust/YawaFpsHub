@@ -14,6 +14,8 @@ namespace yawa {
 // Значения сняты с демо при ширине кадра 1044 px (см. demo-<view>-tall.png в CI).
 constexpr float kDashboardHeight = 2539.0f;
 constexpr float kSettingsHeight = 1852.0f;
+// Датчики: строка поиска и карточка таблицы — как в демо (732 px на таблицу).
+constexpr float kSensorsHeight = 790.0f;
 
 constexpr float kCardRadius = 20.0f;
 constexpr float kGap = 14.0f;

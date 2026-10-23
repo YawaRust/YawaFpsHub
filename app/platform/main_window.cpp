@@ -706,7 +706,7 @@ float MainWindow::contentDesignHeight() const
     case View::Dashboard:
         return kDashboardHeight;
     case View::Sensors:
-        return contentArea().height();
+        return kSensorsHeight;
     case View::Overlay:
         return contentArea().height();
     case View::Settings:
