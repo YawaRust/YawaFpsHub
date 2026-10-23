@@ -1,6 +1,8 @@
 #include "platform/main_window.h"
 #include "platform/app_paths.h"
+#include "platform/win_util.h"
 #include "ui/chrome.h"
+#include "ui/overlay_view.h"
 #include "ui/dashboard_view.h"
 #include "ui/layout.h"
 #include "ui/sensors_view.h"
@@ -118,6 +120,7 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
     if (!m_overlay.create(instance, overlayError)) {
         log.warning("оверлей: " + overlayError);
     } else {
+        m_overlay.setAccent(m_model.settings.ui.accent);
         m_overlay.setSettings(m_model.settings.overlay);
     }
 
@@ -268,25 +271,63 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     case WM_LBUTTONDOWN: {
         const float x = static_cast<float>(GET_X_LPARAM(lParam)) / m_dpiScale;
         const float y = static_cast<float>(GET_Y_LPARAM(lParam)) / m_dpiScale;
+
+        for (const UiHit& hit : m_hits) {
+            if (!hit.rect.contains(x, y)) {
+                continue;
+            }
+            if (hit.action == ActionKind::SetScale || hit.action == ActionKind::SetOpacity) {
+                m_dragAction = hit.action;
+                m_dragRect = hit.rect;
+                SetCapture(m_window);
+                applySlider(hit.action, hit.rect, x);
+                return 0;
+            }
+        }
+
         handleClick(x, y);
         return 0;
     }
 
+    case WM_MOUSEMOVE:
+        if (m_dragAction != ActionKind::None) {
+            dragSlider(static_cast<float>(GET_X_LPARAM(lParam)) / m_dpiScale);
+            return 0;
+        }
+        break;
+
+    case WM_LBUTTONUP:
+        if (m_dragAction != ActionKind::None) {
+            m_dragAction = ActionKind::None;
+            ReleaseCapture();
+            saveSettings();
+            return 0;
+        }
+        break;
+
     case WM_CHAR: {
+        // WM_CHAR приходит уже в UTF-16 после раскладки и IME, поэтому кириллица
+        // и любые другие языки ввода работают без отдельных обработчиков.
         if (m_model.editingLabel >= 0) {
             const auto index = static_cast<std::size_t>(m_model.editingLabel);
-            LabelField field = static_cast<LabelField>(index);
-            std::string value = labelValue(m_model.settings.overlay, field);
+            const LabelField field = static_cast<LabelField>(index);
+            std::wstring current = wideText(labelValue(m_model.settings.overlay, field));
 
-            if (wParam == VK_BACK && !value.empty()) {
-                value.pop_back();
-                setLabel(m_model.settings.overlay, field, value.empty() ? " " : value);
-            } else if (wParam == VK_RETURN || wParam == VK_ESCAPE) {
+            if (wParam == L'\b') {
+                if (!current.empty()) {
+                    current.pop_back();
+                    setLabel(m_model.settings.overlay, field, narrow(current));
+                }
+            } else if (wParam == VK_ESCAPE) {
+                setLabel(m_model.settings.overlay, field, m_labelBackup);
                 m_model.editingLabel = -1;
                 saveSettings();
-            } else if (wParam >= 32 && wParam < 127 && value.size() < 10) {
-                value.push_back(static_cast<char>(wParam));
-                setLabel(m_model.settings.overlay, field, value);
+            } else if (wParam == VK_RETURN) {
+                m_model.editingLabel = -1;
+                saveSettings();
+            } else if (wParam >= 32 && wParam != 127) {
+                current.push_back(static_cast<wchar_t>(wParam));
+                setLabel(m_model.settings.overlay, field, narrow(current));
             }
 
             m_overlay.setSettings(m_model.settings.overlay);
@@ -294,14 +335,6 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         }
         return 0;
     }
-
-    case kExportMessage:
-        exportOverlayStyles();
-        return 0;
-
-    case kTickMessage:
-        onTick();
-        return 0;
 
     case WM_HOTKEY:
         if (wParam == kHotkeyOverlay) {
@@ -365,15 +398,14 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
 
 Rect MainWindow::contentArea() const
 {
-    const float top = kTitleBarHeight + kTabBarHeight + 12.0f;
+    const float top = kTopBarHeight + 4.0f;
     const float bottom = m_renderer.height() - kStatusBarHeight - 12.0f;
-    return Rect{ 18.0f, top, m_renderer.width() - 18.0f, bottom };
+    return Rect{ kRailWidth + 24.0f, top, m_renderer.width() - 24.0f, bottom };
 }
 
 std::vector<UiHit> MainWindow::buildHits()
 {
     std::vector<UiHit> hits;
-    drawTabs(m_renderer, m_model, m_theme, hits);
 
     const Rect area = contentArea();
     switch (m_model.view) {
@@ -382,6 +414,9 @@ std::vector<UiHit> MainWindow::buildHits()
         break;
     case View::Sensors:
         drawSensors(m_renderer, m_model, m_theme, area, hits);
+        break;
+    case View::Overlay:
+        drawOverlayView(m_renderer, m_model, m_theme, area, hits);
         break;
     case View::Settings:
         drawSettings(m_renderer, m_model, m_theme, area, hits);
@@ -398,10 +433,11 @@ void MainWindow::paint()
 
     // Снимок модели снимается под мьютексом: сборщик пишет в него с другого потока.
     std::lock_guard<std::mutex> guard(m_modelMutex);
-    m_renderer.clear(m_theme.background);
 
+    m_renderer.clear(m_theme.background);
     m_hits = buildHits();
-    drawTitleBar(m_renderer, m_model, m_theme, m_hits);
+    drawRail(m_renderer, m_model, m_theme, m_hits);
+    drawTopBar(m_renderer, m_model, m_theme, m_hits);
     drawStatusBar(m_renderer, m_model, m_theme);
 
     m_renderer.end();
@@ -422,6 +458,31 @@ void MainWindow::handleClick(float x, float y)
         return;
     }
 
+    InvalidateRect(m_window, nullptr, FALSE);
+}
+
+void MainWindow::dragSlider(float x)
+{
+    applySlider(m_dragAction, m_dragRect, x);
+}
+
+void MainWindow::applySlider(ActionKind action, const Rect& rect, float x)
+{
+    if (rect.width() <= 0.0f) {
+        return;
+    }
+
+    const float fraction = std::clamp((x - rect.left) / rect.width(), 0.0f, 1.0f);
+    UiHit hit{ rect, action, 0 };
+
+    if (action == ActionKind::SetScale) {
+        // Шаг 5 %: значения остаются ровными и хорошо читаются в ini.
+        hit.value = 70 + static_cast<int>(std::lround(fraction * 90.0f / 5.0f)) * 5;
+    } else {
+        hit.value = static_cast<int>(std::lround(fraction * 100.0f));
+    }
+
+    applyAction(hit);
     InvalidateRect(m_window, nullptr, FALSE);
 }
 
@@ -466,6 +527,7 @@ void MainWindow::applyAction(const UiHit& hit)
     case ActionKind::SetAccent:
         m_model.settings.ui.accent = static_cast<Accent>(hit.value);
         m_theme = makeTheme(m_model.settings.ui.accent);
+        m_overlay.setAccent(m_model.settings.ui.accent);
         saveSettings();
         break;
 
@@ -489,6 +551,7 @@ void MainWindow::applyAction(const UiHit& hit)
 
     case ActionKind::SelectLabel:
         m_model.editingLabel = hit.value;
+        m_labelBackup = labelValue(m_model.settings.overlay, static_cast<LabelField>(hit.value));
         break;
 
     case ActionKind::ResetLabels:
@@ -509,6 +572,38 @@ void MainWindow::applyAction(const UiHit& hit)
     case ActionKind::ResetSettings:
         m_model.settings = defaultSettings();
         m_theme = makeTheme(m_model.settings.ui.accent);
+        m_overlay.setAccent(m_model.settings.ui.accent);
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
+    case ActionKind::SetScale:
+        m_model.settings.overlay.scalePercent = std::clamp(hit.value, 70, 160);
+        m_overlay.setSettings(m_model.settings.overlay);
+        break;
+
+    case ActionKind::SetOpacity:
+        m_model.settings.overlay.opacityPercent = std::clamp(hit.value, 0, 100);
+        m_overlay.setSettings(m_model.settings.overlay);
+        break;
+
+    case ActionKind::ToggleMetric:
+        if (hit.value >= 0 && hit.value < static_cast<int>(kLabelCount)) {
+            auto& visible = m_model.settings.overlay.visible[static_cast<std::size_t>(hit.value)];
+            visible = !visible;
+            m_overlay.setSettings(m_model.settings.overlay);
+            saveSettings();
+        }
+        break;
+
+    case ActionKind::OffsetX:
+        m_model.settings.overlay.offsetX = std::clamp(m_model.settings.overlay.offsetX + hit.value, -400, 400);
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
+    case ActionKind::OffsetY:
+        m_model.settings.overlay.offsetY = std::clamp(m_model.settings.overlay.offsetY + hit.value, -400, 400);
         m_overlay.setSettings(m_model.settings.overlay);
         saveSettings();
         break;

@@ -16,6 +16,7 @@
 #include <condition_variable>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -46,6 +47,8 @@ private:
     void onTick();
     void paint();
     void handleClick(float x, float y);
+    void dragSlider(float x);
+    void applySlider(ActionKind action, const Rect& rect, float x);
     void applyAction(const UiHit& hit);
     void saveSettings();
 
@@ -71,6 +74,9 @@ private:
     AppModel m_model;
     Theme m_theme = makeTheme(Accent::Mint);
     std::vector<UiHit> m_hits;
+    ActionKind m_dragAction = ActionKind::None;
+    Rect m_dragRect;
+    std::string m_labelBackup;
 
     std::thread m_worker;
     std::condition_variable m_wake;

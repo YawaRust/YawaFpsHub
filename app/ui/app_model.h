@@ -14,7 +14,7 @@
 
 namespace yawa {
 
-enum class View : std::uint8_t { Dashboard, Sensors, Settings };
+enum class View : std::uint8_t { Dashboard, Sensors, Overlay, Settings };
 enum class ActionKind : std::uint8_t {
     None,
     SwitchView,
@@ -26,6 +26,11 @@ enum class ActionKind : std::uint8_t {
     CycleGpu,
     ToggleOverlay,
     TogglePause,
+    SetScale,
+    SetOpacity,
+    ToggleMetric,
+    OffsetX,
+    OffsetY,
     SelectLabel,
     ResetLabels,
     ToggleCompact,

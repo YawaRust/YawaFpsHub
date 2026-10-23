@@ -73,9 +73,16 @@ std::int32_t parseInt32(std::string_view text, std::int32_t fallback)
 std::string sanitizeLabel(std::string_view text)
 {
     std::string result(trim(text));
-    if (result.size() > kMaxLabelLength) {
-        result.resize(kMaxLabelLength);
+    // Лимит считается по символам UTF-8, иначе кириллица обрезалась бы вдвое раньше:
+    // «КАДРЫ» — это 10 байт, но всего 5 символов.
+    std::size_t characters = 0;
+    std::size_t cut = 0;
+    while (cut < result.size() && characters < kMaxLabelLength) {
+        const auto byte = static_cast<unsigned char>(result[cut]);
+        cut += (byte & 0xC0) == 0x80 ? 1 : (byte >= 0xF0 ? 4 : (byte >= 0xE0 ? 3 : (byte >= 0xC0 ? 2 : 1)));
+        ++characters;
     }
+    result.resize(std::min(cut, result.size()));
     return result;
 }
 
@@ -110,10 +117,8 @@ const std::string& labelValue(const OverlaySettings& overlay, LabelField field)
 
 void setLabel(OverlaySettings& overlay, LabelField field, std::string value)
 {
-    const std::string cleaned = sanitizeLabel(value);
-    if (!cleaned.empty()) {
-        overlay.labels[static_cast<std::size_t>(field)] = cleaned;
-    }
+    // Пустая строка допустима: так пользователь стирает подпись целиком и вводит новую.
+    overlay.labels[static_cast<std::size_t>(field)] = sanitizeLabel(value);
 }
 
 std::string_view overlayStyleKey(OverlayStyle style)
@@ -293,6 +298,17 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                     kMinScale, kMaxScale);
             } else if (key == "opacity") {
                 target.overlay.opacityPercent = std::clamp(parseInt(value, target.overlay.opacityPercent), 0, 100);
+            } else if (key == "offset_x") {
+                target.overlay.offsetX = std::clamp(parseInt(value, target.overlay.offsetX), -400, 400);
+            } else if (key == "offset_y") {
+                target.overlay.offsetY = std::clamp(parseInt(value, target.overlay.offsetY), -400, 400);
+            } else if (key.size() > 5 && key.substr(0, 5) == "show_") {
+                for (std::size_t index = 0; index < kLabelCount; ++index) {
+                    const auto field = static_cast<LabelField>(index);
+                    if (key.substr(5) == labelKey(field)) {
+                        target.overlay.visible[index] = parseBool(value, target.overlay.visible[index]);
+                    }
+                }
             }
         } else if (section == "labels") {
             for (std::size_t index = 0; index < kLabelCount; ++index) {
@@ -347,7 +363,15 @@ std::string serializeSettings(const Settings& settings)
     text += "layout = " + std::string(overlayLayoutKey(settings.overlay.layout)) + "\n";
     text += "style = " + std::string(overlayStyleKey(settings.overlay.style)) + "\n";
     text += "scale = " + std::to_string(settings.overlay.scalePercent) + "\n";
-    text += "opacity = " + std::to_string(settings.overlay.opacityPercent) + "\n\n";
+    text += "opacity = " + std::to_string(settings.overlay.opacityPercent) + "\n";
+    text += "offset_x = " + std::to_string(settings.overlay.offsetX) + "\n";
+    text += "offset_y = " + std::to_string(settings.overlay.offsetY) + "\n";
+    for (std::size_t index = 0; index < kLabelCount; ++index) {
+        const auto field = static_cast<LabelField>(index);
+        text += std::string("show_") + std::string(labelKey(field)) + " = "
+            + (settings.overlay.visible[index] ? "1" : "0") + "\n";
+    }
+    text += "\n";
 
     text += "[labels]\n";
     for (std::size_t index = 0; index < kLabelCount; ++index) {

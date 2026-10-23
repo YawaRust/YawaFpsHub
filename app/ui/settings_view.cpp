@@ -8,8 +8,6 @@
 namespace yawa {
 namespace {
 
-constexpr std::array<std::wstring_view, 5> kStyleNames{ L"Стекло", L"Неон", L"Капсулы", L"Терминал", L"Минимал" };
-constexpr std::array<std::wstring_view, 4> kPositionNames{ L"↖", L"↗", L"↙", L"↘" };
 constexpr std::array<int, 3> kIntervals{ 500, 1000, 2000 };
 constexpr std::array<int, 4> kTargets{ 60, 120, 144, 165 };
 constexpr std::array<LabelField, 5> kLabelFields{ LabelField::Fps, LabelField::Cpu, LabelField::Gpu,
@@ -59,60 +57,31 @@ Rect chipRow(float left, float top, float width, float height)
     return Rect{ left, top, left + width, top + height };
 }
 
-void drawOverlayCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card,
+void drawCaptureCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card,
     std::vector<UiHit>& hits)
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
-    drawSectionHeader(renderer, inner, L"Оверлей", L"стиль виден сразу в игре, F10 — показать или скрыть", theme);
+    drawSectionHeader(renderer, inner, L"Сбор данных",
+        L"интервал опроса и цель кадра влияют на графики и бюджет", theme);
 
-    float top = inner.top + 46.0f;
-    const float tileWidth = (inner.width() - 4.0f * 8.0f) / 5.0f;
-    for (std::size_t index = 0; index < kStyleNames.size(); ++index) {
-        const Rect tile = chipRow(inner.left + static_cast<float>(index) * (tileWidth + 8.0f), top, tileWidth,
-            30.0f);
-        drawChip(renderer, tile, kStyleNames[index],
-            static_cast<std::size_t>(model.settings.overlay.style) == index, theme);
-        hits.push_back(UiHit{ tile, ActionKind::SetStyle, static_cast<int>(index) });
-    }
-
-    top += 42.0f;
-    renderer.text(L"Положение", Rect{ inner.left, top, inner.left + 90.0f, top + 20.0f }, TextRole::Small,
-        theme.textFaint);
-    for (std::size_t index = 0; index < kPositionNames.size(); ++index) {
-        const Rect button{ inner.left + 96.0f + static_cast<float>(index) * 38.0f, top, inner.left + 128.0f
-                + static_cast<float>(index) * 38.0f, top + 24.0f };
-        drawChip(renderer, button, kPositionNames[index],
-            static_cast<std::size_t>(model.settings.overlay.position) == index, theme);
-        hits.push_back(UiHit{ button, ActionKind::SetPosition, static_cast<int>(index) });
-    }
-
-    renderer.text(L"Вид", Rect{ inner.left + 276.0f, top, inner.left + 306.0f, top + 20.0f }, TextRole::Small,
-        theme.textFaint);
-    const Rect plates{ inner.left + 312.0f, top, inner.left + 386.0f, top + 24.0f };
-    const Rect line{ inner.left + 392.0f, top, inner.left + 452.0f, top + 24.0f };
-    drawChip(renderer, plates, L"Плитки", model.settings.overlay.layout == OverlayLayout::Plates, theme);
-    drawChip(renderer, line, L"Строка", model.settings.overlay.layout == OverlayLayout::Line, theme);
-    hits.push_back(UiHit{ plates, ActionKind::SetLayout, static_cast<int>(OverlayLayout::Plates) });
-    hits.push_back(UiHit{ line, ActionKind::SetLayout, static_cast<int>(OverlayLayout::Line) });
-
-    top += 40.0f;
-    renderer.text(L"Интервал опроса", Rect{ inner.left, top, inner.left + 100.0f, top + 20.0f }, TextRole::Small,
-        theme.textFaint);
+    float top = inner.top + 50.0f;
+    renderer.text(L"Интервал опроса", Rect{ inner.left, top, inner.left + 120.0f, top + 18.0f }, TextRole::Small,
+        theme.textDim);
     for (std::size_t index = 0; index < kIntervals.size(); ++index) {
-        const Rect button{ inner.left + 104.0f + static_cast<float>(index) * 82.0f, top, inner.left + 180.0f
-                + static_cast<float>(index) * 82.0f, top + 24.0f };
+        const Rect button{ inner.left + 124.0f + static_cast<float>(index) * 82.0f, top - 4.0f,
+            inner.left + 200.0f + static_cast<float>(index) * 82.0f, top + 22.0f };
         drawChip(renderer, button, wideText(std::to_string(kIntervals[index]) + " мс"),
             model.settings.capture.intervalMs == kIntervals[index], theme);
         hits.push_back(UiHit{ button, ActionKind::SetInterval, kIntervals[index] });
     }
 
-    top += 36.0f;
-    renderer.text(L"Цель кадра", Rect{ inner.left, top, inner.left + 100.0f, top + 20.0f }, TextRole::Small,
-        theme.textFaint);
+    top += 44.0f;
+    renderer.text(L"Цель кадра", Rect{ inner.left, top, inner.left + 120.0f, top + 18.0f }, TextRole::Small,
+        theme.textDim);
     for (std::size_t index = 0; index < kTargets.size(); ++index) {
-        const Rect button{ inner.left + 104.0f + static_cast<float>(index) * 60.0f, top, inner.left + 158.0f
-                + static_cast<float>(index) * 60.0f, top + 24.0f };
+        const Rect button{ inner.left + 124.0f + static_cast<float>(index) * 64.0f, top - 4.0f,
+            inner.left + 182.0f + static_cast<float>(index) * 64.0f, top + 22.0f };
         drawChip(renderer, button, wideText(std::to_string(kTargets[index]) + " Гц"),
             model.settings.capture.targetHz == kTargets[index], theme);
         hits.push_back(UiHit{ button, ActionKind::SetInterval, kTargets[index] });
@@ -124,7 +93,8 @@ void drawLabelsCard(Renderer& renderer, const AppModel& model, const Theme& them
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
-    drawSectionHeader(renderer, inner, L"Подписи полей", L"нажмите, чтобы изменить, Enter — сохранить", theme);
+    drawSectionHeader(renderer, inner, L"Подписи полей",
+        L"нажмите, чтобы изменить · Enter — сохранить · Esc — отменить · Backspace — стереть", theme);
 
     float top = inner.top + 46.0f;
     for (std::size_t index = 0; index < kLabelFields.size(); ++index) {
@@ -224,12 +194,14 @@ void drawSettings(Renderer& renderer, const AppModel& model, const Theme& theme,
     const Rect left{ area.left, area.top, area.left + leftWidth - kGap, area.bottom };
     const Rect right{ left.right + kGap, area.top, area.right, area.bottom };
 
-    const float overlayHeight = 232.0f;
-    drawOverlayCard(renderer, model, theme, Rect{ left.left, left.top, left.right, left.top + overlayHeight }, hits);
+    // Стиль, положение и масштаб оверлея живут на его собственном экране,
+    // здесь остаются подписи, выбор GPU и портативность.
+    const float captureHeight = 172.0f;
+    drawCaptureCard(renderer, model, theme, Rect{ left.left, left.top, left.right, left.top + captureHeight }, hits);
     drawPortableCard(renderer, model, theme,
-        Rect{ left.left, left.top + overlayHeight + kGap, left.right, left.bottom }, hits);
+        Rect{ left.left, left.top + captureHeight + kGap, left.right, left.bottom }, hits);
 
-    const float labelsHeight = std::clamp(area.height() * 0.55f, 230.0f, 280.0f);
+    const float labelsHeight = std::clamp(area.height() * 0.52f, 230.0f, 280.0f);
     drawLabelsCard(renderer, model, theme, Rect{ right.left, right.top, right.right, right.top + labelsHeight }, hits);
     drawGpuCard(renderer, model, theme,
         Rect{ right.left, right.top + labelsHeight + kGap, right.right, right.bottom }, hits);

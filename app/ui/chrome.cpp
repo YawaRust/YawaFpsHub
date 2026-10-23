@@ -2,23 +2,76 @@
 #include "ui/layout.h"
 
 #include <array>
+#include <cstdint>
+#include <iterator>
 
 namespace yawa {
 namespace {
 
-constexpr std::array<std::wstring_view, 3> kTabNames{ L"Обзор", L"Датчики", L"Настройки" };
-constexpr std::array<View, 3> kTabViews{ View::Dashboard, View::Sensors, View::Settings };
+constexpr std::array<std::wstring_view, 4> kTabNames{ L"Обзор", L"Датчики", L"Оверлей", L"Настройки" };
+constexpr std::array<View, 4> kTabViews{ View::Dashboard, View::Sensors, View::Overlay, View::Settings };
+
+void drawGridIcon(Renderer& renderer, const Rect& box, const Color& color)
+{
+    const float size = 7.0f;
+    const float gap = 3.0f;
+    const float left = box.centerX() - size - gap * 0.5f;
+    const float top = box.centerY() - size - gap * 0.5f;
+    for (int row = 0; row < 2; ++row) {
+        for (int column = 0; column < 2; ++column) {
+            const float x = left + static_cast<float>(column) * (size + gap);
+            const float y = top + static_cast<float>(row) * (size + gap);
+            renderer.fillRoundRect(Rect{ x, y, x + size, y + size }, 2.0f, color);
+        }
+    }
+}
+
+void drawPulseIcon(Renderer& renderer, const Rect& box, const Color& color)
+{
+    const float y = box.centerY();
+    const float left = box.centerX() - 10.0f;
+    const float points[] = { 0.0f, 0.0f, 4.0f, 0.0f, 6.5f, -6.0f, 10.0f, 6.0f, 13.0f, -2.0f, 16.0f, 0.0f, 20.0f, 0.0f };
+    for (std::size_t index = 2; index + 1 < std::size(points); index += 2) {
+        renderer.drawLine(left + points[index - 2], y + points[index - 1], left + points[index],
+            y + points[index + 1], color, 1.6f);
+    }
+}
+
+void drawLayersIcon(Renderer& renderer, const Rect& box, const Color& color)
+{
+    const float width = 16.0f;
+    const float height = 6.0f;
+    const float left = box.centerX() - width * 0.5f;
+    renderer.strokeRoundRect(Rect{ left, box.centerY() - 9.0f, left + width, box.centerY() - 3.0f }, 2.0f, color, 1.4f);
+    renderer.strokeRoundRect(Rect{ left, box.centerY() - 3.0f, left + width, box.centerY() + 3.0f }, 2.0f, color, 1.4f);
+    renderer.strokeRoundRect(Rect{ left, box.centerY() + 3.0f, left + width, box.centerY() + 9.0f }, 2.0f, color, 1.4f);
+    (void)height;
+}
+
+void drawSlidersIcon(Renderer& renderer, const Rect& box, const Color& color)
+{
+    const float left = box.centerX() - 9.0f;
+    const float right = box.centerX() + 9.0f;
+    for (int row = 0; row < 3; ++row) {
+        const float y = box.centerY() - 6.0f + static_cast<float>(row) * 6.0f;
+        renderer.drawLine(left, y, right, y, color, 1.3f);
+        const float knobX = left + 4.0f + static_cast<float>(row) * 4.0f;
+        renderer.fillCircle(knobX, y, 2.2f, color);
+    }
+}
 
 void drawBrand(Renderer& renderer, const Theme& theme)
 {
-    const Rect badge{ 18.0f, 10.0f, 44.0f, 36.0f };
-    renderer.fillRoundRect(badge, 9.0f, theme.accentSoft);
-    renderer.strokeRoundRect(badge, 9.0f, theme.accentGlow, 1.0f);
-    renderer.text(L"Y", badge, TextRole::Heading, theme.accent, TextAlign::Center);
+    const Rect badge{ 16.0f, 16.0f, 52.0f, 52.0f };
+    renderer.fillRoundRect(badge, 12.0f, theme.accentSoft);
+    renderer.strokeRoundRect(badge, 12.0f, theme.accentGlow, 1.0f);
+    renderer.text(L"Y", badge, TextRole::Value, theme.accent, TextAlign::Center);
+}
 
-    renderer.text(L"YawaFpsHub", Rect{ 54.0f, 8.0f, 260.0f, 26.0f }, TextRole::Heading, theme.text);
-    renderer.text(L"мониторинг кадров и системы", Rect{ 54.0f, 24.0f, 300.0f, 40.0f }, TextRole::Tiny,
-        theme.textFaint);
+void drawChip(Renderer& renderer, const Rect& rect, std::wstring_view label, const Theme& theme, bool active)
+{
+    renderer.fillRoundRect(rect, 10.0f, active ? theme.accentSoft : theme.panelSoft);
+    renderer.text(label, rect, TextRole::Tiny, active ? theme.accent : theme.textDim, TextAlign::Center);
 }
 
 } // namespace
@@ -30,29 +83,88 @@ std::string_view viewTitle(View view)
         return "Обзор";
     case View::Sensors:
         return "Все датчики";
+    case View::Overlay:
+        return "Оверлей";
     case View::Settings:
         return "Настройки";
     }
     return "Обзор";
 }
 
-void drawTitleBar(Renderer& renderer, const AppModel& model, const Theme& theme, std::vector<UiHit>& hits)
+std::string_view viewEyebrow(View view)
 {
-    renderer.fillRect(Rect{ 0.0f, 0.0f, renderer.width(), kTitleBarHeight }, theme.panel.withAlpha(0.55f));
-    renderer.drawLine(0.0f, kTitleBarHeight - 1.0f, renderer.width(), kTitleBarHeight - 1.0f, theme.line, 1.0f);
+    switch (view) {
+    case View::Dashboard:
+        return "МОНИТОРИНГ";
+    case View::Sensors:
+        return "ДАТЧИКИ";
+    case View::Overlay:
+        return "НАЛОЖЕНИЕ ПОВЕРХ ИГРЫ";
+    case View::Settings:
+        return "ПРИЛОЖЕНИЕ";
+    }
+    return "МОНИТОРИНГ";
+}
+
+void drawRail(Renderer& renderer, const AppModel& model, const Theme& theme, std::vector<UiHit>& hits)
+{
+    renderer.fillRect(Rect{ 0.0f, 0.0f, kRailWidth, renderer.height() }, theme.panel.withAlpha(0.85f));
+    renderer.drawLine(kRailWidth - 1.0f, 0.0f, kRailWidth - 1.0f, renderer.height(), theme.line, 1.0f);
 
     drawBrand(renderer, theme);
 
-    // Правая часть шапки собирается справа налево: так кнопки не разъезжаются
-    // при длинных подписях и любом масштабе.
-    const float top = 13.0f;
-    const float bottom = 33.0f;
-    float right = renderer.width() - 14.0f;
+    float top = 96.0f;
+    for (std::size_t index = 0; index < kTabNames.size(); ++index) {
+        const Rect button{ 12.0f, top, kRailWidth - 12.0f, top + 44.0f };
+        const bool isActive = kTabViews[index] == model.view;
+        renderer.fillRoundRect(button, 12.0f, isActive ? theme.accentSoft : theme.panelSoft.withAlpha(0.6f));
+        if (isActive) {
+            renderer.strokeRoundRect(button, 12.0f, theme.accentGlow, 1.0f);
+        }
 
-    const Rect pause{ right - 82.0f, top, right, bottom };
-    renderer.fillRoundRect(pause, 10.0f, theme.panelSoft);
-    renderer.text(model.paused ? L"Продолжить" : L"Пауза", pause, TextRole::Tiny,
-        model.paused ? theme.warn : theme.textDim, TextAlign::Center);
+        const Color icon = isActive ? theme.accent : theme.textFaint;
+        switch (kTabViews[index]) {
+        case View::Dashboard:
+            drawGridIcon(renderer, button, icon);
+            break;
+        case View::Sensors:
+            drawPulseIcon(renderer, button, icon);
+            break;
+        case View::Overlay:
+            drawLayersIcon(renderer, button, icon);
+            break;
+        case View::Settings:
+            drawSlidersIcon(renderer, button, icon);
+            break;
+        }
+
+        hits.push_back(UiHit{ button, ActionKind::SwitchView, static_cast<int>(kTabViews[index]) });
+        top += 54.0f;
+    }
+
+    renderer.fillCircle(24.0f, renderer.height() - 54.0f, 3.0f,
+        model.etwRunning ? theme.accent : theme.textFaint);
+    renderer.text(L"v0.4", Rect{ 14.0f, renderer.height() - 44.0f, kRailWidth - 6.0f,
+                                 renderer.height() - 26.0f },
+        TextRole::Tiny, theme.textFaint);
+}
+
+void drawTopBar(Renderer& renderer, const AppModel& model, const Theme& theme, std::vector<UiHit>& hits)
+{
+    renderer.fillRect(Rect{ kRailWidth, 0.0f, renderer.width(), kTopBarHeight }, theme.background);
+
+    renderer.text(wideText(viewEyebrow(model.view)),
+        Rect{ kRailWidth + 24.0f, 18.0f, kRailWidth + 360.0f, 34.0f }, TextRole::Tiny, theme.accent, TextAlign::Left,
+        0.8f);
+    renderer.text(wideText(viewTitle(model.view)),
+        Rect{ kRailWidth + 24.0f, 34.0f, kRailWidth + 460.0f, 72.0f }, TextRole::Value, theme.text);
+
+    const float top = 24.0f;
+    const float bottom = 58.0f;
+    float right = renderer.width() - 20.0f;
+
+    const Rect pause{ right - 88.0f, top, right, bottom };
+    drawChip(renderer, pause, model.paused ? L"Продолжить" : L"Пауза", theme, model.paused);
     hits.push_back(UiHit{ pause, ActionKind::TogglePause, 0 });
     right = pause.left - 8.0f;
 
@@ -61,7 +173,7 @@ void drawTitleBar(Renderer& renderer, const AppModel& model, const Theme& theme,
     renderer.fillCircle(overlayButton.left + 12.0f, overlayButton.centerY(), 3.0f,
         model.overlayVisible ? theme.accent : theme.textFaint);
     renderer.text(L"Оверлей", Rect{ overlayButton.left + 22.0f, overlayButton.top, overlayButton.right - 6.0f,
-                         overlayButton.bottom },
+                                     overlayButton.bottom },
         TextRole::Tiny, model.overlayVisible ? theme.accent : theme.textDim);
     hits.push_back(UiHit{ overlayButton, ActionKind::ToggleOverlay, 0 });
     right = overlayButton.left - 12.0f;
@@ -77,61 +189,37 @@ void drawTitleBar(Renderer& renderer, const AppModel& model, const Theme& theme,
         }
         hits.push_back(UiHit{ Rect{ centerX - 9.0f, top, centerX + 9.0f, bottom }, ActionKind::SetAccent,
             static_cast<int>(index) });
-        right = centerX - 8.0f - 6.0f;
+        right = centerX - 14.0f;
     }
     right -= 4.0f;
 
-    const Rect interval{ right - 92.0f, top, right, bottom };
-    renderer.fillRoundRect(interval, 10.0f, theme.panelSoft);
-    renderer.text(wideText("опрос " + std::to_string(model.settings.capture.intervalMs) + " мс"), interval,
-        TextRole::Tiny, theme.textDim, TextAlign::Center);
+    const Rect interval{ right - 112.0f, top, right, bottom };
+    drawChip(renderer, interval, wideText("опрос " + std::to_string(model.settings.capture.intervalMs) + " мс"), theme,
+        false);
     right = interval.left - 8.0f;
 
     const Rect live{ right - 168.0f, top, right, bottom };
     renderer.fillRoundRect(live, 10.0f, model.etwRunning ? theme.accentSoft : theme.panelSoft);
-    renderer.fillCircle(live.left + 12.0f, live.centerY(), 3.0f,
-        model.etwRunning ? theme.accent : theme.textFaint);
+    renderer.fillCircle(live.left + 12.0f, live.centerY(), 3.0f, model.etwRunning ? theme.accent : theme.textFaint);
     renderer.text(model.etwRunning ? L"ETW · кадры" : L"ETW выключен",
         Rect{ live.left + 22.0f, live.top, live.right - 6.0f, live.bottom }, TextRole::Tiny,
         model.etwRunning ? theme.accent : theme.textFaint);
 }
 
-void drawTabs(Renderer& renderer, const AppModel& model, const Theme& theme, std::vector<UiHit>& hits)
-{
-    renderer.fillRect(Rect{ 0.0f, kTitleBarHeight, renderer.width(), kTitleBarHeight + kTabBarHeight },
-        theme.background);
-
-    float left = 18.0f;
-    for (std::size_t index = 0; index < kTabNames.size(); ++index) {
-        const float width = renderer.measureText(kTabNames[index], TextRole::Body) + 28.0f;
-        const Rect tab{ left, kTitleBarHeight + 8.0f, left + width, kTitleBarHeight + kTabBarHeight - 6.0f };
-        const bool isActive = kTabViews[index] == model.view;
-
-        renderer.fillRoundRect(tab, 9.0f, isActive ? theme.accentSoft : theme.panelSoft.withAlpha(0.55f));
-        if (isActive) {
-            renderer.strokeRoundRect(tab, 9.0f, theme.accentGlow, 1.0f);
-        }
-        renderer.text(kTabNames[index], tab, TextRole::Body, isActive ? theme.accent : theme.textDim,
-            TextAlign::Center);
-
-        hits.push_back(UiHit{ tab, ActionKind::SwitchView, static_cast<int>(kTabViews[index]) });
-        left += width + 8.0f;
-    }
-}
-
 void drawStatusBar(Renderer& renderer, const AppModel& model, const Theme& theme)
 {
     const float top = renderer.height() - kStatusBarHeight;
-    renderer.fillRect(Rect{ 0.0f, top, renderer.width(), renderer.height() }, theme.panel.withAlpha(0.5f));
+    renderer.fillRect(Rect{ 0.0f, top, renderer.width(), renderer.height() }, theme.panel.withAlpha(0.85f));
     renderer.drawLine(0.0f, top, renderer.width(), top, theme.line, 1.0f);
 
-    renderer.fillCircle(24.0f, top + 14.0f, 3.0f, model.etwRunning ? theme.accent : theme.textFaint);
+    renderer.fillCircle(kRailWidth + 16.0f, top + 14.0f, 3.0f, model.etwRunning ? theme.accent : theme.textFaint);
 
     std::wstring left = model.etwRunning ? L"ETW-сессия активна · кадры DXGI" : L"ETW выключен · FPS недоступен";
     if (model.paused) {
         left += L" · сбор на паузе";
     }
-    renderer.text(left, Rect{ 34.0f, top, 460.0f, renderer.height() }, TextRole::Tiny, theme.textFaint);
+    renderer.text(left, Rect{ kRailWidth + 26.0f, top, kRailWidth + 460.0f, renderer.height() }, TextRole::Tiny,
+        theme.textFaint);
 
     const std::wstring right = L"приложение " + wideMetric(MetricId::SelfCpu, model.store.value(MetricId::SelfCpu))
         + L" · " + wideMetric(MetricId::SelfRam, model.store.value(MetricId::SelfRam))

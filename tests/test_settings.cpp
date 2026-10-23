@@ -104,11 +104,18 @@ void testLabelLengthIsLimited()
 {
     OverlaySettings overlay;
     setLabel(overlay, LabelField::Gpu, "ОЧЕНЬДЛИННАЯПОДПИСЬ");
-    CHECK(labelValue(overlay, LabelField::Gpu).size() <= 10);
+    // Лимит — 10 символов, а не байт: иначе кириллица обрезалась бы вдвое раньше.
+    CHECK(labelValue(overlay, LabelField::Gpu) == "ОЧЕНЬДЛИНН");
 
-    const std::string before = labelValue(overlay, LabelField::Cpu);
-    setLabel(overlay, LabelField::Cpu, "   ");
-    CHECK(labelValue(overlay, LabelField::Cpu) == before);
+    setLabel(overlay, LabelField::Gpu, "КАДРЫ");
+    CHECK(labelValue(overlay, LabelField::Gpu) == "КАДРЫ");
+
+    // Пустая подпись допустима: пользователь стирает её, чтобы ввести новую.
+    setLabel(overlay, LabelField::Cpu, "");
+    CHECK(labelValue(overlay, LabelField::Cpu).empty());
+
+    setLabel(overlay, LabelField::Ram, "   ");
+    CHECK(labelValue(overlay, LabelField::Ram).empty());
 }
 
 void testKeysAreStable()

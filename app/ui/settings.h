@@ -30,6 +30,12 @@ struct OverlaySettings {
     OverlayStyle style = OverlayStyle::Glass;
     int scalePercent = 100;
     int opacityPercent = 72;
+    // Ручной сдвиг от выбранного угла: даёт поставить оверлей точно по месту
+    // независимо от разрешения и рамок экрана.
+    int offsetX = 0;
+    int offsetY = 0;
+    // Состав: какие строки вообще показывать (fps, cpu, gpu, ram, vram).
+    std::array<bool, kLabelCount> visible{ true, true, true, true, true };
     std::array<std::string, kLabelCount> labels{ "FPS", "CPU", "GPU", "RAM", "VRAM" };
 };
 

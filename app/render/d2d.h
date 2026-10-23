@@ -78,6 +78,9 @@ public:
     void drawSeries(const ChartSeries& series, const Rect& rect, float minimum, float maximum, float thickness);
 
     ID2D1Factory* factory() const { return m_d2d; }
+    IDWriteFactory* dwrite() const { return m_dwrite; }
+    ID2D1RenderTarget* target() const { return m_target; }
+    IDWriteTextFormat* textFormat(TextRole role) const { return formatFor(role); }
 
 private:
     bool createDeviceResources(std::string& error);

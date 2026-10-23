@@ -55,6 +55,8 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
     yawa::View initialView = yawa::View::Dashboard;
     if (arguments.find(L"--view=sensors") != std::wstring_view::npos) {
         initialView = yawa::View::Sensors;
+    } else if (arguments.find(L"--view=overlay") != std::wstring_view::npos) {
+        initialView = yawa::View::Overlay;
     } else if (arguments.find(L"--view=settings") != std::wstring_view::npos) {
         initialView = yawa::View::Settings;
     }

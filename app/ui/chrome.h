@@ -9,13 +9,16 @@
 
 namespace yawa {
 
-constexpr float kTitleBarHeight = 46.0f;
-constexpr float kTabBarHeight = 40.0f;
+// Каркас окна повторяет прототип: узкая колонка с иконками разделов слева,
+// широкая шапка с надзаголовком и названием экрана, действия справа.
+constexpr float kRailWidth = 68.0f;
+constexpr float kTopBarHeight = 84.0f;
 constexpr float kStatusBarHeight = 28.0f;
 
-void drawTitleBar(Renderer& renderer, const AppModel& model, const Theme& theme, std::vector<UiHit>& hits);
-void drawTabs(Renderer& renderer, const AppModel& model, const Theme& theme, std::vector<UiHit>& hits);
+void drawRail(Renderer& renderer, const AppModel& model, const Theme& theme, std::vector<UiHit>& hits);
+void drawTopBar(Renderer& renderer, const AppModel& model, const Theme& theme, std::vector<UiHit>& hits);
 void drawStatusBar(Renderer& renderer, const AppModel& model, const Theme& theme);
 std::string_view viewTitle(View view);
+std::string_view viewEyebrow(View view);
 
 } // namespace yawa

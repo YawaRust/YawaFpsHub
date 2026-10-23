@@ -17,10 +17,12 @@ add_executable(YawaFpsHub WIN32
     platform/sensors_win.cpp
     platform/win_util.cpp
     render/d2d.cpp
+    render/overlay_painter.cpp
     render/theme.cpp
     ui/chrome.cpp
     ui/dashboard_view.cpp
     ui/layout.cpp
+    ui/overlay_view.cpp
     ui/sensors_view.cpp
     ui/settings.cpp
     ui/settings_view.cpp

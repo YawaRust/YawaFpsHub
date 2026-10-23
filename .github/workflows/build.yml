@@ -170,7 +170,7 @@ jobs:
           }
           "@
           $exe = (Get-ChildItem -Path .\build -Recurse -Filter YawaFpsHub.exe | Select-Object -First 1).FullName
-          $views = @("dashboard", "sensors", "settings")
+          $views = @("dashboard", "sensors", "overlay", "settings")
           foreach ($view in $views) {
             $process = Start-Process -FilePath $exe -ArgumentList "--smoke", "--view=$view" -PassThru
             Start-Sleep -Seconds 4

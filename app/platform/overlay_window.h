@@ -2,6 +2,7 @@
 
 #include "metrics/metric_store.h"
 #include "metrics/statistics.h"
+#include "render/overlay_painter.h"
 #include "render/theme.h"
 #include "ui/settings.h"
 
@@ -28,6 +29,7 @@ public:
     void destroy();
 
     void setSettings(const OverlaySettings& settings);
+    void setAccent(Accent accent);
     void setContent(const MetricStore& store, const FpsSummary& fps, const std::wstring& gpuName);
 
     void show();
@@ -59,6 +61,7 @@ private:
     IDWriteTextFormat* m_keyFormat = nullptr;
     IDWriteTextFormat* m_valueFormat = nullptr;
     IDWriteTextFormat* m_smallFormat = nullptr;
+    IDWriteTextFormat* m_monoFormat = nullptr;
 
     HDC m_memoryDc = nullptr;
     HBITMAP m_bitmap = nullptr;
@@ -72,7 +75,7 @@ private:
     MetricStore m_store;
     FpsSummary m_fps;
     std::wstring m_gpuName;
-    D2D1_RECT_F m_contentRect{};
+    D2D1_RECT_F m_contentRectD2D{};
     bool m_visible = false;
     bool m_hasContent = false;
 };
