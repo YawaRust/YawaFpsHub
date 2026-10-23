@@ -1,0 +1,64 @@
+name: build
+
+on:
+  push:
+    branches: [main, "arena/**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  metrics:
+    name: Ядро метрик (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            generator: ""
+            warnings: "ON"
+          - os: ubuntu-latest
+            generator: "-G \"Unix Makefiles\""
+            warnings: "ON"
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Настроить CMake
+        shell: bash
+        run: cmake -S . -B build ${{ matrix.generator }} -DCMAKE_BUILD_TYPE=Release -DYAWA_WARNINGS_AS_ERRORS=${{ matrix.warnings }}
+
+      - name: Собрать
+        shell: bash
+        run: cmake --build build --config Release --parallel
+
+      - name: Тесты
+        shell: bash
+        run: ctest --test-dir build -C Release --output-on-failure
+
+  probe:
+    name: Диагностика датчиков (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Настроить CMake
+        run: cmake -S . -B build -A x64 -DYAWA_WARNINGS_AS_ERRORS=ON
+
+      - name: Собрать
+        run: cmake --build build --config Release --parallel
+
+      - name: Прогон с ETW
+        shell: pwsh
+        run: |
+          & .\build\tools\probe\Release\yawa-probe.exe --seconds 3 --interval 1000
+          if ($LASTEXITCODE -ne 0) { throw "yawa-probe завершился с кодом $LASTEXITCODE" }
+          Get-Content .\build\tools\probe\Release\yawa-probe.log
+
+      - name: Артефакт
+        uses: actions/upload-artifact@v4
+        with:
+          name: yawa-probe-win64
+          path: build/tools/probe/Release/yawa-probe.exe

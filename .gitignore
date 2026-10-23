@@ -1,0 +1,9 @@
+build/
+out/
+.vs/
+.idea/
+*.user
+*.aps
+*.vcxproj.filters
+*.log
+ui-prototype/.cache/
