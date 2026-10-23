@@ -156,6 +156,17 @@ jobs:
             Write-Output "::warning title=YawaFpsHub::скриншот не снят (нет интерактивного рабочего стола)"
           }
 
+      - name: Опубликовать скриншот
+        if: hashFiles('screenshot.png') != ''
+        shell: bash
+        run: |
+          git config user.email "ci@yawafpshub.local"
+          git config user.name "ci"
+          git checkout -B ci-logs
+          git add -f screenshot.png
+          git commit -m "screenshot" || true
+          git push -f origin ci-logs
+
       - name: Прогон диагностики
         shell: pwsh
         run: |
