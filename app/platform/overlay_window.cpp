@@ -318,9 +318,11 @@ void OverlayWindow::drawRow(float y, float scale, const std::wstring& key, const
 {
     // Колонки считаются от рамки плитки, а не от края экрана: иначе подпись уходит
     // в левый угол, а число — в правый край монитора.
-    const float left = m_contentRect.left + 10.0f * scale;
-    const float right = m_contentRect.right - 10.0f * scale;
-    const float secondaryWidth = secondary.empty() ? 0.0f : 52.0f * scale;
+    // У капсулы скругления съедают край, поэтому текст отодвинут глубже.
+    const float inset = (m_settings.style == OverlayStyle::Capsule ? 16.0f : 10.0f) * scale;
+    const float left = m_contentRect.left + inset;
+    const float right = m_contentRect.right - inset;
+    const float secondaryWidth = secondary.empty() ? 0.0f : 58.0f * scale;
     const float valueRight = right - secondaryWidth;
 
     ID2D1SolidColorBrush* brush = nullptr;
@@ -340,7 +342,7 @@ void OverlayWindow::drawRow(float y, float scale, const std::wstring& key, const
     if (!secondary.empty()
         && SUCCEEDED(m_target->CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.45f), &brush))) {
         m_target->DrawTextW(secondary.data(), static_cast<UINT32>(secondary.size()), m_keyFormat,
-            D2D1::RectF(valueRight + 2.0f * scale, y, right + 4.0f * scale, y + 16.0f * scale), brush);
+            D2D1::RectF(valueRight + 8.0f * scale, y, right, y + 16.0f * scale), brush);
         brush->Release();
     }
 }
