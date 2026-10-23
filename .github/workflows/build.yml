@@ -206,13 +206,55 @@ jobs:
             }
           }
 
-      - name: Скриншоты оверлея
+      - name: Скриншоты стилей оверлея
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path .\shots | Out-Null
+          Add-Type -AssemblyName System.Drawing
+          Add-Type @"
+          using System;
+          using System.Runtime.InteropServices;
+          public class YawaStyleShot {
+            [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+            [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+          }
+          "@
           $exe = (Get-ChildItem -Path .\build -Recurse -Filter YawaFpsHub.exe | Select-Object -First 1).FullName
-          $process = Start-Process -FilePath $exe -ArgumentList "--smoke=12", "--overlay-shots=$PWD\shots\" -PassThru -Wait
-          Get-ChildItem .\shots | ForEach-Object { Write-Output "::notice title=YawaFpsHub::оверлей $($_.Name) $([math]::Round($_.Length / 1KB, 1)) КБ" }
+          $styles = @("glass", "neon", "capsule", "terminal", "minimal")
+          foreach ($style in $styles) {
+            $process = Start-Process -FilePath $exe -ArgumentList "--smoke", "--view=overlay", "--style=$style" -PassThru
+            Start-Sleep -Seconds 4
+            $shot = $null
+            for ($i = 0; $i -lt 10 -and -not $shot; $i++) {
+              $process.Refresh()
+              $hwnd = $process.MainWindowHandle
+              if ($hwnd -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 500; continue }
+              $rect = New-Object YawaStyleShot+RECT
+              if (-not [YawaStyleShot]::GetWindowRect($hwnd, [ref] $rect)) { Start-Sleep -Milliseconds 500; continue }
+              $width = $rect.Right - $rect.Left
+              $height = $rect.Bottom - $rect.Top
+              if ($width -le 0 -or $height -le 0) { Start-Sleep -Milliseconds 500; continue }
+              $bitmap = New-Object System.Drawing.Bitmap $width, $height
+              $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+              $hdc = $graphics.GetHdc()
+              $ok = [YawaStyleShot]::PrintWindow($hwnd, $hdc, 2)
+              $graphics.ReleaseHdc($hdc)
+              $graphics.Dispose()
+              if ($ok) {
+                $path = "$PWD\style-$style.png"
+                $bitmap.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+                $shot = $path
+              }
+              $bitmap.Dispose()
+              if (-not $shot) { Start-Sleep -Milliseconds 500 }
+            }
+            $process.WaitForExit()
+            if ($shot) {
+              Write-Output "::notice title=YawaFpsHub::стиль $style снят"
+            } else {
+              Write-Output "::warning title=YawaFpsHub::стиль $style не снят"
+            }
+          }
 
       - name: Опубликовать скриншоты
         # Два прогона на один коммит (push и pull_request) соревнуются за ветку ci-logs,
@@ -224,6 +266,7 @@ jobs:
           # и checkout отказывается перезаписывать неотслеживаемые файлы.
           mkdir -p /tmp/shots
           mv screenshot-*.png /tmp/shots/ 2>/dev/null || true
+          mv style-*.png /tmp/shots/ 2>/dev/null || true
           if [ -d shots ]; then mv shots/*.png /tmp/shots/ 2>/dev/null || true; fi
           git config user.email "ci@yawafpshub.local"
           git config user.name "ci"

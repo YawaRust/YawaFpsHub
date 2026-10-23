@@ -124,6 +124,11 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
         m_overlay.setSettings(m_model.settings.overlay);
     }
 
+    if (m_hasInitialStyle) {
+        m_model.settings.overlay.style = m_initialStyle;
+        m_overlay.setSettings(m_model.settings.overlay);
+    }
+
     m_model.settingsPath = settingsPath();
     m_model.logPath = logPath();
     m_model.sessionsPath = sessionsDirectory();
@@ -276,6 +281,15 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             if (!hit.rect.contains(x, y)) {
                 continue;
             }
+            if (hit.action == ActionKind::DragOverlay) {
+                m_dragAction = ActionKind::DragOverlay;
+                m_dragStartX = x;
+                m_dragStartY = y;
+                m_dragOffsetX = m_model.settings.overlay.offsetX;
+                m_dragOffsetY = m_model.settings.overlay.offsetY;
+                SetCapture(m_window);
+                return 0;
+            }
             if (hit.action == ActionKind::SetScale || hit.action == ActionKind::SetOpacity) {
                 m_dragAction = hit.action;
                 m_dragRect = hit.rect;
@@ -290,6 +304,17 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     }
 
     case WM_MOUSEMOVE:
+        if (m_dragAction == ActionKind::DragOverlay) {
+            const float x = static_cast<float>(GET_X_LPARAM(lParam)) / m_dpiScale;
+            const float y = static_cast<float>(GET_Y_LPARAM(lParam)) / m_dpiScale;
+            m_model.settings.overlay.offsetX
+                = std::clamp(m_dragOffsetX + static_cast<int>(std::lround(x - m_dragStartX)), -600, 600);
+            m_model.settings.overlay.offsetY
+                = std::clamp(m_dragOffsetY + static_cast<int>(std::lround(y - m_dragStartY)), -600, 600);
+            m_overlay.setSettings(m_model.settings.overlay);
+            InvalidateRect(m_window, nullptr, FALSE);
+            return 0;
+        }
         if (m_dragAction != ActionKind::None) {
             dragSlider(static_cast<float>(GET_X_LPARAM(lParam)) / m_dpiScale);
             return 0;
@@ -297,6 +322,12 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         break;
 
     case WM_LBUTTONUP:
+        if (m_dragAction == ActionKind::SetScale || m_dragAction == ActionKind::SetOpacity) {
+            m_dragAction = ActionKind::None;
+            ReleaseCapture();
+            saveSettings();
+            return 0;
+        }
         if (m_dragAction != ActionKind::None) {
             m_dragAction = ActionKind::None;
             ReleaseCapture();
@@ -305,36 +336,13 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         }
         break;
 
-    case WM_CHAR: {
-        // WM_CHAR приходит уже в UTF-16 после раскладки и IME, поэтому кириллица
-        // и любые другие языки ввода работают без отдельных обработчиков.
+    case WM_CHAR:
+    case WM_IME_CHAR:
         if (m_model.editingLabel >= 0) {
-            const auto index = static_cast<std::size_t>(m_model.editingLabel);
-            const LabelField field = static_cast<LabelField>(index);
-            std::wstring current = wideText(labelValue(m_model.settings.overlay, field));
-
-            if (wParam == L'\b') {
-                if (!current.empty()) {
-                    current.pop_back();
-                    setLabel(m_model.settings.overlay, field, narrow(current));
-                }
-            } else if (wParam == VK_ESCAPE) {
-                setLabel(m_model.settings.overlay, field, m_labelBackup);
-                m_model.editingLabel = -1;
-                saveSettings();
-            } else if (wParam == VK_RETURN) {
-                m_model.editingLabel = -1;
-                saveSettings();
-            } else if (wParam >= 32 && wParam != 127) {
-                current.push_back(static_cast<wchar_t>(wParam));
-                setLabel(m_model.settings.overlay, field, narrow(current));
-            }
-
-            m_overlay.setSettings(m_model.settings.overlay);
+            editLabelChar(static_cast<wchar_t>(wParam));
             InvalidateRect(m_window, nullptr, FALSE);
         }
         return 0;
-    }
 
     case WM_HOTKEY:
         if (wParam == kHotkeyOverlay) {
@@ -398,9 +406,9 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
 
 Rect MainWindow::contentArea() const
 {
-    const float top = kTopBarHeight + 4.0f;
-    const float bottom = m_renderer.height() - kStatusBarHeight - 12.0f;
-    return Rect{ kRailWidth + 24.0f, top, m_renderer.width() - 24.0f, bottom };
+    const float top = kTopBarHeight + 8.0f;
+    const float bottom = m_renderer.height() - kStatusBarHeight - 10.0f;
+    return Rect{ kRailWidth + 20.0f, top, m_renderer.width() - 20.0f, bottom };
 }
 
 std::vector<UiHit> MainWindow::buildHits()
@@ -486,6 +494,39 @@ void MainWindow::applySlider(ActionKind action, const Rect& rect, float x)
     InvalidateRect(m_window, nullptr, FALSE);
 }
 
+void MainWindow::editLabelChar(wchar_t symbol)
+{
+    const auto index = static_cast<std::size_t>(m_model.editingLabel);
+    if (index >= kLabelCount) {
+        return;
+    }
+    const LabelField field = static_cast<LabelField>(index);
+    std::wstring current = wideText(labelValue(m_model.settings.overlay, field));
+
+    if (symbol == L'\b') {
+        if (!current.empty()) {
+            current.pop_back();
+        }
+    } else if (symbol == L'\r' || symbol == L'\n') {
+        m_model.editingLabel = -1;
+        saveSettings();
+        return;
+    } else if (symbol == 27) { // Esc
+        setLabel(m_model.settings.overlay, field, m_labelBackup);
+        m_model.editingLabel = -1;
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        return;
+    } else if (symbol == 127) { // Delete — стереть подпись целиком.
+        current.clear();
+    } else if (symbol >= 32) {
+        current.push_back(symbol);
+    }
+
+    setLabel(m_model.settings.overlay, field, narrow(current));
+    m_overlay.setSettings(m_model.settings.overlay);
+}
+
 void MainWindow::applyAction(const UiHit& hit)
 {
     switch (hit.action) {
@@ -551,13 +592,50 @@ void MainWindow::applyAction(const UiHit& hit)
         break;
     }
 
-    case ActionKind::SelectLabel:
+    case ActionKind::SelectLabel: {
+        const LabelField field = static_cast<LabelField>(std::clamp(hit.value, 0, static_cast<int>(kLabelCount) - 1));
+        m_labelBackup = labelValue(m_model.settings.overlay, field);
+        // Поле очищается сразу: иначе новое название пришлось бы стирать посимвольно.
+        // Esc возвращает прежнюю подпись.
+        setLabel(m_model.settings.overlay, field, std::string{});
         m_model.editingLabel = hit.value;
-        m_labelBackup = labelValue(m_model.settings.overlay, static_cast<LabelField>(hit.value));
+        m_overlay.setSettings(m_model.settings.overlay);
+        break;
+    }
+
+    case ActionKind::ClearLabel: {
+        const LabelField field = static_cast<LabelField>(std::clamp(hit.value, 0, static_cast<int>(kLabelCount) - 1));
+        setLabel(m_model.settings.overlay, field, std::string{});
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+    }
+
+    case ActionKind::ApplyLabelPreset:
+        m_model.settings.overlay.labels = hit.value == 0 ? std::array<std::string, kLabelCount>{ "FPS", "CPU", "GPU",
+                                                                    "RAM", "VRAM" }
+            : hit.value == 1                                ? std::array<std::string, kLabelCount>{ "КАДРЫ", "ЦП",
+                                                                       "ГП", "ОЗУ", "ВИДЕО" }
+                                                            : std::array<std::string, kLabelCount>{ "", "", "", "", "" };
+        m_model.editingLabel = -1;
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
+    case ActionKind::ResetOverlayPlacement:
+        m_model.settings.overlay.offsetX = 0;
+        m_model.settings.overlay.offsetY = 0;
+        m_model.settings.overlay.scalePercent = 100;
+        m_model.settings.overlay.opacityPercent = 72;
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
         break;
 
     case ActionKind::ResetLabels:
-        m_model.settings.overlay = OverlaySettings{};
+        // Сбрасываем только подписи: остальные настройки оверлея не трогаем.
+        m_model.settings.overlay.labels = OverlaySettings{}.labels;
+        m_model.settings.overlay.visible = OverlaySettings{}.visible;
+        m_model.editingLabel = -1;
         m_overlay.setSettings(m_model.settings.overlay);
         saveSettings();
         break;
@@ -629,13 +707,13 @@ void MainWindow::applyAction(const UiHit& hit)
         break;
 
     case ActionKind::OffsetX:
-        m_model.settings.overlay.offsetX = std::clamp(m_model.settings.overlay.offsetX + hit.value, -400, 400);
+        m_model.settings.overlay.offsetX = std::clamp(m_model.settings.overlay.offsetX + hit.value, -600, 600);
         m_overlay.setSettings(m_model.settings.overlay);
         saveSettings();
         break;
 
     case ActionKind::OffsetY:
-        m_model.settings.overlay.offsetY = std::clamp(m_model.settings.overlay.offsetY + hit.value, -400, 400);
+        m_model.settings.overlay.offsetY = std::clamp(m_model.settings.overlay.offsetY + hit.value, -600, 600);
         m_overlay.setSettings(m_model.settings.overlay);
         saveSettings();
         break;
@@ -647,6 +725,10 @@ void MainWindow::applyAction(const UiHit& hit)
 
     case ActionKind::TogglePause:
         m_model.paused = !m_model.paused;
+        break;
+
+    case ActionKind::DragOverlay:
+        // Само перетаскивание обрабатывается в WM_MOUSEMOVE, сюда попадает только клик.
         break;
 
     case ActionKind::None:

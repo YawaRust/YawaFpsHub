@@ -4,129 +4,107 @@
 
 #include <algorithm>
 #include <array>
-#include <iterator>
 #include <string>
 
 namespace yawa {
 namespace {
 
-constexpr std::array<std::wstring_view, 3> kStyleNames{ L"Стекло", L"Неон", L"Капсулы" };
-constexpr std::array<std::wstring_view, 2> kStyleNamesTail{ L"Терминал", L"Минимал" };
-constexpr std::array<std::wstring_view, 4> kPositionNames{ L"↖", L"↗", L"↙", L"↘" };
-constexpr std::array<std::wstring_view, 5> kMetricNames{ L"FPS", L"Процессор", L"Видеокарта", L"Память",
-    L"Видеопамять" };
-constexpr std::array<LabelField, 5> kLabelFields{ LabelField::Fps, LabelField::Cpu, LabelField::Gpu,
-    LabelField::Ram, LabelField::Vram };
-constexpr std::array<std::wstring_view, 5> kLabelTitles{ L"Кадры", L"Процессор", L"Видеокарта", L"Память",
-    L"Видеопамять" };
+constexpr std::array<std::wstring_view, 5> kStyleNames{ L"Стекло", L"Неон", L"Капсулы", L"Терминал", L"Минимал" };
+constexpr std::array<std::wstring_view, 4> kPositionNames{ L"Слева сверху", L"Справа сверху", L"Слева снизу",
+    L"Справа снизу" };
+constexpr std::array<std::wstring_view, 5> kFieldNames{ L"Кадры в секунду", L"Загрузка процессора",
+    L"Загрузка видеокарты", L"Занятая память", L"Видеопамять" };
 
-// Ползунок без отдельного контрола: клик по дорожке сразу ставит значение,
-// а перетаскивание обрабатывает окно (SetScale/SetOpacity в UiHit).
-void drawSlider(Renderer& renderer, const Rect& row, int value, int minimum, int maximum, std::wstring_view caption,
-    const Theme& theme, std::vector<UiHit>& hits, ActionKind action)
-{
-    renderer.text(caption, Rect{ row.left, row.top, row.left + 130.0f, row.top + 16.0f }, TextRole::Small,
-        theme.textDim);
-    renderer.text(wideText(std::to_string(value) + " %"),
-        Rect{ row.right - 60.0f, row.top, row.right, row.top + 16.0f }, TextRole::Small, theme.text,
-        TextAlign::Right);
-
-    const Rect track{ row.left, row.top + 24.0f, row.right, row.top + 36.0f };
-    renderer.fillRoundRect(Rect{ track.left, track.centerY() - 2.0f, track.right, track.centerY() + 2.0f }, 2.0f,
-        theme.line);
-    const float fraction = static_cast<float>(value - minimum) / static_cast<float>(maximum - minimum);
-    const float knob = track.left + std::clamp(fraction, 0.0f, 1.0f) * track.width();
-    renderer.fillRoundRect(Rect{ track.left, track.centerY() - 2.0f, knob, track.centerY() + 2.0f }, 2.0f,
-        theme.accent);
-    renderer.fillCircle(knob, track.centerY(), 6.0f, theme.accent);
-    renderer.fillCircle(knob, track.centerY(), 2.5f, theme.background);
-
-    hits.push_back(UiHit{ track, action, 0 });
-}
-
-OverlayValues valuesFromModel(const AppModel& model)
+OverlayValues currentValues(const AppModel& model)
 {
     OverlayValues values;
     values.fps = model.fps.currentFps;
     values.low1 = model.fps.low1Fps;
     values.cpuLoad = model.store.value(MetricId::CpuLoad);
     values.cpuTemp = model.store.value(MetricId::CpuTemp);
-    values.hasCpuTemp = model.availability.cpuTemperature && values.cpuTemp > 0.0;
+    values.hasCpuTemp = model.availability.cpuTemperature;
     values.gpuLoad = model.store.value(MetricId::GpuLoad);
     values.gpuTemp = model.store.value(MetricId::GpuTemp);
-    values.hasGpuTemp = model.availability.gpuTemperature && values.gpuTemp > 0.0;
+    values.hasGpuTemp = model.availability.gpuTemperature;
     values.ramUsed = model.store.value(MetricId::RamUsed);
-    values.ramTotal = model.store.value(MetricId::RamUsed) + model.store.value(MetricId::RamFree);
     values.vramUsed = model.store.value(MetricId::VramUsed);
-    values.vramTotal = model.store.value(MetricId::VramTotal);
-    values.hasVram = values.vramTotal > 0.0;
+    values.hasVram = model.store.value(MetricId::VramTotal) > 0.0;
     return values;
 }
 
-// Имитация игры под предпросмотром: показывает, как оверлей читается на живой картинке.
-void drawPreviewScene(Renderer& renderer, const Rect& scene, const Theme& theme)
+void drawSlider(Renderer& renderer, const Rect& row, int value, int minimum, int maximum, std::wstring_view caption,
+    const Theme& theme, std::vector<UiHit>& hits, ActionKind action, std::wstring_view suffix)
 {
-    renderer.fillRoundRect(scene, 12.0f, fromRgba(0xFF0B1220));
-    renderer.fillRoundRect(Rect{ scene.left, scene.top, scene.right, scene.top + scene.height() * 0.55f }, 12.0f,
-        fromRgba(0xFF16283C));
-    renderer.fillCircle(scene.right - 90.0f, scene.top + 54.0f, 26.0f, theme.warn.withAlpha(0.22f));
+    renderer.text(caption, Rect{ row.left, row.top, row.left + 160.0f, row.top + 16.0f }, TextRole::Small,
+        theme.textDim);
+    std::wstring valueText = std::to_wstring(value);
+    valueText += suffix;
+    renderer.text(valueText, Rect{ row.right - 70.0f, row.top, row.right, row.top + 16.0f }, TextRole::Small,
+        theme.text, TextAlign::Right);
 
-    const float ground = scene.bottom - scene.height() * 0.22f;
-    renderer.fillRect(Rect{ scene.left, ground, scene.right, scene.bottom }, fromRgba(0xFF0E1A26));
-
-    float left = scene.left + 24.0f;
-    const float heights[] = { 44.0f, 72.0f, 34.0f, 96.0f, 58.0f, 80.0f, 40.0f, 64.0f };
-    for (std::size_t index = 0; index < std::size(heights); ++index) {
-        const float width = 26.0f + static_cast<float>(index % 3) * 8.0f;
-        renderer.fillRoundRect(Rect{ left, ground - heights[index], left + width, ground }, 3.0f,
-            fromRgba(0xFF1B2A3A));
-        left += width + 12.0f;
-        if (left > scene.right - 60.0f) {
-            break;
-        }
-    }
-
-    // Прицел и полоска здоровья из «игры».
-    renderer.drawLine(scene.centerX() - 10.0f, scene.centerY() - 40.0f, scene.centerX() + 10.0f,
-        scene.centerY() - 40.0f, theme.text.withAlpha(0.5f), 1.2f);
-    renderer.drawLine(scene.centerX(), scene.centerY() - 50.0f, scene.centerX(), scene.centerY() - 30.0f,
-        theme.text.withAlpha(0.5f), 1.2f);
-    renderer.fillRoundRect(Rect{ scene.left + 24.0f, scene.bottom - 34.0f, scene.left + 150.0f, scene.bottom - 26.0f },
-        4.0f, theme.text.withAlpha(0.12f));
-    renderer.fillRoundRect(Rect{ scene.left + 24.0f, scene.bottom - 34.0f, scene.left + 118.0f, scene.bottom - 26.0f },
-        4.0f, theme.warn.withAlpha(0.65f));
+    const Rect track{ row.left, row.top + 24.0f, row.right, row.top + 34.0f };
+    drawBar(renderer, track, static_cast<float>(value - minimum) / static_cast<float>(maximum - minimum),
+        theme.accent, theme);
+    const float knobX = track.left + track.width() * static_cast<float>(value - minimum)
+        / static_cast<float>(maximum - minimum);
+    renderer.fillCircle(knobX, track.centerY(), 6.0f, theme.accent);
+    hits.push_back(UiHit{ Rect{ track.left, track.top - 8.0f, track.right, track.bottom + 8.0f }, action, 0 });
 }
 
-void drawPreviewCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card)
+void drawToggleRow(Renderer& renderer, const Rect& row, std::wstring_view label, bool on, const Theme& theme,
+    std::vector<UiHit>& hits, ActionKind action, int value)
+{
+    const Rect track{ row.right - 36.0f, row.centerY() - 9.0f, row.right, row.centerY() + 9.0f };
+    renderer.fillRoundRect(track, 9.0f, on ? theme.accentSoft : theme.panelSoft);
+    if (on) {
+        renderer.strokeRoundRect(track, 9.0f, theme.accentGlow, 1.0f);
+    }
+    renderer.fillCircle(on ? track.right - 9.0f : track.left + 9.0f, track.centerY(), 6.0f,
+        on ? theme.accent : theme.textFaint);
+    renderer.text(label, Rect{ row.left, row.top, track.left - 12.0f, row.bottom }, TextRole::Small,
+        on ? theme.text : theme.textFaint);
+    hits.push_back(UiHit{ row, action, value });
+}
+
+void drawPreviewCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card,
+    std::vector<UiHit>& hits)
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
 
-    renderer.text(L"Оверлей поверх игры", Rect{ inner.left, inner.top, inner.left + 260.0f, inner.top + 22.0f },
+    renderer.text(L"Оверлей поверх игры", Rect{ inner.left, inner.top, inner.right, inner.top + 22.0f },
         TextRole::Heading, theme.text);
-    renderer.text(L"предпросмотр · в игре это отдельное topmost-окно, F10 — показать или скрыть",
-        Rect{ inner.left, inner.top + 20.0f, inner.right - 70.0f, inner.top + 38.0f }, TextRole::Tiny,
-        theme.textFaint);
+    renderer.text(L"предпросмотр на макете сцены: перетащите его, чтобы поставить оверлей точно",
+        Rect{ inner.left, inner.top + 20.0f, inner.right - 60.0f, inner.top + 38.0f }, TextRole::Tiny, theme.textFaint);
 
-    const Rect badge{ inner.right - 62.0f, inner.top - 2.0f, inner.right, inner.top + 20.0f };
-    renderer.fillRoundRect(badge, 9.0f, model.overlayVisible ? theme.accentSoft : theme.panelSoft);
-    renderer.text(model.overlayVisible ? L"ВКЛ" : L"F10", badge, TextRole::Tiny,
-        model.overlayVisible ? theme.accent : theme.textFaint, TextAlign::Center);
+    const Rect tag{ inner.right - 52.0f, inner.top, inner.right, inner.top + 20.0f };
+    renderer.fillRoundRect(tag, 10.0f, theme.panelSoft);
+    renderer.text(L"F10", tag, TextRole::Tiny, theme.textFaint, TextAlign::Center);
 
-    const Rect scene{ inner.left, inner.top + 48.0f, inner.right, inner.bottom };
-    drawPreviewScene(renderer, scene, theme);
+    const Rect scene{ inner.left, inner.top + 46.0f, inner.right, inner.bottom };
+
+    // Макет игровой сцены: небо, земля и пара силуэтов — на нём видно, как читается оверлей.
+    renderer.fillRoundRect(scene, kCardRadius, theme.panelSoft);
+    renderer.fillRect(Rect{ scene.left + 1.0f, scene.centerY() + 14.0f, scene.right - 1.0f, scene.bottom - 1.0f },
+        theme.background.withAlpha(0.55f));
+    renderer.fillCircle(scene.right - 74.0f, scene.top + 56.0f, 22.0f, theme.warn.withAlpha(0.16f));
+    for (int index = 0; index < 5; ++index) {
+        const float width = 26.0f + static_cast<float>(index % 3) * 12.0f;
+        const float left = scene.left + 26.0f + static_cast<float>(index) * 58.0f;
+        const float height = 40.0f + static_cast<float>(index % 4) * 22.0f;
+        renderer.fillRoundRect(
+            Rect{ left, scene.bottom - height, left + width, scene.bottom }, 3.0f, theme.line.withAlpha(0.8f));
+    }
 
     const OverlayFormats formats{ renderer.dwrite(), renderer.textFormat(TextRole::Heading),
         renderer.textFormat(TextRole::Value), renderer.textFormat(TextRole::Small),
         renderer.textFormat(TextRole::Mono) };
+    const OverlayText text = makeOverlayText(model.settings.overlay, currentValues(model));
+    const float scale = static_cast<float>(model.settings.overlay.scalePercent) / 100.0f * 0.9f;
+    paintOverlay(renderer.target(), model.settings.overlay, theme, text, scene, scale, formats);
 
-    // Предпросмотр масштабируется вместе с реальным оверлеем, но чуть меньше,
-    // чтобы при 160 % содержимое не упиралось в рамку карточки.
-    const float scale = static_cast<float>(model.settings.overlay.scalePercent) / 100.0f * 0.92f;
-    const OverlayText text = makeOverlayText(model.settings.overlay, valuesFromModel(model));
-    paintOverlay(renderer.target(), model.settings.overlay, theme, text, scene.inset(2.0f), scale, formats);
-
-    renderer.strokeRoundRect(scene, 12.0f, theme.line, 1.0f);
+    renderer.strokeRoundRect(scene, kCardRadius, theme.line, 1.0f);
+    hits.push_back(UiHit{ scene, ActionKind::DragOverlay, 0 });
 }
 
 void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card,
@@ -143,83 +121,83 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
 
     float top = inner.top + 44.0f;
 
-    // Стиль: три варианта в первом ряду и два во втором, чтобы подписи не сжимались.
     renderer.text(L"Стиль", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
     top += 18.0f;
     const float styleWidth = (inner.width() - 2.0f * 8.0f) / 3.0f;
-    for (std::size_t index = 0; index < kStyleNames.size(); ++index) {
+    for (std::size_t index = 0; index < 3; ++index) {
         const Rect chip{ inner.left + static_cast<float>(index) * (styleWidth + 8.0f), top,
             inner.left + static_cast<float>(index) * (styleWidth + 8.0f) + styleWidth, top + 26.0f };
         drawChip(renderer, chip, kStyleNames[index], static_cast<std::size_t>(overlay.style) == index, theme);
         hits.push_back(UiHit{ chip, ActionKind::SetStyle, static_cast<int>(index) });
     }
-
-    const float tailWidth = (inner.width() - 8.0f) / 2.0f;
-    for (std::size_t index = 0; index < kStyleNamesTail.size(); ++index) {
-        const Rect chip{ inner.left + static_cast<float>(index) * (tailWidth + 8.0f), top + 32.0f,
-            inner.left + static_cast<float>(index) * (tailWidth + 8.0f) + tailWidth, top + 58.0f };
-        drawChip(renderer, chip, kStyleNamesTail[index], static_cast<std::size_t>(overlay.style) == index + 3, theme);
+    const float halfWidth = (inner.width() - 8.0f) / 2.0f;
+    for (std::size_t index = 0; index < 2; ++index) {
+        const Rect chip{ inner.left + static_cast<float>(index) * (halfWidth + 8.0f), top + 32.0f,
+            inner.left + static_cast<float>(index) * (halfWidth + 8.0f) + halfWidth, top + 58.0f };
+        drawChip(renderer, chip, kStyleNames[index + 3], static_cast<std::size_t>(overlay.style) == index + 3, theme);
         hits.push_back(UiHit{ chip, ActionKind::SetStyle, static_cast<int>(index + 3) });
     }
     top += 70.0f;
 
-    renderer.text(L"Положение", Rect{ inner.left, top + 3.0f, inner.left + 84.0f, top + 19.0f }, TextRole::Small,
-        theme.textDim);
-    for (std::size_t index = 0; index < kPositionNames.size(); ++index) {
-        const Rect chip{ inner.left + 88.0f + static_cast<float>(index) * 40.0f, top,
-            inner.left + 120.0f + static_cast<float>(index) * 40.0f, top + 26.0f };
-        drawChip(renderer, chip, kPositionNames[index], static_cast<std::size_t>(overlay.position) == index, theme);
+    renderer.text(L"Положение", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
+    top += 18.0f;
+    const float quarterWidth = (inner.width() - 3.0f * 6.0f) / 4.0f;
+    for (std::size_t index = 0; index < 4; ++index) {
+        const Rect chip{ inner.left + static_cast<float>(index) * (quarterWidth + 6.0f), top,
+            inner.left + static_cast<float>(index) * (quarterWidth + 6.0f) + quarterWidth, top + 26.0f };
+        drawChip(renderer, chip, kPositionNames[index], static_cast<std::size_t>(overlay.position) == index, theme,
+            TextRole::Tiny);
         hits.push_back(UiHit{ chip, ActionKind::SetPosition, static_cast<int>(index) });
     }
     top += 34.0f;
 
-    renderer.text(L"Вид", Rect{ inner.left, top + 3.0f, inner.left + 84.0f, top + 19.0f }, TextRole::Small,
-        theme.textDim);
-    const Rect plates{ inner.left + 88.0f, top, inner.left + 196.0f, top + 26.0f };
-    const Rect line{ inner.left + 204.0f, top, inner.left + 300.0f, top + 26.0f };
-    drawChip(renderer, plates, L"Плитки", overlay.layout == OverlayLayout::Plates, theme);
-    drawChip(renderer, line, L"Строка", overlay.layout == OverlayLayout::Line, theme);
+    renderer.text(L"Вид", Rect{ inner.left, top, inner.left + 40.0f, top + 16.0f }, TextRole::Small, theme.textDim);
+    const Rect plates{ inner.left + 44.0f, top - 4.0f, inner.left + 120.0f, top + 20.0f };
+    const Rect line{ inner.left + 126.0f, top - 4.0f, inner.left + 196.0f, top + 20.0f };
+    drawChip(renderer, plates, L"Плитки", overlay.layout == OverlayLayout::Plates, theme, TextRole::Tiny);
+    drawChip(renderer, line, L"Строка", overlay.layout == OverlayLayout::Line, theme, TextRole::Tiny);
     hits.push_back(UiHit{ plates, ActionKind::SetLayout, static_cast<int>(OverlayLayout::Plates) });
     hits.push_back(UiHit{ line, ActionKind::SetLayout, static_cast<int>(OverlayLayout::Line) });
-    top += 40.0f;
+    top += 34.0f;
 
-    drawSlider(renderer, Rect{ inner.left, top, inner.right, top + 36.0f }, overlay.scalePercent, 70, 160,
-        L"Масштаб", theme, hits, ActionKind::SetScale);
-    top += 50.0f;
-    drawSlider(renderer, Rect{ inner.left, top, inner.right, top + 36.0f }, overlay.opacityPercent, 0, 100,
-        L"Прозрачность фона", theme, hits, ActionKind::SetOpacity);
-    top += 52.0f;
+    drawSlider(renderer, Rect{ inner.left, top, inner.right, top + 34.0f }, overlay.scalePercent, 70, 160,
+        L"Масштаб", theme, hits, ActionKind::SetScale, L" %");
+    top += 48.0f;
+    drawSlider(renderer, Rect{ inner.left, top, inner.right, top + 34.0f }, overlay.opacityPercent, 0, 100,
+        L"Прозрачность", theme, hits, ActionKind::SetOpacity, L" %");
+    top += 48.0f;
 
-    renderer.text(L"Смещение", Rect{ inner.left, top, inner.left + 84.0f, top + 18.0f }, TextRole::Small,
-        theme.textDim);
+    renderer.text(L"Смещение", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
+    top += 20.0f;
     const auto drawOffset = [&](float left, ActionKind action, int value, std::wstring_view axis) {
-        const Rect minus{ left, top - 4.0f, left + 28.0f, top + 22.0f };
-        const Rect plus{ left + 92.0f, top - 4.0f, left + 120.0f, top + 22.0f };
-        drawChip(renderer, minus, L"−", false, theme);
-        drawChip(renderer, plus, L"+", false, theme);
-        renderer.text(wideText(std::to_string(value) + " px"), Rect{ minus.left, top + 20.0f, plus.right, top + 36.0f },
-            TextRole::Tiny, theme.textDim, TextAlign::Center);
-        renderer.text(axis, Rect{ minus.right + 2.0f, top, plus.left - 2.0f, top + 18.0f }, TextRole::Small,
-            theme.textFaint, TextAlign::Center);
+        const Rect minus{ left, top, left + 26.0f, top + 24.0f };
+        const Rect plus{ left + 92.0f, top, left + 118.0f, top + 24.0f };
+        drawChip(renderer, minus, L"−", false, theme, TextRole::Small);
+        drawChip(renderer, plus, L"+", false, theme, TextRole::Small);
+        renderer.text(axis, Rect{ minus.right, top, plus.left, top + 24.0f }, TextRole::Tiny, theme.textFaint,
+            TextAlign::Center);
+        renderer.text(wideText(std::to_string(value) + " px"),
+            Rect{ left - 6.0f, top + 24.0f, plus.right + 6.0f, top + 38.0f }, TextRole::Tiny, theme.textDim,
+            TextAlign::Center);
         hits.push_back(UiHit{ minus, action, -10 });
         hits.push_back(UiHit{ plus, action, 10 });
     };
-    drawOffset(inner.left + 88.0f, ActionKind::OffsetX, overlay.offsetX, L"X");
-    drawOffset(inner.left + 232.0f, ActionKind::OffsetY, overlay.offsetY, L"Y");
+    drawOffset(inner.left, ActionKind::OffsetX, overlay.offsetX, L"X");
+    drawOffset(inner.left + 148.0f, ActionKind::OffsetY, overlay.offsetY, L"Y");
     top += 44.0f;
 
     renderer.text(L"Состав", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
-    top += 20.0f;
-    const float metricWidth = (inner.width() - 8.0f) / 2.0f;
-    for (std::size_t index = 0; index < kMetricNames.size(); ++index) {
-        const float column = static_cast<float>(index % 2);
-        const float row = static_cast<float>(index / 2);
-        const Rect chip{ inner.left + column * (metricWidth + 8.0f), top + row * 32.0f,
-            inner.left + column * (metricWidth + 8.0f) + metricWidth, top + row * 32.0f + 26.0f };
-        drawChip(renderer, chip, kMetricNames[index], overlay.visible[index], theme, TextRole::Tiny);
-        hits.push_back(UiHit{ chip, ActionKind::ToggleMetric, static_cast<int>(index) });
+    top += 22.0f;
+    for (std::size_t index = 0; index < kFieldNames.size(); ++index) {
+        if (top + 24.0f > inner.bottom) {
+            break;
+        }
+        drawToggleRow(renderer, Rect{ inner.left, top, inner.right, top + 24.0f }, kFieldNames[index],
+            overlay.visible[index], theme, hits, ActionKind::ToggleMetric, static_cast<int>(index));
+        top += 28.0f;
     }
 }
+
 
 void drawLabelsCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card,
     std::vector<UiHit>& hits)
@@ -229,37 +207,45 @@ void drawLabelsCard(Renderer& renderer, const AppModel& model, const Theme& them
 
     renderer.text(L"Подписи полей", Rect{ inner.left, inner.top, inner.right, inner.top + 22.0f }, TextRole::Heading,
         theme.text);
-    renderer.text(L"свои названия вместо CPU и GPU, пустое поле скрывает строку",
+    renderer.text(L"клик по строке очищает подпись и начинает ввод; Esc вернёт прежнюю, Delete сотрёт целиком",
         Rect{ inner.left, inner.top + 20.0f, inner.right, inner.top + 36.0f }, TextRole::Tiny, theme.textFaint);
 
+    const std::array<std::wstring_view, 3> presets{ L"Стандарт", L"Русские", L"Только FPS" };
     float top = inner.top + 42.0f;
-    for (std::size_t index = 0; index < kLabelFields.size(); ++index) {
-        if (top + 26.0f > inner.bottom - 22.0f) {
+    const float presetWidth = (inner.width() - 2.0f * 6.0f) / 3.0f;
+    for (std::size_t index = 0; index < presets.size(); ++index) {
+        const Rect chip{ inner.left + static_cast<float>(index) * (presetWidth + 6.0f), top,
+            inner.left + static_cast<float>(index) * (presetWidth + 6.0f) + presetWidth, top + 24.0f };
+        drawChip(renderer, chip, presets[index], false, theme, TextRole::Tiny);
+        hits.push_back(UiHit{ chip, ActionKind::ApplyLabelPreset, static_cast<int>(index) });
+    }
+    top += 32.0f;
+
+    for (std::size_t index = 0; index < kFieldNames.size(); ++index) {
+        if (top + 24.0f > inner.bottom) {
             break;
         }
-        const Rect row{ inner.left, top, inner.right, top + 26.0f };
+        const Rect row{ inner.left, top, inner.right, top + 24.0f };
         const bool editing = model.editingLabel == static_cast<int>(index);
-
         renderer.fillRoundRect(row, 9.0f, editing ? theme.accentSoft : theme.panelSoft);
         if (editing) {
             renderer.strokeRoundRect(row, 9.0f, theme.accentGlow, 1.0f);
         }
-        renderer.text(kLabelTitles[index], Rect{ row.left + 10.0f, row.top, row.left + 120.0f, row.bottom },
-            TextRole::Small, theme.textDim);
+        renderer.text(kFieldNames[index], Rect{ row.left + 10.0f, row.top, row.left + 150.0f, row.bottom },
+            TextRole::Tiny, theme.textDim);
 
-        const std::wstring value = wideText(labelValue(model.settings.overlay, kLabelFields[index]));
-        renderer.text(editing ? value + L"|" : (value.empty() ? L"скрыто" : value),
-            Rect{ row.left + 126.0f, row.top, row.right - 10.0f, row.bottom }, TextRole::Small,
-            editing ? theme.accent : (value.empty() ? theme.textFaint : theme.text), TextAlign::Right);
+        const std::string& value = labelValue(model.settings.overlay, static_cast<LabelField>(index));
+        const std::wstring shown = wideText(value);
+        renderer.text(editing ? shown + L"|" : (shown.empty() ? L"скрыто" : shown),
+            Rect{ row.left + 156.0f, row.top, row.right - 34.0f, row.bottom }, TextRole::Small,
+            editing ? theme.accent : (shown.empty() ? theme.textFaint : theme.text), TextAlign::Right);
 
+        // Крестик стирает подпись одним нажатием: пустая подпись — валидное состояние.
+        const Rect clear{ row.right - 28.0f, row.centerY() - 9.0f, row.right - 10.0f, row.centerY() + 9.0f };
+        renderer.text(L"×", clear, TextRole::Small, theme.textFaint, TextAlign::Center);
         hits.push_back(UiHit{ row, ActionKind::SelectLabel, static_cast<int>(index) });
+        hits.push_back(UiHit{ clear, ActionKind::ClearLabel, static_cast<int>(index) });
         top += 28.0f;
-    }
-
-    if (top + 26.0f <= inner.bottom) {
-        const Rect reset{ inner.left, top + 2.0f, inner.left + 140.0f, top + 28.0f };
-        drawChip(renderer, reset, L"Сбросить подписи", false, theme, TextRole::Tiny);
-        hits.push_back(UiHit{ reset, ActionKind::ResetLabels, 0 });
     }
 }
 
@@ -268,14 +254,14 @@ void drawLabelsCard(Renderer& renderer, const AppModel& model, const Theme& them
 void drawOverlayView(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area,
     std::vector<UiHit>& hits)
 {
-    const float leftWidth = std::max(area.width() * 0.58f, 480.0f);
-    const float previewHeight = std::max(230.0f, (area.height() - kGap) * 0.60f);
+    const float previewWidth = area.width() * 0.58f;
+    const float previewHeight = std::max(220.0f, (area.height() - kGap) * 0.58f);
 
-    const Rect preview{ area.left, area.top, area.left + leftWidth - kGap, area.top + previewHeight };
+    const Rect preview{ area.left, area.top, area.left + previewWidth, area.top + previewHeight };
     const Rect labels{ area.left, preview.bottom + kGap, preview.right, area.bottom };
     const Rect controls{ preview.right + kGap, area.top, area.right, area.bottom };
 
-    drawPreviewCard(renderer, model, theme, preview);
+    drawPreviewCard(renderer, model, theme, preview, hits);
     drawLabelsCard(renderer, model, theme, labels, hits);
     drawControlsCard(renderer, model, theme, controls, hits);
 }

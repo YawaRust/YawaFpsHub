@@ -42,6 +42,10 @@ enum class ActionKind : std::uint8_t {
     SetOpacity,
     ToggleMetric,
     SetSensorFilter,
+    ClearLabel,
+    ResetOverlayPlacement,
+    DragOverlay,
+    ApplyLabelPreset,
     OffsetX,
     OffsetY,
 };

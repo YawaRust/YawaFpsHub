@@ -234,9 +234,12 @@ StyleSpec styleSpec(const OverlaySettings& settings, const OverlayText& text, fl
         return StyleSpec{ std::max(lineWidth + 24.0f, 120.0f), height };
     }
     switch (settings.style) {
-    case OverlayStyle::Glass:
-        spec = { 196.0f, 14.0f + static_cast<float>(rows) * kRowStep };
+    case OverlayStyle::Glass: {
+        // Крупное число кадров плюс строки со значениями; без FPS карточка ниже.
+        const std::size_t listed = rowShown(text, 0) && rows > 0 ? rows - 1 : rows;
+        spec = { 208.0f, (rowShown(text, 0) ? 74.0f : 10.0f) + static_cast<float>(listed) * 18.0f + 6.0f };
         break;
+    }
     case OverlayStyle::Neon:
         spec = { 226.0f, 104.0f };
         break;
@@ -257,32 +260,53 @@ void drawGlass(Painter& painter, const OverlayText& text, const Rect& frame)
 {
     const Theme& theme = painter.theme();
     const float scale = painter.scale();
-    painter.fillRound(frame, 10.0f * scale, theme.panel, painter.opacity());
-    painter.strokeRound(frame, 10.0f * scale, theme.line, 1.0f, 0.9f);
-    painter.fillRound(Rect{ frame.left + 1.0f, frame.top + 8.0f * scale, frame.left + 3.0f * scale,
-                         frame.bottom - 8.0f * scale },
-        1.0f * scale, theme.accent);
 
-    const float left = frame.left + 12.0f * scale;
-    const float right = frame.right - 12.0f * scale;
-    float y = frame.top + 6.0f * scale;
+    // Стекло: полупрозрачная плитка с крупным числом кадров и списком показателей.
+    painter.fillRound(frame, 12.0f * scale, theme.panel, painter.opacity());
+    painter.fillRound(Rect{ frame.left + 1.0f, frame.top + 1.0f, frame.right - 1.0f, frame.top + 2.0f * scale },
+        1.0f, theme.text, 0.06f);
+    painter.strokeRound(frame, 12.0f * scale, theme.line, 1.0f, 0.9f);
+
+    const float left = frame.left + 14.0f * scale;
+    const float right = frame.right - 14.0f * scale;
+
+    if (rowShown(text, 0)) {
+        painter.text(text.labels[0], Rect{ left, frame.top + 8.0f * scale, left + 120.0f * scale,
+                                           frame.top + 22.0f * scale },
+            TextRole::Tiny, theme.textDim);
+        painter.text(text.fps, Rect{ left, frame.top + 20.0f * scale, left + 130.0f * scale,
+                                      frame.top + 58.0f * scale },
+            TextRole::Display, theme.text);
+        painter.text(L"fps", Rect{ left + 58.0f * scale, frame.top + 44.0f * scale, left + 92.0f * scale,
+                                   frame.top + 58.0f * scale },
+            TextRole::Tiny, theme.textFaint);
+
+        painter.text(L"1% low", Rect{ right - 96.0f * scale, frame.top + 10.0f * scale, right,
+                                      frame.top + 24.0f * scale },
+            TextRole::Tiny, theme.textFaint, TextAlign::Right);
+        painter.text(text.low1, Rect{ right - 96.0f * scale, frame.top + 24.0f * scale, right,
+                                      frame.top + 46.0f * scale },
+            TextRole::Body, theme.accent, TextAlign::Right);
+        painter.line(left, frame.top + 62.0f * scale, right, frame.top + 62.0f * scale, theme.line, 1.0f, 0.8f);
+    }
 
     const std::pair<std::wstring, std::wstring> rows[] = {
-        { text.labels[0], text.fps },
         { text.labels[1], text.cpu },
         { text.labels[2], text.gpu },
         { text.labels[3], text.ram },
+        { text.labels[4], text.vram },
     };
 
+    float y = frame.top + (rowShown(text, 0) ? 68.0f : 8.0f) * scale;
     for (std::size_t index = 0; index < 4; ++index) {
-        if (!rowShown(text, index)) {
+        if (!rowShown(text, index + 1)) {
             continue;
         }
-        painter.text(rows[index].first, Rect{ left, y, left + 70.0f * scale, y + kRowHeight * scale },
-            TextRole::Tiny, index == 0 ? theme.text : theme.textDim);
-        painter.text(rows[index].second, Rect{ left + 70.0f * scale, y, right, y + kRowHeight * scale },
+        painter.text(rows[index].first, Rect{ left, y, left + 96.0f * scale, y + kRowHeight * scale },
+            TextRole::Tiny, theme.textDim);
+        painter.text(rows[index].second, Rect{ left + 96.0f * scale, y, right, y + kRowHeight * scale },
             TextRole::Small, theme.text, TextAlign::Right);
-        y += kRowStep * scale;
+        y += 18.0f * scale;
     }
 }
 

@@ -7,7 +7,9 @@
 #include <objbase.h>
 
 #include <string>
+#include <initializer_list>
 #include <string_view>
+#include <utility>
 
 #include <cwctype>
 
@@ -51,6 +53,21 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
         }
     }
 
+    // --style=glass|neon|capsule|terminal|minimal: CI снимает один и тот же экран
+    // оверлея во всех стилях, чтобы было видно, что меняется вся композиция.
+    yawa::OverlayStyle initialStyle = yawa::OverlayStyle::Glass;
+    bool hasStyle = false;
+    for (const auto& [argument, style] : std::initializer_list<std::pair<std::wstring_view, yawa::OverlayStyle>>{
+             { L"--style=glass", yawa::OverlayStyle::Glass }, { L"--style=neon", yawa::OverlayStyle::Neon },
+             { L"--style=capsule", yawa::OverlayStyle::Capsule },
+             { L"--style=terminal", yawa::OverlayStyle::Terminal },
+             { L"--style=minimal", yawa::OverlayStyle::Minimal } }) {
+        if (arguments.find(argument) != std::wstring_view::npos) {
+            initialStyle = style;
+            hasStyle = true;
+        }
+    }
+
     // --view=sensors|settings нужен CI, чтобы снять скриншоты всех экранов.
     yawa::View initialView = yawa::View::Dashboard;
     if (arguments.find(L"--view=sensors") != std::wstring_view::npos) {
@@ -88,6 +105,9 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
 
     // Самопроверка держит окно открытым, чтобы CI успел снять скриншот интерфейса.
     window.setInitialView(initialView);
+    if (hasStyle) {
+        window.setInitialStyle(initialStyle);
+    }
     if (arguments.find(L"--overlay") != std::wstring_view::npos) {
         window.setOverlayVisible(true);
     }
