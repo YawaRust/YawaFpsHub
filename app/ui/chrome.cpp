@@ -154,8 +154,8 @@ void drawTopBar(Renderer& renderer, const AppModel& model, const Theme& theme, s
     renderer.fillRect(Rect{ kRailWidth, 0.0f, renderer.width(), kTopBarHeight }, theme.background);
 
     renderer.text(wideText(viewEyebrow(model.view)),
-        Rect{ kRailWidth + 24.0f, 18.0f, kRailWidth + 360.0f, 34.0f }, TextRole::Tiny, theme.accent, TextAlign::Left,
-        0.8f);
+        Rect{ kRailWidth + 24.0f, 18.0f, kRailWidth + 360.0f, 34.0f }, TextRole::Tiny,
+        theme.accent.withAlpha(0.8f));
     renderer.text(wideText(viewTitle(model.view)),
         Rect{ kRailWidth + 24.0f, 34.0f, kRailWidth + 460.0f, 72.0f }, TextRole::Value, theme.text);
 

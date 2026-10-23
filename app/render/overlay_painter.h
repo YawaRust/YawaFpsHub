@@ -44,7 +44,7 @@ struct OverlayFormats {
     IDWriteFactory* factory = nullptr;
     IDWriteTextFormat* key = nullptr;
     IDWriteTextFormat* value = nullptr;
-    IDWriteTextFormat* small = nullptr;
+    IDWriteTextFormat* smallText = nullptr;
     IDWriteTextFormat* mono = nullptr;
 };
 

@@ -48,6 +48,7 @@ private:
     bool ensureRenderTarget(UINT width, UINT height);
     void render();
     void drawScene(float scale);
+    OverlayValues currentValues() const;
     void drawPlates(float scale);
     void drawLine(float scale);
     void drawBackground(const D2D1_RECT_F& frame, float scale);

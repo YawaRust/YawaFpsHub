@@ -167,7 +167,7 @@ private:
         case TextRole::Mono:
             return m_formats.mono;
         default:
-            return m_formats.small;
+            return m_formats.smallText;
         }
     }
 
