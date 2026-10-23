@@ -15,16 +15,10 @@ constexpr std::array<std::wstring_view, 2> kStyleNamesTail{ L"Терминал",
 constexpr std::array<std::wstring_view, 4> kPositionNames{ L"↖", L"↗", L"↙", L"↘" };
 constexpr std::array<std::wstring_view, 5> kMetricNames{ L"FPS", L"Процессор", L"Видеокарта", L"Память",
     L"Видеопамять" };
-
-void drawChip(Renderer& renderer, const Rect& rect, std::wstring_view label, bool isActive, const Theme& theme,
-    TextRole role = TextRole::Small)
-{
-    renderer.fillRoundRect(rect, 9.0f, isActive ? theme.accentSoft : theme.panelSoft);
-    if (isActive) {
-        renderer.strokeRoundRect(rect, 9.0f, theme.accentGlow, 1.0f);
-    }
-    renderer.text(label, rect, role, isActive ? theme.accent : theme.textDim, TextAlign::Center);
-}
+constexpr std::array<LabelField, 5> kLabelFields{ LabelField::Fps, LabelField::Cpu, LabelField::Gpu,
+    LabelField::Ram, LabelField::Vram };
+constexpr std::array<std::wstring_view, 5> kLabelTitles{ L"Кадры", L"Процессор", L"Видеокарта", L"Память",
+    L"Видеопамять" };
 
 // Ползунок без отдельного контрола: клик по дорожке сразу ставит значение,
 // а перетаскивание обрабатывает окно (SetScale/SetOpacity в UiHit).
@@ -227,16 +221,62 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
     }
 }
 
+void drawLabelsCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card,
+    std::vector<UiHit>& hits)
+{
+    drawCard(renderer, card, theme);
+    const Rect inner = card.inset(kCardPadding);
+
+    renderer.text(L"Подписи полей", Rect{ inner.left, inner.top, inner.right, inner.top + 22.0f }, TextRole::Heading,
+        theme.text);
+    renderer.text(L"свои названия вместо CPU и GPU, пустое поле скрывает строку",
+        Rect{ inner.left, inner.top + 20.0f, inner.right, inner.top + 36.0f }, TextRole::Tiny, theme.textFaint);
+
+    float top = inner.top + 46.0f;
+    for (std::size_t index = 0; index < kLabelFields.size(); ++index) {
+        if (top + 26.0f > inner.bottom - 22.0f) {
+            break;
+        }
+        const Rect row{ inner.left, top, inner.right, top + 26.0f };
+        const bool editing = model.editingLabel == static_cast<int>(index);
+
+        renderer.fillRoundRect(row, 9.0f, editing ? theme.accentSoft : theme.panelSoft);
+        if (editing) {
+            renderer.strokeRoundRect(row, 9.0f, theme.accentGlow, 1.0f);
+        }
+        renderer.text(kLabelTitles[index], Rect{ row.left + 10.0f, row.top, row.left + 120.0f, row.bottom },
+            TextRole::Small, theme.textDim);
+
+        const std::wstring value = wideText(labelValue(model.settings.overlay, kLabelFields[index]));
+        renderer.text(editing ? value + L"|" : (value.empty() ? L"скрыто" : value),
+            Rect{ row.left + 126.0f, row.top, row.right - 10.0f, row.bottom }, TextRole::Small,
+            editing ? theme.accent : (value.empty() ? theme.textFaint : theme.text), TextAlign::Right);
+
+        hits.push_back(UiHit{ row, ActionKind::SelectLabel, static_cast<int>(index) });
+        top += 32.0f;
+    }
+
+    if (top + 26.0f <= inner.bottom) {
+        const Rect reset{ inner.left, top + 2.0f, inner.left + 140.0f, top + 28.0f };
+        drawChip(renderer, reset, L"Сбросить подписи", false, theme, TextRole::Tiny);
+        hits.push_back(UiHit{ reset, ActionKind::ResetLabels, 0 });
+    }
+}
+
 } // namespace
 
 void drawOverlayView(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area,
     std::vector<UiHit>& hits)
 {
-    const float leftWidth = std::max(area.width() * 0.56f, 460.0f);
-    const Rect preview{ area.left, area.top, area.left + leftWidth - kGap, area.bottom };
+    const float leftWidth = std::max(area.width() * 0.58f, 480.0f);
+    const float previewHeight = std::max(230.0f, (area.height() - kGap) * 0.60f);
+
+    const Rect preview{ area.left, area.top, area.left + leftWidth - kGap, area.top + previewHeight };
+    const Rect labels{ area.left, preview.bottom + kGap, preview.right, area.bottom };
     const Rect controls{ preview.right + kGap, area.top, area.right, area.bottom };
 
     drawPreviewCard(renderer, model, theme, preview);
+    drawLabelsCard(renderer, model, theme, labels, hits);
     drawControlsCard(renderer, model, theme, controls, hits);
 }
 

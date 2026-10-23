@@ -2,6 +2,8 @@
 
 #include <windows.h>
 
+#include <iterator>
+
 namespace yawa {
 namespace {
 
@@ -24,6 +26,38 @@ std::wstring systemMessage(unsigned long errorCode)
 }
 
 } // namespace
+
+std::wstring foregroundProcessName()
+{
+    const HWND window = GetForegroundWindow();
+    if (window == nullptr) {
+        return {};
+    }
+
+    DWORD processId = 0;
+    GetWindowThreadProcessId(window, &processId);
+    if (processId == 0) {
+        return {};
+    }
+
+    // PROCESS_QUERY_LIMITED_INFORMATION не требует прав администратора и работает
+    // для чужих процессов, включая игры с античитом.
+    const HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId);
+    if (process == nullptr) {
+        return {};
+    }
+
+    wchar_t path[1024]{};
+    DWORD size = static_cast<DWORD>(std::size(path));
+    std::wstring name;
+    if (QueryFullProcessImageNameW(process, 0, path, &size) != FALSE) {
+        std::wstring_view full(path, size);
+        const std::size_t slash = full.find_last_of(L'\\');
+        name.assign(slash == std::wstring_view::npos ? full : full.substr(slash + 1));
+    }
+    CloseHandle(process);
+    return name;
+}
 
 std::string narrow(std::wstring_view text)
 {

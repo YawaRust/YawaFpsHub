@@ -493,10 +493,12 @@ void MainWindow::applyAction(const UiHit& hit)
         m_model.view = static_cast<View>(hit.value);
         break;
 
+    case ActionKind::SetTargetHz:
+        m_model.settings.capture.targetHz = std::clamp(hit.value, 30, 480);
+        saveSettings();
+        break;
+
     case ActionKind::SetInterval:
-        if (hit.value >= 30) {
-            m_model.settings.capture.targetHz = hit.value;
-        }
         if (hit.value == 500 || hit.value == 1000 || hit.value == 2000) {
             m_model.settings.capture.intervalMs = hit.value;
             // Сборщик спит до следующего опроса — будим его, чтобы новый интервал
@@ -560,9 +562,39 @@ void MainWindow::applyAction(const UiHit& hit)
         saveSettings();
         break;
 
+    case ActionKind::SetDensity:
+        m_model.settings.ui.compactDensity = hit.value != 0;
+        saveSettings();
+        break;
+
     case ActionKind::ToggleCompact:
         m_model.settings.ui.compactDensity = !m_model.settings.ui.compactDensity;
         saveSettings();
+        break;
+
+    case ActionKind::ToggleTray:
+        m_model.settings.ui.closeToTray = !m_model.settings.ui.closeToTray;
+        saveSettings();
+        break;
+
+    case ActionKind::ToggleEtw:
+        m_model.settings.capture.etwEnabled = !m_model.settings.capture.etwEnabled;
+        saveSettings();
+        restartSampling();
+        break;
+
+    case ActionKind::ToggleIdlePause:
+        m_model.settings.capture.pauseWhenIdle = !m_model.settings.capture.pauseWhenIdle;
+        saveSettings();
+        break;
+
+    case ActionKind::ToggleDiskNet:
+        m_model.settings.capture.includeDiskNet = !m_model.settings.capture.includeDiskNet;
+        saveSettings();
+        break;
+
+    case ActionKind::SetSensorFilter:
+        m_model.sensorFilter = hit.value;
         break;
 
     case ActionKind::OpenSettingsFolder:
@@ -647,6 +679,17 @@ void MainWindow::stopSampling()
     m_worker.join();
 }
 
+void MainWindow::restartSampling()
+{
+    stopSampling();
+    {
+        std::lock_guard<std::mutex> guard(m_modelMutex);
+        m_model.etwRunning = false;
+        m_model.store.reset();
+    }
+    startSampling();
+}
+
 void MainWindow::samplingLoop()
 {
     yawa::FrameTracker tracker(EtwFrameSession::qpcFrequency());
@@ -687,6 +730,8 @@ void MainWindow::samplingLoop()
             const yawa::DerivedValues values = yawa::deriveValues(snapshot, deltas);
             const yawa::FpsSummary fps = tracker.summary(static_cast<double>(m_model.settings.capture.targetHz));
 
+            const std::wstring foreground = foregroundProcessName();
+
             {
                 std::lock_guard<std::mutex> guard(m_modelMutex);
                 yawa::applySnapshot(m_model.store, snapshot, values, fps,
@@ -694,6 +739,17 @@ void MainWindow::samplingLoop()
                 m_model.fps = fps;
                 m_model.availability = m_sensors.availability();
                 m_model.etwRunning = m_etw.isRunning();
+                if (!foreground.empty()) {
+                    m_model.foregroundApp = foreground;
+                }
+            }
+
+            // В простое без кадров опрос можно замедлить: это и есть «экономия вне игры».
+            if (fps.currentFps <= 0.0) {
+                std::lock_guard<std::mutex> guard(m_modelMutex);
+                if (m_model.settings.capture.pauseWhenIdle) {
+                    interval = std::max(interval, 2000);
+                }
             }
 
             PostMessageW(m_window, kTickMessage, 0, 0);

@@ -275,6 +275,15 @@ void Renderer::drawDashedLine(float x1, float y1, float x2, float y2, const Colo
     dashed->Release();
 }
 
+void Renderer::strokeCircle(float centerX, float centerY, float radius, const Color& color, float thickness)
+{
+    ID2D1SolidColorBrush* brush = brushFor(color);
+    if (brush == nullptr) {
+        return;
+    }
+    m_target->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(centerX, centerY), radius, radius), brush, thickness);
+}
+
 void Renderer::drawArc(float centerX, float centerY, float radius, float thickness, float sweepFraction,
     const Color& color)
 {

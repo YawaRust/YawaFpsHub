@@ -43,6 +43,8 @@ private:
 
     void startSampling();
     void stopSampling();
+    // Перезапуск нужен, когда меняется состав сбора (ETW включают или выключают).
+    void restartSampling();
     void samplingLoop();
     void onTick();
     void paint();

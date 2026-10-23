@@ -68,12 +68,6 @@ void drawBrand(Renderer& renderer, const Theme& theme)
     renderer.text(L"Y", badge, TextRole::Value, theme.accent, TextAlign::Center);
 }
 
-void drawChip(Renderer& renderer, const Rect& rect, std::wstring_view label, const Theme& theme, bool active)
-{
-    renderer.fillRoundRect(rect, 10.0f, active ? theme.accentSoft : theme.panelSoft);
-    renderer.text(label, rect, TextRole::Tiny, active ? theme.accent : theme.textDim, TextAlign::Center);
-}
-
 } // namespace
 
 std::string_view viewTitle(View view)
@@ -164,7 +158,7 @@ void drawTopBar(Renderer& renderer, const AppModel& model, const Theme& theme, s
     float right = renderer.width() - 20.0f;
 
     const Rect pause{ right - 88.0f, top, right, bottom };
-    drawChip(renderer, pause, model.paused ? L"Продолжить" : L"Пауза", theme, model.paused);
+    drawChip(renderer, pause, model.paused ? L"Продолжить" : L"Пауза", model.paused, theme);
     hits.push_back(UiHit{ pause, ActionKind::TogglePause, 0 });
     right = pause.left - 8.0f;
 
@@ -194,8 +188,8 @@ void drawTopBar(Renderer& renderer, const AppModel& model, const Theme& theme, s
     right -= 4.0f;
 
     const Rect interval{ right - 112.0f, top, right, bottom };
-    drawChip(renderer, interval, wideText("опрос " + std::to_string(model.settings.capture.intervalMs) + " мс"), theme,
-        false);
+    drawChip(renderer, interval, wideText("опрос " + std::to_string(model.settings.capture.intervalMs) + " мс"),
+        false, theme);
     right = interval.left - 8.0f;
 
     const Rect live{ right - 168.0f, top, right, bottom };

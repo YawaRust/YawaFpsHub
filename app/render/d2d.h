@@ -64,6 +64,7 @@ public:
     void fillRoundRect(const Rect& rect, float radius, const Color& color);
     void strokeRoundRect(const Rect& rect, float radius, const Color& color, float thickness = 1.0f);
     void fillCircle(float centerX, float centerY, float radius, const Color& color);
+    void strokeCircle(float centerX, float centerY, float radius, const Color& color, float thickness = 1.0f);
     void drawLine(float x1, float y1, float x2, float y2, const Color& color, float thickness = 1.0f);
     void drawDashedLine(float x1, float y1, float x2, float y2, const Color& color, float thickness);
 

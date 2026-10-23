@@ -1,5 +1,7 @@
 #include "ui/layout.h"
 
+#include "metrics/units.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -88,10 +90,20 @@ void drawLabelValue(Renderer& renderer, const Rect& rect, std::wstring_view labe
         theme.text, TextAlign::Right);
 }
 
-void drawBar(Renderer& renderer, const Rect& rect, float fraction, const Color& color, const Color& trackColor)
+void drawChip(Renderer& renderer, const Rect& rect, std::wstring_view label, bool active, const Theme& theme,
+    TextRole role)
+{
+    renderer.fillRoundRect(rect, 9.0f, active ? theme.accentSoft : theme.panelSoft);
+    if (active) {
+        renderer.strokeRoundRect(rect, 9.0f, theme.accentGlow, 1.0f);
+    }
+    renderer.text(label, rect, role, active ? theme.accent : theme.textDim, TextAlign::Center);
+}
+
+void drawBar(Renderer& renderer, const Rect& rect, float fraction, const Color& color, const Theme& theme)
 {
     const float radius = rect.height() * 0.5f;
-    renderer.fillRoundRect(rect, radius, trackColor);
+    renderer.fillRoundRect(rect, radius, theme.line);
 
     const float width = rect.width() * clamp01(fraction);
     if (width > 1.0f) {
@@ -100,9 +112,9 @@ void drawBar(Renderer& renderer, const Rect& rect, float fraction, const Color& 
 }
 
 void drawGauge(Renderer& renderer, float centerX, float centerY, float radius, float fraction,
-    const Color& color, const Color& trackColor, std::wstring_view value, const Color& valueColor)
+    const Color& color, const Color& track, std::wstring_view value, const Color& valueColor)
 {
-    renderer.drawArc(centerX, centerY, radius, 8.0f, 1.0f, trackColor);
+    renderer.strokeCircle(centerX, centerY, radius, track, 8.0f);
     renderer.drawArc(centerX, centerY, radius, 8.0f, clamp01(fraction), color);
 
     const Rect valueRect{ centerX - radius, centerY - 16.0f, centerX + radius, centerY + 14.0f };
