@@ -86,7 +86,7 @@ void drawPreviewCard(Renderer& renderer, const AppModel& model, const Theme& the
     renderer.fillRoundRect(tag, 10.0f, theme.panelSoft);
     renderer.text(L"F10", tag, TextRole::Tiny, theme.textFaint, TextAlign::Center);
 
-    const float galleryTop = inner.bottom - 66.0f;
+    const float galleryTop = inner.bottom - 104.0f;
     const Rect scene{ inner.left, inner.top + 46.0f, inner.right, std::max(inner.top + 76.0f, galleryTop - 10.0f) };
 
     // Макет игровой сцены: небо, земля и пара силуэтов — на нём видно, как читается оверлей.
@@ -122,44 +122,43 @@ void drawStyleGallery(Renderer& renderer, const AppModel& model, const Theme& th
         theme.textDim);
 
     const float gap = 6.0f;
-    const std::size_t count = kStyleNames.size();
-    const float tileWidth = (area.width() - gap * static_cast<float>(count - 1)) / static_cast<float>(count);
-    const float top = area.top + 16.0f;
+    const float rowGap = 6.0f;
+    const float columnWidth = (area.width() - gap * 3.0f) / 4.0f;
+    const float rowHeight = (area.height() - 16.0f - rowGap) / 2.0f;
 
-    for (std::size_t index = 0; index < count; ++index) {
-        const Rect tile{ area.left + static_cast<float>(index) * (tileWidth + gap), top,
-            area.left + static_cast<float>(index) * (tileWidth + gap) + tileWidth, area.bottom };
+    for (std::size_t index = 0; index < kStyleNames.size(); ++index) {
+        const std::size_t column = index % 4;
+        const std::size_t row = index / 4;
+        const float left = area.left + static_cast<float>(column) * (columnWidth + gap);
+        const float top = area.top + 16.0f + static_cast<float>(row) * (rowHeight + rowGap);
+        const Rect tile{ left, top, left + columnWidth, top + rowHeight };
         const bool active = static_cast<std::size_t>(model.settings.overlay.style) == index;
         const bool hover = isHovered(model, tile);
+        const OverlaySwatch swatch = overlaySwatch(static_cast<OverlayStyle>(index));
 
-        renderer.fillRoundRect(tile, 8.0f, active ? theme.accentSoft : theme.panelSoft.withAlpha(hover ? 0.95f : 0.6f));
+        renderer.fillRoundRect(
+            tile, 8.0f, active ? theme.accentSoft : theme.panelSoft.withAlpha(hover ? 0.95f : 0.6f));
         if (active) {
             renderer.strokeRoundRect(tile, 8.0f, theme.accentGlow, 1.0f);
         }
 
-        // Миниатюра — тот же рендер оверлея, уменьшенный и обрезанный по плитке:
-        // видно реальную палитру и компоновку, а не абстрактный прямоугольник.
-        const Rect preview{ tile.left + 3.0f, tile.top + 3.0f, tile.right - 3.0f, tile.top + 31.0f };
-        OverlaySettings sample = model.settings.overlay;
-        sample.style = static_cast<OverlayStyle>(index);
-        sample.visible = { true, true, true, true, false };
-        sample.labels = { "FPS", "CPU", "GPU", "RAM", "VRAM" };
-        sample.position = OverlayPosition::TopLeft;
-        sample.offsetX = 0;
-        sample.offsetY = 0;
-        sample.scalePercent = 70;
-        sample.opacityPercent = 95;
+        // Миниатюра показывает палитру и форму пресета: фон, рамку, цвет значения.
+        const Rect preview{ tile.left + 5.0f, tile.top + 4.0f, tile.right - 5.0f, tile.top + 26.0f };
+        if (swatch.alpha > 0.0f) {
+            renderer.fillRoundRect(preview, swatch.radius * 0.6f, swatch.background.withAlpha(swatch.alpha));
+        }
+        if (swatch.borderVisible) {
+            renderer.strokeRoundRect(preview, swatch.radius * 0.6f, swatch.border.withAlpha(0.8f), 1.0f);
+        }
+        renderer.text(L"142", Rect{ preview.left + 6.0f, preview.top, preview.left + 44.0f, preview.bottom },
+            swatch.mono ? TextRole::Mono : TextRole::Small, swatch.value, TextAlign::Left);
+        renderer.text(L"FPS", Rect{ preview.left + 34.0f, preview.top, preview.left + 62.0f, preview.bottom },
+            TextRole::Tiny, swatch.accent, TextAlign::Left);
+        renderer.text(L"46%", Rect{ preview.right - 38.0f, preview.top, preview.right - 6.0f, preview.bottom },
+            TextRole::Tiny, swatch.value, TextAlign::Right);
 
-        const OverlayFormats formats{ renderer.dwrite(), renderer.textFormat(TextRole::Heading),
-            renderer.textFormat(TextRole::Value), renderer.textFormat(TextRole::Small),
-            renderer.textFormat(TextRole::Mono) };
-        const OverlayText text = makeOverlayText(sample, currentValues(model));
-
-        renderer.pushClip(preview);
-        paintOverlay(renderer.target(), sample, theme, text, preview, 0.62f, formats);
-        renderer.popClip();
-
-        renderer.text(kStyleNames[index], Rect{ tile.left + 2.0f, tile.top + 33.0f, tile.right - 2.0f, tile.bottom },
+        renderer.text(kStyleNames[index], Rect{ tile.left + 4.0f, tile.bottom - 15.0f, tile.right - 4.0f,
+                                                 tile.bottom - 1.0f },
             TextRole::Tiny, active ? theme.accent : (hover ? theme.text : theme.textDim), TextAlign::Center);
         hits.push_back(UiHit{ tile, ActionKind::SetStyle, static_cast<int>(index) });
     }

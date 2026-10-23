@@ -122,6 +122,8 @@ Color pipColor(std::size_t groupIndex, const Theme& theme)
         return theme.ram;
     case 4:
         return theme.disk;
+    case 5:
+        return theme.warn;
     default:
         return theme.textDim;
     }

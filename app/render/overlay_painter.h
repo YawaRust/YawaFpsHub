@@ -50,6 +50,20 @@ struct OverlayFormats {
 
 OverlayText makeOverlayText(const OverlaySettings& settings, const OverlayValues& values);
 
+// Палитра стиля для галереи в редакторе: миниатюру рисуем теми же цветами, что и оверлей.
+struct OverlaySwatch {
+    Color background;
+    Color border;
+    Color accent;
+    Color value;
+    float alpha = 1.0f;
+    float radius = 8.0f;
+    bool borderVisible = true;
+    bool mono = false;
+};
+
+OverlaySwatch overlaySwatch(OverlayStyle style);
+
 // Рисует оверлей выбранного стиля внутри bounds и возвращает прямоугольник содержимого.
 // Один и тот же код рисует и настоящее окно поверх игры, и предпросмотр в настройках.
 Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, const Theme& theme,

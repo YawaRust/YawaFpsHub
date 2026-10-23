@@ -105,7 +105,7 @@ void SystemSensors::initializeCpu(Log& log)
     if (m_thermalZone.open(L"\\Thermal Zone Information(*)\\Temperature")) {
         log.info("CPU: термозона ACPI подключена");
     } else {
-        log.info("CPU: температура недоступна без MSR-драйвера");
+        log.info("CPU: термозона ACPI не отдала счётчик, температура недоступна");
     }
 }
 

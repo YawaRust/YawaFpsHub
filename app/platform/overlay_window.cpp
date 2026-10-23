@@ -329,8 +329,14 @@ bool OverlayWindow::render()
         return false;
     }
 
-    if (m_monitorRect.right <= m_monitorRect.left) {
-        m_monitorRect = monitorRect();
+    // Разрешение или монитор могли смениться, пока оверлей висел поверх игры.
+    const RECT currentMonitor = monitorRect();
+    if (currentMonitor.left != m_monitorRect.left || currentMonitor.top != m_monitorRect.top
+        || currentMonitor.right != m_monitorRect.right || currentMonitor.bottom != m_monitorRect.bottom) {
+        m_monitorRect = currentMonitor;
+        SetWindowPos(m_window, HWND_TOPMOST, m_monitorRect.left, m_monitorRect.top,
+            m_monitorRect.right - m_monitorRect.left, m_monitorRect.bottom - m_monitorRect.top,
+            SWP_NOACTIVATE);
     }
     const UINT width = static_cast<UINT>(m_monitorRect.right - m_monitorRect.left);
     const UINT height = static_cast<UINT>(m_monitorRect.bottom - m_monitorRect.top);

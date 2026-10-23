@@ -820,6 +820,41 @@ void drawInline(Painter& painter, const OverlaySettings& settings, const Overlay
 
 } // namespace
 
+OverlaySwatch overlaySwatch(OverlayStyle style)
+{
+    const StyleLook look = lookFor(style);
+    OverlaySwatch swatch;
+    swatch.background = look.background;
+    swatch.border = look.border;
+    swatch.accent = look.accent;
+    swatch.value = look.value;
+    swatch.radius = look.radius;
+    swatch.borderVisible = look.borderVisible;
+    swatch.mono = look.mono;
+
+    switch (style) {
+    case OverlayStyle::Rtss:
+        swatch.alpha = 0.0f;
+        break;
+    case OverlayStyle::Frosted:
+        swatch.alpha = 0.22f;
+        break;
+    case OverlayStyle::Mono:
+        swatch.alpha = 0.35f;
+        break;
+    case OverlayStyle::Cyber:
+        swatch.alpha = 0.9f;
+        break;
+    case OverlayStyle::Terminal:
+        swatch.alpha = 0.96f;
+        break;
+    default:
+        swatch.alpha = 0.95f;
+        break;
+    }
+    return swatch;
+}
+
 OverlayText makeOverlayText(const OverlaySettings& settings, const OverlayValues& values)
 {
     OverlayText text;
