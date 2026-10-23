@@ -131,11 +131,12 @@ int MainWindow::run(int smokeSeconds)
 {
     std::thread smoke;
     if (smokeSeconds > 0) {
-        smoke = std::thread([this, smokeSeconds]() {
+        // WM_CLOSE в трей-приложении не завершает процесс, поэтому самопроверка
+        // ставит WM_QUIT прямо в очередь главного потока.
+        const DWORD mainThread = GetCurrentThreadId();
+        smoke = std::thread([smokeSeconds, mainThread]() {
             std::this_thread::sleep_for(std::chrono::seconds(smokeSeconds));
-            if (m_window != nullptr) {
-                PostMessageW(m_window, WM_CLOSE, 0, 0);
-            }
+            PostThreadMessageW(mainThread, WM_QUIT, 0, 0);
         });
     }
 
