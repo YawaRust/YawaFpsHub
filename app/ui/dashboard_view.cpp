@@ -225,7 +225,7 @@ void drawCpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
 
     const float radius = gaugeRadius(Rect{ inner.left, top, inner.right, inner.bottom });
     const float rowsLeft = inner.left + radius * 2.0f + 20.0f;
-    float rowTop = top + 10.0f;
+    float rowTop = top + 6.0f;
     const std::array<std::pair<std::wstring, std::wstring>, 2> rows{
         std::pair<std::wstring, std::wstring>{ L"Частота",
             model.availability.cpuClock ? wideMetric(MetricId::CpuClock, model.store.value(MetricId::CpuClock))
@@ -240,16 +240,17 @@ void drawCpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
             break;
         }
         drawLabelValue(renderer, Rect{ rowsLeft, rowTop, inner.right, rowTop + 16.0f }, label, value, theme);
-        rowTop += 24.0f;
+        rowTop += 22.0f;
     }
 
     // Полоски по ядрам, как в демо: видно, что процессор действительно опрашивается.
-    if (model.cpuCores > 0 && inner.bottom - rowTop >= 22.0f) {
+    if (model.cpuCores > 0 && inner.bottom - rowTop >= 8.0f) {
+        // Полоски тонкие: в короткой карточке под них остаётся меньше двадцати пикселей.
         const std::size_t count = std::min<std::size_t>(model.cpuCores, 16);
-        const float gap = 3.0f;
+        const float gap = 2.0f;
         const float barWidth = (inner.width() - gap * static_cast<float>(count - 1)) / static_cast<float>(count);
         const float base = inner.bottom;
-        const float height = std::min(18.0f, inner.bottom - rowTop);
+        const float height = std::min(14.0f, inner.bottom - rowTop);
 
         for (std::size_t index = 0; index < count; ++index) {
             const MetricId id = static_cast<MetricId>(static_cast<std::size_t>(MetricId::Core0Load) + index);

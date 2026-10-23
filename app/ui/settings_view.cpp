@@ -294,17 +294,17 @@ void drawHotkeyCard(Renderer& renderer, const AppModel& model, const Theme& them
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
     float top = drawCardHeader(renderer, card, L"Горячие клавиши",
-        L"нажмите на строку и введите клавишу, Delete отключает", theme);
+        L"нажмите строку и введите клавишу · Esc — отмена · Delete — выключить", theme);
 
     const std::array<std::wstring_view, 3> names{ L"Оверлей", L"Положение оверлея", L"Показать или скрыть окно" };
     const std::array<unsigned int, 3> keys{ model.settings.hotkeys.overlay, model.settings.hotkeys.position,
         model.settings.hotkeys.window };
 
     for (std::size_t index = 0; index < names.size(); ++index) {
-        if (top + 32.0f > inner.bottom) {
+        if (top + 28.0f > inner.bottom) {
             break;
         }
-        const Rect row{ inner.left, top, inner.right, top + 30.0f };
+        const Rect row{ inner.left, top, inner.right, top + 26.0f };
         const bool editing = model.hotkeyEditing == static_cast<int>(index);
         renderer.fillRoundRect(row, 9.0f, editing ? theme.accentSoft : theme.panelSoft);
         if (editing) {
@@ -314,17 +314,14 @@ void drawHotkeyCard(Renderer& renderer, const AppModel& model, const Theme& them
         renderer.text(names[index], Rect{ row.left + 10.0f, row.top, row.right - 120.0f, row.bottom },
             TextRole::Small, editing ? theme.text : theme.textDim);
 
-        const Rect keyChip{ row.right - 108.0f, row.top + 5.0f, row.right - 8.0f, row.bottom - 5.0f };
+        const Rect keyChip{ row.right - 108.0f, row.top + 3.0f, row.right - 8.0f, row.bottom - 3.0f };
         renderer.fillRoundRect(keyChip, 7.0f, editing ? theme.accent : theme.background.withAlpha(0.6f));
         renderer.text(editing ? L"нажмите клавишу" : keyName(keys[index]), keyChip, TextRole::Tiny,
             editing ? theme.background : theme.text, TextAlign::Center);
 
         hits.push_back(UiHit{ row, ActionKind::CaptureHotkey, static_cast<int>(index) });
-        top += 34.0f;
+        top += 30.0f;
     }
-
-    renderer.text(L"Esc — отмена, Delete — выключить. Если клавишу занял другой процесс, привязка не сработает.",
-        Rect{ inner.left, inner.bottom - 16.0f, inner.right, inner.bottom }, TextRole::Tiny, theme.textFaint);
 }
 
 void drawSourcesCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card)
