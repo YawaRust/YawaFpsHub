@@ -341,7 +341,7 @@ bool OverlayWindow::render()
     drawScene(static_cast<float>(std::clamp(m_settings.scalePercent, 70, 160)) / 100.0f);
 
     HDC screen = GetDC(nullptr);
-    const POINT destination{ m_monitorRect.left, m_monitorRect.top };
+    POINT destination{ m_monitorRect.left, m_monitorRect.top };
     POINT source{ 0, 0 };
     SIZE size{ static_cast<LONG>(m_bitmapWidth), static_cast<LONG>(m_bitmapHeight) };
     BLENDFUNCTION blend{};
