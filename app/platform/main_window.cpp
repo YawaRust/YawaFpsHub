@@ -759,6 +759,10 @@ std::vector<UiHit> MainWindow::buildHits()
     if (scrolled) {
         m_renderer.pushTranslate(0.0f, -m_model.contentScroll);
     }
+    // Курсор приходит в координатах окна: сдвигаем его в координаты содержимого,
+    // чтобы наведение работало и после прокрутки.
+    const float cursorY = m_model.cursorY;
+    m_model.cursorY += m_model.contentScroll;
     switch (m_model.view) {
     case View::Dashboard:
         drawDashboard(m_renderer, m_model, m_theme, area, hits);
@@ -776,6 +780,7 @@ std::vector<UiHit> MainWindow::buildHits()
     if (scrolled) {
         m_renderer.popTranslate();
     }
+    m_model.cursorY = cursorY;
     m_renderer.popClip();
     drawScrollBar(viewport);
     return hits;
@@ -798,6 +803,14 @@ void MainWindow::paint()
     m_renderer.fillRadialGlow(width * 0.12f, -60.0f, 560.0f, m_theme.accent.withAlpha(0.16f));
     m_renderer.fillRadialGlow(width * 0.94f, 30.0f, 440.0f, fromRgba(0xFF6AA8FF).withAlpha(0.10f));
     m_hits = buildHits();
+    // Хиты построены в координатах содержимого — переводим их в координаты окна,
+    // иначе после прокрутки клики попадали бы не туда.
+    if (m_model.contentScroll > 0.5f) {
+        for (UiHit& hit : m_hits) {
+            hit.rect.top -= m_model.contentScroll;
+            hit.rect.bottom -= m_model.contentScroll;
+        }
+    }
     drawRail(m_renderer, m_model, m_theme, m_hits);
     drawTitleBar(m_renderer, m_model, m_theme, m_hits);
     drawTopBar(m_renderer, m_model, m_theme, m_hits);
