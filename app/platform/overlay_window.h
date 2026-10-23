@@ -7,6 +7,7 @@
 
 #include <windows.h>
 #include <d2d1.h>
+#include <dwrite.h>
 
 #include <string>
 
@@ -43,8 +44,8 @@ private:
     void drawPlates(float scale);
     void drawLine(float scale);
     void drawBackground(const D2D1_RECT_F& frame, float scale);
-    void drawRow(float y, float scale, const wchar_t* key, const std::wstring& value, const std::wstring& unit,
-        bool emphasize);
+    void drawRow(float y, float scale, const std::wstring& key, const std::wstring& value,
+        const std::wstring& unit, bool emphasize);
 
     HWND m_window = nullptr;
     ID2D1DCRenderTarget* m_target = nullptr;

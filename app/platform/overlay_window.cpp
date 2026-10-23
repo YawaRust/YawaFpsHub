@@ -1,4 +1,5 @@
 #include "platform/overlay_window.h"
+#include "ui/layout.h"
 
 #include <d2d1helper.h>
 #include <dwrite.h>
@@ -291,7 +292,7 @@ void OverlayWindow::drawBackground(const D2D1_RECT_F& frame, float scale)
     }
 }
 
-void OverlayWindow::drawRow(float y, float scale, const wchar_t* key, const std::wstring& value,
+void OverlayWindow::drawRow(float y, float scale, const std::wstring& key, const std::wstring& value,
     const std::wstring& unit, bool emphasize)
 {
     const float left = kMargin + 10.0f * scale;
@@ -299,8 +300,8 @@ void OverlayWindow::drawRow(float y, float scale, const wchar_t* key, const std:
 
     ID2D1SolidColorBrush* brush = nullptr;
     if (SUCCEEDED(m_target->CreateSolidColorBrush(colorOf(m_theme.accent), &brush))) {
-        m_target->DrawTextW(key, static_cast<UINT32>(wcslen(key)), m_keyFormat,
-            D2D1::RectF(left, y, left + 46.0f * scale, y + 16.0f * scale), brush);
+        m_target->DrawTextW(key.data(), static_cast<UINT32>(key.size()), m_keyFormat,
+            D2D1::RectF(left, y, left + 52.0f * scale, y + 16.0f * scale), brush);
         brush->Release();
     }
 
@@ -371,22 +372,22 @@ void OverlayWindow::drawPlates(float scale)
     const float lineHeight = 16.5f * scale;
 
     const std::wstring fps = std::to_wstring(static_cast<int>(std::lround(m_fps.currentFps)));
-    drawRow(y, scale, m_settings.labels[0].c_str(), fps, L"fps", true);
+    drawRow(y, scale, wideText(m_settings.labels[0]), fps, L"fps", true);
     y += lineHeight + 4.0f * scale;
 
-    drawRow(y, scale, m_settings.labels[1].c_str(),
+    drawRow(y, scale, wideText(m_settings.labels[1]),
         std::to_wstring(static_cast<int>(std::lround(m_store.value(MetricId::CpuLoad)))),
         std::to_wstring(static_cast<int>(std::lround(m_store.value(MetricId::CpuTemp)))) + L"°C", false);
     y += lineHeight;
 
-    drawRow(y, scale, m_settings.labels[2].c_str(),
+    drawRow(y, scale, wideText(m_settings.labels[2]),
         std::to_wstring(static_cast<int>(std::lround(m_store.value(MetricId::GpuLoad)))),
         std::to_wstring(static_cast<int>(std::lround(m_store.value(MetricId::GpuTemp)))) + L"°C", false);
     y += lineHeight;
 
     wchar_t ram[32]{};
     swprintf_s(ram, L"%.1f", m_store.value(MetricId::RamUsed));
-    drawRow(y, scale, m_settings.labels[3].c_str(), ram, L"ГБ", false);
+    drawRow(y, scale, wideText(m_settings.labels[3]), ram, L"ГБ", false);
 }
 
 void OverlayWindow::drawLine(float scale)
@@ -398,16 +399,18 @@ void OverlayWindow::drawLine(float scale)
 
     drawBackground(D2D1::RectF(left, top, left + width, top + height), scale);
 
-    wchar_t line[128]{};
-    swprintf_s(line, L"%s %d fps   %s %d%%   %s %d%%   %s %.1f ГБ", m_settings.labels[0].c_str(),
-        static_cast<int>(std::lround(m_fps.currentFps)), m_settings.labels[1].c_str(),
-        static_cast<int>(std::lround(m_store.value(MetricId::CpuLoad))), m_settings.labels[2].c_str(),
-        static_cast<int>(std::lround(m_store.value(MetricId::GpuLoad))), m_settings.labels[3].c_str(),
-        m_store.value(MetricId::RamUsed));
+    const std::wstring text = wideText(m_settings.labels[0]) + L" "
+        + std::to_wstring(static_cast<int>(std::lround(m_fps.currentFps))) + L" fps   "
+        + wideText(m_settings.labels[1]) + L" " + std::to_wstring(static_cast<int>(std::lround(
+                                                    m_store.value(MetricId::CpuLoad))))
+        + L"%   " + wideText(m_settings.labels[2]) + L" " + std::to_wstring(static_cast<int>(std::lround(
+                                                               m_store.value(MetricId::GpuLoad))))
+        + L"%   " + wideText(m_settings.labels[3]) + L" "
+        + std::to_wstring(static_cast<int>(std::lround(m_store.value(MetricId::RamUsed) * 10.0) / 10.0)) + L" ГБ";
 
     ID2D1SolidColorBrush* brush = nullptr;
     if (SUCCEEDED(m_target->CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.95f), &brush))) {
-        m_target->DrawTextW(line, static_cast<UINT32>(wcslen(line)), m_smallFormat,
+        m_target->DrawTextW(text.data(), static_cast<UINT32>(text.size()), m_smallFormat,
             D2D1::RectF(left + 14.0f, top, left + width - 14.0f, top + height), brush);
         brush->Release();
     }
