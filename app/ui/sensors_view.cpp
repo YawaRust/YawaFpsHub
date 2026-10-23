@@ -318,7 +318,9 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
         const MetricId id = entries[index].id;
         const float rowTop = top;
 
-        if (rowTop + kRowHeight > viewport.top && rowTop < viewport.bottom) {
+        // Рисуем только целиком видимые строки: раньше внизу оставалась обрезанная
+        // пополам строка, и таблица выглядела сломанной.
+        if (rowTop + kRowHeight > viewport.top && rowTop + kRowHeight <= viewport.bottom + 0.5f) {
             const Rect row{ inner.left, rowTop, inner.right, rowTop + kRowHeight };
             const bool hover = isHovered(model, row);
             if (hover) {

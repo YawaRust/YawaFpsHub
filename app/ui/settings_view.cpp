@@ -188,15 +188,18 @@ void drawPortableCard(Renderer& renderer, const AppModel& model, const Theme& th
             break;
         }
         drawFieldLabel(renderer, Rect{ inner.left, top, inner.right, top + 16.0f }, row[0], row[1], theme);
-        top += 20.0f;
+        top += 18.0f;
     }
 
     // Кнопки прижимаем к низу карточки: раньше при низком окне путь и «Сбросить»
-    // уезжали за край, и кнопки просто исчезали.
+    // уезжали за край, и кнопки просто исчезали. Путь показываем только если между
+    // строками и кнопками для него осталось место — иначе он печатался поверх строк.
     const float actionsTop = inner.bottom - 28.0f;
-    const float pathTop = std::min(top + 2.0f, actionsTop - 18.0f);
-    renderer.text(clipRight(renderer, wideText(model.settingsPath), TextRole::Mono, inner.width() * 0.96f),
-        Rect{ inner.left, pathTop, inner.right, pathTop + 16.0f }, TextRole::Mono, theme.textFaint);
+    const float pathTop = actionsTop - 18.0f;
+    if (pathTop >= top + 2.0f) {
+        renderer.text(clipRight(renderer, wideText(model.settingsPath), TextRole::Mono, inner.width() * 0.96f),
+            Rect{ inner.left, pathTop, inner.right, pathTop + 16.0f }, TextRole::Mono, theme.textFaint);
+    }
 
     const Rect open{ inner.left, actionsTop, inner.left + 150.0f, actionsTop + 28.0f };
     const Rect reset{ open.right + 8.0f, actionsTop, open.right + 158.0f, actionsTop + 28.0f };
