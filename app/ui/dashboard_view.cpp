@@ -304,19 +304,19 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
     const double total = used + free;
 
     renderer.text(wideNumber(used, MetricUnit::Gigabytes, 1),
-        Rect{ inner.left, top, inner.left + 160.0f, top + 38.0f }, TextRole::Value, theme.text);
+        Rect{ inner.left, top - 6.0f, inner.left + 160.0f, top + 26.0f }, TextRole::Value, theme.text);
     const float valueWidth = renderer.measureText(wideNumber(used, MetricUnit::Gigabytes, 1), TextRole::Value);
-    renderer.text(L"/ " + wideNumber(total, MetricUnit::Gigabytes, 1) + L" ГБ занято",
-        Rect{ inner.left + valueWidth + 8.0f, top + 20.0f, inner.right, top + 38.0f }, TextRole::Tiny,
+    renderer.text(L"из " + wideNumber(total, MetricUnit::Gigabytes, 1) + L" ГБ",
+        Rect{ inner.left + valueWidth + 8.0f, top + 4.0f, inner.right, top + 20.0f }, TextRole::Tiny,
         theme.textFaint);
 
-    const float barTop = top + 48.0f;
+    const float barTop = top + 32.0f;
     if (barTop + 8.0f < inner.bottom) {
         drawBar(renderer, Rect{ inner.left, barTop, inner.right, barTop + 6.0f },
             total > 0.0 ? static_cast<float>(used / total) : 0.0f, theme.ram, theme);
     }
 
-    const Rect legend{ inner.left, barTop + 12.0f, inner.right, barTop + 28.0f };
+    const Rect legend{ inner.left, barTop + 10.0f, inner.right, barTop + 24.0f };
     if (legend.bottom > inner.bottom) {
         return;
     }
@@ -338,7 +338,7 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
         x += width + 6.0f;
     }
 
-    float rowTop = legend.bottom + 8.0f;
+    float rowTop = legend.bottom + 6.0f;
     const std::array<std::pair<std::wstring, std::wstring>, 2> rows{
         std::pair<std::wstring, std::wstring>{ L"Своп-файл",
             wideNumber(model.store.value(MetricId::PageFile), MetricUnit::Gigabytes, 1) },
@@ -350,7 +350,7 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
             break;
         }
         drawLabelValue(renderer, Rect{ inner.left, rowTop, inner.right, rowTop + 16.0f }, label, value, theme);
-        rowTop += 22.0f;
+        rowTop += 20.0f;
     }
 }
 
@@ -401,7 +401,9 @@ void drawDiskNetCard(Renderer& renderer, const AppModel& model, const Theme& the
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
-    const float top = drawCardHeader(renderer, card, L"Диски и сеть", L"скорости за последнюю секунду", theme);
+    renderer.text(L"Диски и сеть", Rect{ inner.left, inner.top, inner.right, inner.top + 18.0f }, TextRole::Heading,
+        theme.text);
+    const float top = inner.top + 26.0f;
 
     if (!model.settings.capture.includeDiskNet) {
         renderer.text(L"раздел отключён в настройках", Rect{ inner.left, top, inner.right, top + 18.0f },
@@ -419,7 +421,7 @@ void drawDiskNetCard(Renderer& renderer, const AppModel& model, const Theme& the
         { L"Сеть: исходящий", MetricId::NetUp } };
 
     // Карточка узкая: одна колонка, иначе подпись и значение наезжают друг на друга.
-    const float rowHeight = std::clamp((inner.bottom - top - 2.0f) / 4.0f, 18.0f, 24.0f);
+    const float rowHeight = std::clamp((inner.bottom - top) / 4.0f, 14.0f, 22.0f);
     float rowTop = top + 2.0f;
 
     for (std::size_t index = 0; index < cells.size(); ++index) {
