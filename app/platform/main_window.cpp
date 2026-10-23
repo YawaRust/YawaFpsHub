@@ -122,6 +122,11 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
     createTrayIcon();
     registerHotkeys();
 
+    // Первый запуск показывает окно сразу: приложение живёт в трее только после того,
+    // как пользователь сам свернул его или включил «сворачивать в трей».
+    ShowWindow(m_window, SW_SHOWNORMAL);
+    UpdateWindow(m_window);
+
     m_running = true;
     startSampling();
     return true;
