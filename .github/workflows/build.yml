@@ -90,11 +90,18 @@ jobs:
           if (-not (Test-Path $exe)) {
             $fail = "нет YawaFpsHub.exe"
           } else {
-            $process = Start-Process -FilePath $exe -ArgumentList "--smoke" -PassThru
-            Start-Sleep -Seconds 5
+            $process = Start-Process -FilePath $exe -ArgumentList "--smoke=22" -PassThru
+            Start-Sleep -Seconds 8
             $process.Refresh()
-            $diagnostics.Add("память: " + [math]::Round($process.WorkingSet64 / 1MB, 1) + " МБ")
-            $diagnostics.Add("CPU за 5 с: " + [math]::Round($process.TotalProcessorTime.TotalMilliseconds, 0) + " мс")
+            $cpuBefore = $process.TotalProcessorTime.TotalSeconds
+            $memory = $process.WorkingSet64
+            $diagnostics.Add("память: " + [math]::Round($memory / 1MB, 1) + " МБ")
+            Start-Sleep -Seconds 10
+            $process.Refresh()
+            $cpuUsed = $process.TotalProcessorTime.TotalSeconds - $cpuBefore
+            $cores = [Environment]::ProcessorCount
+            $diagnostics.Add("CPU в простое: " + [math]::Round($cpuUsed / 10.0 * 100 / $cores, 2) + " % от всех ядер")
+            $diagnostics.Add("CPU на ядро: " + [math]::Round($cpuUsed / 10.0 * 100, 2) + " % одного ядра")
 
             # Оверлей — отдельное окно: проверяем класс и стили layered/topmost/click-through.
             $overlayFound = $false
@@ -119,7 +126,7 @@ jobs:
             $diagnostics.Add("оверлей layered+topmost+click-through: " + $script:overlayFound + " (" + $script:overlayStyle + ")")
             if (-not $script:overlayFound) { $fail = "окно оверлея не найдено или не имеет нужных стилей" }
 
-            if (-not $process.WaitForExit(30000)) {
+            if (-not $process.WaitForExit(40000)) {
               $process.Kill()
               if (-not $fail) { $fail = "приложение не закрылось за 30 с" }
             } else {

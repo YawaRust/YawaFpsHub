@@ -8,6 +8,8 @@
 #include <string>
 #include <string_view>
 
+#include <cwctype>
+
 namespace {
 
 constexpr wchar_t kInstanceMutex[] = L"Global\\YawaFpsHubInstance";
@@ -30,7 +32,23 @@ bool isAlreadyRunning()
 int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
 {
     const std::wstring_view arguments = commandLine != nullptr ? commandLine : L"";
-    const bool smoke = arguments.find(L"--smoke") != std::wstring_view::npos;
+    const std::size_t smokeFlag = arguments.find(L"--smoke");
+    const bool smoke = smokeFlag != std::wstring_view::npos;
+
+    // --smoke=<секунды>: CI держит окно дольше, чтобы замерить потребление в установившемся режиме.
+    int smokeSeconds = 8;
+    if (smoke) {
+        const std::size_t equals = arguments.find(L'=', smokeFlag);
+        if (equals != std::wstring_view::npos) {
+            int parsed = 0;
+            for (std::size_t index = equals + 1; index < arguments.size() && iswdigit(arguments[index]) != 0; ++index) {
+                parsed = parsed * 10 + (arguments[index] - L'0');
+            }
+            if (parsed > 0) {
+                smokeSeconds = parsed;
+            }
+        }
+    }
 
     // --view=sensors|settings нужен CI, чтобы снять скриншоты всех экранов.
     yawa::View initialView = yawa::View::Dashboard;
@@ -67,7 +85,7 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
     if (arguments.find(L"--overlay") != std::wstring_view::npos) {
         window.setOverlayVisible(true);
     }
-    const int result = window.run(smoke ? 8 : 0);
+    const int result = window.run(smoke ? smokeSeconds : 0);
     log.info("остановка");
     return result;
 }
