@@ -78,7 +78,7 @@ std::wstring formatClock(std::uint64_t milliseconds)
 void drawCard(Renderer& renderer, const Rect& rect, const Theme& theme)
 {
     renderer.fillRoundRect(rect, kCardRadius, theme.panel);
-    renderer.strokeRoundRect(rect, kCardRadius, theme.line.withAlpha(0.85f), 1.0f);
+    renderer.strokeRoundRect(rect, kCardRadius, theme.line.withAlpha(0.65f), 1.0f);
 }
 
 void drawLabelValue(Renderer& renderer, const Rect& rect, std::wstring_view label, std::wstring_view value,

@@ -737,6 +737,9 @@ void MainWindow::paint()
     drawRail(m_renderer, m_model, m_theme, m_hits);
     drawTitleBar(m_renderer, m_model, m_theme, m_hits);
     drawTopBar(m_renderer, m_model, m_theme, m_hits);
+    // Свечение поверх шапки: в прототипе оно мягко подсвечивает левый верхний угол,
+    // а не только область контента.
+    m_renderer.fillRadialGlow(width * 0.12f, -60.0f, 420.0f, m_theme.accent.withAlpha(0.10f));
     drawStatusBar(m_renderer, m_model, m_theme);
 
     m_renderer.end();

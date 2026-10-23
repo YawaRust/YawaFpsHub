@@ -65,9 +65,9 @@ void Renderer::createTextFormats()
 
     m_display = createFormat(m_dwrite, kFontFamily, 66.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     m_value = createFormat(m_dwrite, kFontFamily, 26.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD);
-    m_heading = createFormat(m_dwrite, kFontFamily, 15.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    m_heading = createFormat(m_dwrite, kFontFamily, 14.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     m_body = createFormat(m_dwrite, kFontFamily, 12.5f, DWRITE_FONT_WEIGHT_NORMAL);
-    m_small = createFormat(m_dwrite, kFontFamily, 11.0f, DWRITE_FONT_WEIGHT_NORMAL);
+    m_small = createFormat(m_dwrite, kFontFamily, 11.5f, DWRITE_FONT_WEIGHT_NORMAL);
     m_tiny = createFormat(m_dwrite, kFontFamily, 9.5f, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     m_mono = createFormat(m_dwrite, kMonoFamily, 11.5f, DWRITE_FONT_WEIGHT_NORMAL);
 
