@@ -1,8 +1,10 @@
+// Абсолютный путь к иконке подставляет CMake: rc.exe ищет файлы относительно
+// рабочего каталога сборки, а не каталога скрипта.
 // Иконка и свойства exe. Иконка генерируется tools/make_icon.py и совпадает с той,
 // что рисуется в рельсе приложения.
 #include <windows.h>
 
-101 ICON "yawa.ico"
+101 ICON "@YAWA_ICON_PATH@"
 
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION 1,0,0,0

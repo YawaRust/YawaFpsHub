@@ -31,7 +31,9 @@ add_executable(YawaFpsHub WIN32
 # Ресурсы (иконка и свойства файла) собирает только MSVC: windres в CI не используется,
 # а локальная проверка ядра собирается без приложения.
 if(MSVC)
-    target_sources(YawaFpsHub PRIVATE resources/resource.rc)
+    set(YAWA_ICON_PATH "${CMAKE_CURRENT_SOURCE_DIR}/resources/yawa.ico")
+    configure_file(resources/resource.rc.in "${CMAKE_CURRENT_BINARY_DIR}/resource.rc" @ONLY)
+    target_sources(YawaFpsHub PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/resource.rc")
 endif()
 
 target_include_directories(YawaFpsHub PRIVATE ${CMAKE_SOURCE_DIR}/app)
