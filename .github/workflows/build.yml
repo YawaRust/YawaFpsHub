@@ -1,5 +1,8 @@
 name: build
 
+permissions:
+  contents: write
+
 on:
   push:
     branches: [main, "arena/**"]
@@ -49,6 +52,18 @@ jobs:
 
       - name: Собрать
         run: cmake --build build --config Release --parallel
+
+      - name: Записать лог сборки при ошибке
+        if: failure()
+        shell: bash
+        run: |
+          cmake --build build --config Release --parallel > build-log.txt 2>&1 || true
+          git config user.email "ci@yawafpshub.local"
+          git config user.name "ci"
+          git checkout -B ci-logs
+          git add -f build-log.txt
+          git commit -m "build log" || true
+          git push -f origin ci-logs
 
       - name: Прогон с ETW
         shell: pwsh
