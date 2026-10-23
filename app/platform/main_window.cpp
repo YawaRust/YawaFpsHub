@@ -106,6 +106,11 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
     const MARGINS glass{ -1, -1, -1, -1 };
     DwmExtendFrameIntoClientArea(m_window, &glass);
 
+    if (m_initialWidth > 0 && m_initialHeight > 0) {
+        SetWindowPos(m_window, nullptr, CW_USEDEFAULT, CW_USEDEFAULT, m_initialWidth, m_initialHeight,
+            SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+
     if (!m_renderer.initialize(error)) {
         return false;
     }
@@ -717,6 +722,11 @@ void MainWindow::paint()
 
     m_model.maximized = IsZoomed(m_window) != FALSE;
     m_renderer.clear(m_theme.background);
+    // Свечение как в прототипе: акцент слева сверху и холодный отсвет справа.
+    // Рисуем до интерфейса, чтобы карточки и панели легли поверх.
+    const float width = m_renderer.width();
+    m_renderer.fillRadialGlow(width * 0.12f, -60.0f, 560.0f, m_theme.accent.withAlpha(0.16f));
+    m_renderer.fillRadialGlow(width * 0.94f, 30.0f, 440.0f, fromRgba(0xFF6AA8FF).withAlpha(0.10f));
     m_hits = buildHits();
     drawRail(m_renderer, m_model, m_theme, m_hits);
     drawTitleBar(m_renderer, m_model, m_theme, m_hits);

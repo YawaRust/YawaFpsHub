@@ -291,6 +291,30 @@ void Renderer::drawDashedLine(float x1, float y1, float x2, float y2, const Colo
     dashed->Release();
 }
 
+void Renderer::fillRadialGlow(float centerX, float centerY, float radius, const Color& color)
+{
+    if (m_target == nullptr || radius <= 0.0f) {
+        return;
+    }
+
+    const D2D1_GRADIENT_STOP stops[2]{ { 0.0f, toD2D(color) },
+        { 1.0f, D2D1::ColorF(color.r, color.g, color.b, 0.0f) } };
+    ID2D1GradientStopCollection* collection = nullptr;
+    if (FAILED(m_target->CreateGradientStopCollection(stops, 2, &collection)) || collection == nullptr) {
+        return;
+    }
+
+    ID2D1RadialGradientBrush* brush = nullptr;
+    const D2D1_RADIAL_GRADIENT_BRUSH_PROPERTIES properties{ D2D1::Point2F(centerX, centerY),
+        D2D1::Point2F(0.0f, 0.0f), radius, radius };
+    if (SUCCEEDED(m_target->CreateRadialGradientBrush(properties, collection, &brush)) && brush != nullptr) {
+        m_target->FillRectangle(
+            D2D1::RectF(centerX - radius, centerY - radius, centerX + radius, centerY + radius), brush);
+        brush->Release();
+    }
+    collection->Release();
+}
+
 void Renderer::strokeCircle(float centerX, float centerY, float radius, const Color& color, float thickness)
 {
     ID2D1SolidColorBrush* brush = brushFor(color);

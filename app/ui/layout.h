@@ -10,8 +10,8 @@
 
 namespace yawa {
 
-constexpr float kCardRadius = 14.0f;
-constexpr float kGap = 12.0f;
+constexpr float kCardRadius = 20.0f;
+constexpr float kGap = 14.0f;
 constexpr float kCardPadding = 16.0f;
 
 std::wstring wideText(std::string_view utf8);

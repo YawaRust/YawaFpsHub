@@ -32,6 +32,14 @@ public:
 
     bool create(HINSTANCE instance, Log& log, std::string& error);
     void setInitialView(View view) { m_model.view = view; }
+
+    // CI снимает экраны при фиксированном размере: иначе размер окна зависит от
+    // разрешения раннера и сравнивать со скриншотом прототипа нечем.
+    void setInitialSize(int width, int height)
+    {
+        m_initialWidth = width;
+        m_initialHeight = height;
+    }
     // Стартовый стиль оверлея: нужен CI, чтобы снять все пять стилей одного экрана.
     // Вызывается после create(), поэтому применяем сразу, а не через флаг.
     void setInitialStyle(OverlayStyle style)
@@ -110,6 +118,8 @@ private:
     bool m_trackingMouse = false;
     int m_hoverIndex = -1;
     float m_dpiScale = 1.0f;
+    int m_initialWidth = 0;
+    int m_initialHeight = 0;
     std::wstring m_overlayShotDir;
 };
 

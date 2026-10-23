@@ -11,6 +11,7 @@
 #include <string_view>
 #include <utility>
 
+#include <cstdlib>
 #include <cwctype>
 
 namespace {
@@ -79,6 +80,20 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
     } else if (arguments.find(L"--view=settings") != std::wstring_view::npos) {
         initialView = yawa::View::Settings;
     }
+    // --size=1280x800: фиксированный размер окна для скриншотов. Прототип снимается
+    // тем же размером, поэтому картинки можно сравнивать попиксельно.
+    int initialWidth = 0;
+    int initialHeight = 0;
+    const std::size_t sizeFlag = arguments.find(L"--size=");
+    if (sizeFlag != std::wstring_view::npos) {
+        const std::wstring_view value = arguments.substr(sizeFlag + 7);
+        const std::size_t cross = value.find(L'x');
+        if (cross != std::wstring_view::npos) {
+            initialWidth = static_cast<int>(std::wcstol(std::wstring(value.substr(0, cross)).c_str(), nullptr, 10));
+            initialHeight = static_cast<int>(std::wcstol(std::wstring(value.substr(cross + 1)).c_str(), nullptr, 10));
+        }
+    }
+
     // Монитор FPS не должен влиять на картинку в игре: сначала сообщаем Windows, что
     // приложение само управляет масштабом, и только потом создаём окна.
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -107,6 +122,9 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
 
     // Самопроверка держит окно открытым, чтобы CI успел снять скриншот интерфейса.
     window.setInitialView(initialView);
+    if (initialWidth > 0 && initialHeight > 0) {
+        window.setInitialSize(initialWidth, initialHeight);
+    }
     if (hasStyle) {
         window.setInitialStyle(initialStyle);
     }

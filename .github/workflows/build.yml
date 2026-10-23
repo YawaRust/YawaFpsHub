@@ -174,7 +174,7 @@ jobs:
           $exe = (Get-ChildItem -Path .\build -Recurse -Filter YawaFpsHub.exe | Select-Object -First 1).FullName
           $views = @("dashboard", "sensors", "overlay", "settings")
           foreach ($view in $views) {
-            $process = Start-Process -FilePath $exe -ArgumentList "--smoke", "--view=$view" -PassThru
+            $process = Start-Process -FilePath $exe -ArgumentList "--smoke", "--view=$view", "--size=1280x800" -PassThru
             Start-Sleep -Seconds 4
             $shot = $null
             for ($i = 0; $i -lt 10 -and -not $shot; $i++) {
@@ -224,7 +224,7 @@ jobs:
           $exe = (Get-ChildItem -Path .\build -Recurse -Filter YawaFpsHub.exe | Select-Object -First 1).FullName
           $styles = @("neon", "rtss", "frosted", "terminal", "cyber", "mono", "esport", "retro")
           foreach ($style in $styles) {
-            $process = Start-Process -FilePath $exe -ArgumentList "--smoke", "--view=overlay", "--style=$style" -PassThru
+            $process = Start-Process -FilePath $exe -ArgumentList "--smoke", "--view=overlay", "--style=$style", "--size=1280x800" -PassThru
             Start-Sleep -Seconds 4
             $shot = $null
             for ($i = 0; $i -lt 10 -and -not $shot; $i++) {
