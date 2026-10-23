@@ -218,7 +218,11 @@ void drawCpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
-    const float top = drawCardHeader(renderer, card, L"Процессор", L"счётчик загрузки как в диспетчере задач", theme);
+    std::wstring subtitle = L"счётчик загрузки как в диспетчере задач";
+    if (model.cpuCores > 0) {
+        subtitle += L" · " + std::to_wstring(model.cpuCores) + L" ядер";
+    }
+    const float top = drawCardHeader(renderer, card, L"Процессор", subtitle, theme);
 
     const double load = model.store.value(MetricId::CpuLoad);
     drawGaugeCard(renderer, Rect{ inner.left, top, inner.right, inner.bottom }, load, theme.cpu, theme);
@@ -244,18 +248,21 @@ void drawCpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
     }
 
     // Полоски по ядрам, как в демо: видно, что процессор действительно опрашивается.
-    if (model.cpuCores > 0 && inner.bottom - rowTop >= 8.0f) {
-        // Полоски тонкие: в короткой карточке под них остаётся меньше двадцати пикселей.
+    // Полоски по ядрам — только справа от датчика и только когда под них есть место:
+    // в короткой карточке они наезжали на подпись «загрузка».
+    const float coreLeft = rowsLeft;
+    const float coreWidth = inner.right - coreLeft;
+    if (model.cpuCores > 0 && coreWidth > 60.0f && inner.bottom - rowTop >= 18.0f) {
         const std::size_t count = std::min<std::size_t>(model.cpuCores, 16);
-        const float gap = 2.0f;
-        const float barWidth = (inner.width() - gap * static_cast<float>(count - 1)) / static_cast<float>(count);
+        const float gap = 3.0f;
+        const float barWidth = (coreWidth - gap * static_cast<float>(count - 1)) / static_cast<float>(count);
         const float base = inner.bottom;
-        const float height = std::min(14.0f, inner.bottom - rowTop);
+        const float height = std::min(16.0f, inner.bottom - rowTop);
 
         for (std::size_t index = 0; index < count; ++index) {
             const MetricId id = static_cast<MetricId>(static_cast<std::size_t>(MetricId::Core0Load) + index);
             const double ratio = std::clamp(model.store.value(id) / 100.0, 0.0, 1.0);
-            const float left = inner.left + static_cast<float>(index) * (barWidth + gap);
+            const float left = coreLeft + static_cast<float>(index) * (barWidth + gap);
             renderer.fillRoundRect(Rect{ left, base - height, left + barWidth, base }, 2.0f,
                 theme.panelSoft);
             const float filled = std::max(2.0f, height * static_cast<float>(ratio));

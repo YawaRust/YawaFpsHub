@@ -504,6 +504,7 @@
     osd.style.setProperty("--osd-scale", (overlayState.scale / 100).toFixed(2));
     osd.style.setProperty("--osd-bg", (overlayState.opacity / 100).toFixed(2));
     // -1/null — радиус берётся из пресета; число — как в приложении.
+    osd.classList.toggle("osd--radius", overlayState.radius !== null);
     if (overlayState.radius === null) osd.style.removeProperty("--osd-radius");
     else osd.style.setProperty("--osd-radius", `${overlayState.radius}px`);
     osd.style.setProperty("--osd-shift-x", `${overlayState.offsetX}px`);
@@ -614,11 +615,25 @@
     });
   }
 
+  // Как в приложении: пресет приносит свои переключатели оформления и свой радиус.
+  const STYLE_CHROME = {
+    rtss: { background: false, border: false, shadow: false },
+    mono: { background: true, border: false, shadow: false }
+  };
+
   function bindOsdStyles() {
     $("#osdStyles").addEventListener("click", (event) => {
       const tile = event.target.closest(".style-tile");
       if (!tile) return;
       overlayState.style = tile.dataset.style;
+      const chrome = STYLE_CHROME[tile.dataset.style] || { background: true, border: true, shadow: true };
+      overlayState.background = chrome.background;
+      overlayState.border = chrome.border;
+      overlayState.shadow = chrome.shadow;
+      overlayState.radius = null;
+      $$("#osdChrome button").forEach((chip) => {
+        chip.classList.toggle("is-active", Boolean(overlayState[chip.dataset.chrome]));
+      });
       $$("#osdStyles .style-tile").forEach((node) => node.classList.toggle("is-active", node === tile));
       applyOverlay();
     });

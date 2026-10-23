@@ -1710,9 +1710,10 @@ body.is-paused .tag--live { color: var(--warn); border-color: rgba(255, 179, 71,
   max-width: none;
 }
 
-/* Оформление оверлея: то же, что переключатели «Фон / Рамка / Тень» в приложении. */
-.osd {
-  border-radius: var(--osd-radius, 10px);
+/* Оформление оверлея: то же, что переключатели «Фон / Рамка / Тень» в приложении.
+   Радиус применяется только когда его выставили вручную, иначе остаётся радиус пресета. */
+.osd.osd--radius {
+  border-radius: var(--osd-radius);
 }
 .osd.no-background { background: transparent; backdrop-filter: none; }
 .osd.no-border { border-color: transparent; }
