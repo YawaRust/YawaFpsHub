@@ -22,7 +22,7 @@ std::wstring formatClock(std::uint64_t milliseconds);
 // Карточка: фон, тонкая рамка и мягкая тень отсутствует — интерфейс «плоский», как в прототипе.
 void drawCard(Renderer& renderer, const Rect& rect, const Theme& theme);
 void drawChip(Renderer& renderer, const Rect& rect, std::wstring_view label, bool active, const Theme& theme,
-    TextRole role = TextRole::Small);
+    TextRole role = TextRole::Small, bool hovered = false);
 void drawLabelValue(Renderer& renderer, const Rect& rect, std::wstring_view label, std::wstring_view value,
     const Theme& theme);
 void drawBar(Renderer& renderer, const Rect& rect, float fraction, const Color& color, const Theme& theme);

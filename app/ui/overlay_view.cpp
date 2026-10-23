@@ -9,7 +9,9 @@
 namespace yawa {
 namespace {
 
-constexpr std::array<std::wstring_view, 5> kStyleNames{ L"Стекло", L"Неон", L"Капсулы", L"Терминал", L"Минимал" };
+// Восемь пресетов из Fpsmon2.0: имя и подсказка, чем стиль отличается.
+constexpr std::array<std::wstring_view, 8> kStyleNames{ L"Неон", L"RTSS", L"Стекло", L"Терминал", L"Кибер",
+    L"Минимал", L"Esport", L"Retro" };
 constexpr std::array<std::wstring_view, 4> kPositionNames{ L"Слева сверху", L"Справа сверху", L"Слева снизу",
     L"Справа снизу" };
 constexpr std::array<std::wstring_view, 5> kFieldNames{ L"Кадры в секунду", L"Загрузка процессора",
@@ -66,6 +68,9 @@ void drawToggleRow(Renderer& renderer, const Rect& row, std::wstring_view label,
     hits.push_back(UiHit{ row, action, value });
 }
 
+void drawStyleGallery(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area,
+    std::vector<UiHit>& hits);
+
 void drawPreviewCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card,
     std::vector<UiHit>& hits)
 {
@@ -81,7 +86,8 @@ void drawPreviewCard(Renderer& renderer, const AppModel& model, const Theme& the
     renderer.fillRoundRect(tag, 10.0f, theme.panelSoft);
     renderer.text(L"F10", tag, TextRole::Tiny, theme.textFaint, TextAlign::Center);
 
-    const Rect scene{ inner.left, inner.top + 46.0f, inner.right, inner.bottom };
+    const float galleryTop = inner.bottom - 66.0f;
+    const Rect scene{ inner.left, inner.top + 46.0f, inner.right, std::max(inner.top + 76.0f, galleryTop - 10.0f) };
 
     // Макет игровой сцены: небо, земля и пара силуэтов — на нём видно, как читается оверлей.
     renderer.fillRoundRect(scene, kCardRadius, theme.panelSoft);
@@ -105,6 +111,58 @@ void drawPreviewCard(Renderer& renderer, const AppModel& model, const Theme& the
 
     renderer.strokeRoundRect(scene, kCardRadius, theme.line, 1.0f);
     hits.push_back(UiHit{ scene, ActionKind::DragOverlay, 0 });
+
+    drawStyleGallery(renderer, model, theme, Rect{ inner.left, galleryTop, inner.right, inner.bottom }, hits);
+}
+
+void drawStyleGallery(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area,
+    std::vector<UiHit>& hits)
+{
+    renderer.text(L"Стиль оверлея", Rect{ area.left, area.top, area.left + 120.0f, area.top + 14.0f }, TextRole::Tiny,
+        theme.textDim);
+
+    const float gap = 6.0f;
+    const std::size_t count = kStyleNames.size();
+    const float tileWidth = (area.width() - gap * static_cast<float>(count - 1)) / static_cast<float>(count);
+    const float top = area.top + 16.0f;
+
+    for (std::size_t index = 0; index < count; ++index) {
+        const Rect tile{ area.left + static_cast<float>(index) * (tileWidth + gap), top,
+            area.left + static_cast<float>(index) * (tileWidth + gap) + tileWidth, area.bottom };
+        const bool active = static_cast<std::size_t>(model.settings.overlay.style) == index;
+        const bool hover = isHovered(model, tile);
+
+        renderer.fillRoundRect(tile, 8.0f, active ? theme.accentSoft : theme.panelSoft.withAlpha(hover ? 0.95f : 0.6f));
+        if (active) {
+            renderer.strokeRoundRect(tile, 8.0f, theme.accentGlow, 1.0f);
+        }
+
+        // Миниатюра — тот же рендер оверлея, уменьшенный и обрезанный по плитке:
+        // видно реальную палитру и компоновку, а не абстрактный прямоугольник.
+        const Rect preview{ tile.left + 3.0f, tile.top + 3.0f, tile.right - 3.0f, tile.top + 31.0f };
+        OverlaySettings sample = model.settings.overlay;
+        sample.style = static_cast<OverlayStyle>(index);
+        sample.visible = { true, true, true, true, false };
+        sample.labels = { "FPS", "CPU", "GPU", "RAM", "VRAM" };
+        sample.position = OverlayPosition::TopLeft;
+        sample.offsetX = 0;
+        sample.offsetY = 0;
+        sample.scalePercent = 70;
+        sample.opacityPercent = 95;
+
+        const OverlayFormats formats{ renderer.dwrite(), renderer.textFormat(TextRole::Heading),
+            renderer.textFormat(TextRole::Value), renderer.textFormat(TextRole::Small),
+            renderer.textFormat(TextRole::Mono) };
+        const OverlayText text = makeOverlayText(sample, currentValues(model));
+
+        renderer.pushClip(preview);
+        paintOverlay(renderer.target(), sample, theme, text, preview, 0.62f, formats);
+        renderer.popClip();
+
+        renderer.text(kStyleNames[index], Rect{ tile.left + 2.0f, tile.top + 33.0f, tile.right - 2.0f, tile.bottom },
+            TextRole::Tiny, active ? theme.accent : (hover ? theme.text : theme.textDim), TextAlign::Center);
+        hits.push_back(UiHit{ tile, ActionKind::SetStyle, static_cast<int>(index) });
+    }
 }
 
 void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card,
@@ -120,24 +178,6 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
         Rect{ inner.left, inner.top + 20.0f, inner.right, inner.top + 36.0f }, TextRole::Tiny, theme.textFaint);
 
     float top = inner.top + 44.0f;
-
-    renderer.text(L"Стиль", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
-    top += 18.0f;
-    const float styleWidth = (inner.width() - 2.0f * 8.0f) / 3.0f;
-    for (std::size_t index = 0; index < 3; ++index) {
-        const Rect chip{ inner.left + static_cast<float>(index) * (styleWidth + 8.0f), top,
-            inner.left + static_cast<float>(index) * (styleWidth + 8.0f) + styleWidth, top + 26.0f };
-        drawChip(renderer, chip, kStyleNames[index], static_cast<std::size_t>(overlay.style) == index, theme);
-        hits.push_back(UiHit{ chip, ActionKind::SetStyle, static_cast<int>(index) });
-    }
-    const float halfWidth = (inner.width() - 8.0f) / 2.0f;
-    for (std::size_t index = 0; index < 2; ++index) {
-        const Rect chip{ inner.left + static_cast<float>(index) * (halfWidth + 8.0f), top + 32.0f,
-            inner.left + static_cast<float>(index) * (halfWidth + 8.0f) + halfWidth, top + 58.0f };
-        drawChip(renderer, chip, kStyleNames[index + 3], static_cast<std::size_t>(overlay.style) == index + 3, theme);
-        hits.push_back(UiHit{ chip, ActionKind::SetStyle, static_cast<int>(index + 3) });
-    }
-    top += 70.0f;
 
     renderer.text(L"Положение", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
     top += 18.0f;

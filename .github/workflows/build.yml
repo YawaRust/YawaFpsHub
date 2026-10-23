@@ -220,7 +220,7 @@ jobs:
           }
           "@
           $exe = (Get-ChildItem -Path .\build -Recurse -Filter YawaFpsHub.exe | Select-Object -First 1).FullName
-          $styles = @("glass", "neon", "capsule", "terminal", "minimal")
+          $styles = @("neon", "rtss", "frosted", "terminal", "cyber", "mono", "esport", "retro")
           foreach ($style in $styles) {
             $process = Start-Process -FilePath $exe -ArgumentList "--smoke", "--view=overlay", "--style=$style" -PassThru
             Start-Sleep -Seconds 4

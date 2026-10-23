@@ -98,7 +98,7 @@
   const overlayState = {
     position: "tl",
     layout: "plates",
-    style: "glass",
+    style: "frosted",
     scale: 100,
     opacity: 72,
     labels: { ...DEFAULT_LABELS }

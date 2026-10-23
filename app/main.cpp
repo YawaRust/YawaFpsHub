@@ -53,15 +53,17 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
         }
     }
 
-    // --style=glass|neon|capsule|terminal|minimal: CI снимает один и тот же экран
-    // оверлея во всех стилях, чтобы было видно, что меняется вся композиция.
-    yawa::OverlayStyle initialStyle = yawa::OverlayStyle::Glass;
+    // --style=<пресет>: CI снимает один и тот же экран оверлея во всех стилях,
+    // чтобы было видно, что меняется вся композиция.
+    yawa::OverlayStyle initialStyle = yawa::OverlayStyle::Frosted;
     bool hasStyle = false;
     for (const auto& [argument, style] : std::initializer_list<std::pair<std::wstring_view, yawa::OverlayStyle>>{
-             { L"--style=glass", yawa::OverlayStyle::Glass }, { L"--style=neon", yawa::OverlayStyle::Neon },
-             { L"--style=capsule", yawa::OverlayStyle::Capsule },
+             { L"--style=neon", yawa::OverlayStyle::Neon }, { L"--style=rtss", yawa::OverlayStyle::Rtss },
+             { L"--style=frosted", yawa::OverlayStyle::Frosted },
              { L"--style=terminal", yawa::OverlayStyle::Terminal },
-             { L"--style=minimal", yawa::OverlayStyle::Minimal } }) {
+             { L"--style=cyber", yawa::OverlayStyle::Cyber }, { L"--style=mono", yawa::OverlayStyle::Mono },
+             { L"--style=esport", yawa::OverlayStyle::Esport },
+             { L"--style=retro", yawa::OverlayStyle::Retro } }) {
         if (arguments.find(argument) != std::wstring_view::npos) {
             initialStyle = style;
             hasStyle = true;

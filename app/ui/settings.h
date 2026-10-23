@@ -7,7 +7,9 @@
 
 namespace yawa {
 
-enum class OverlayStyle : std::uint8_t { Glass, Neon, Capsule, Terminal, Minimal };
+// Набор пресетов взят из Fpsmon2.0: стиль меняет не только подложку, но и палитру,
+// типографику, форму и компоновку оверлея.
+enum class OverlayStyle : std::uint8_t { Frosted, Neon, Rtss, Terminal, Cyber, Mono, Esport, Retro };
 enum class OverlayPosition : std::uint8_t { TopLeft, TopRight, BottomLeft, BottomRight };
 enum class OverlayLayout : std::uint8_t { Plates, Line };
 enum class Accent : std::uint8_t { Mint, Ice, Violet, Amber, Coral };
@@ -29,7 +31,7 @@ struct CaptureSettings {
 struct OverlaySettings {
     OverlayPosition position = OverlayPosition::TopLeft;
     OverlayLayout layout = OverlayLayout::Plates;
-    OverlayStyle style = OverlayStyle::Glass;
+    OverlayStyle style = OverlayStyle::Frosted;
     int scalePercent = 100;
     int opacityPercent = 72;
     // Ручной сдвиг от выбранного угла: даёт поставить оверлей точно по месту

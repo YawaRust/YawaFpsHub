@@ -17,7 +17,7 @@ void testDefaultsRoundTrip()
 
     CHECK(parsed.capture.intervalMs == 1000);
     CHECK(parsed.capture.targetHz == 60);
-    CHECK(parsed.overlay.style == OverlayStyle::Glass);
+    CHECK(parsed.overlay.style == OverlayStyle::Frosted);
     CHECK(parsed.overlay.position == OverlayPosition::TopLeft);
     CHECK(labelValue(parsed.overlay, LabelField::Gpu) == "GPU");
 }
@@ -120,14 +120,22 @@ void testLabelLengthIsLimited()
 
 void testKeysAreStable()
 {
-    CHECK(overlayStyleKey(OverlayStyle::Minimal) == "minimal");
+    CHECK(overlayStyleKey(OverlayStyle::Mono) == "mono");
+    CHECK(overlayStyleKey(OverlayStyle::Rtss) == "rtss");
     CHECK(overlayPositionKey(OverlayPosition::TopRight) == "tr");
     CHECK(overlayLayoutKey(OverlayLayout::Plates) == "plates");
     CHECK(accentKey(Accent::Coral) == "coral");
 
-    OverlayStyle style = OverlayStyle::Glass;
+    OverlayStyle style = OverlayStyle::Frosted;
+    // Старые ключи из файлов прошлых версий читаются и переводятся в новые пресеты.
     CHECK(parseOverlayStyle("capsule", style));
-    CHECK(style == OverlayStyle::Capsule);
+    CHECK(style == OverlayStyle::Esport);
+    CHECK(parseOverlayStyle("glass", style));
+    CHECK(style == OverlayStyle::Frosted);
+    CHECK(parseOverlayStyle("minimal", style));
+    CHECK(style == OverlayStyle::Mono);
+    CHECK(parseOverlayStyle("retro", style));
+    CHECK(style == OverlayStyle::Retro);
     CHECK(!parseOverlayStyle("nope", style));
 }
 

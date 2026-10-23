@@ -20,11 +20,22 @@ struct StyleKey {
 };
 
 constexpr StyleKey kStyles[] = {
-    { OverlayStyle::Glass, "glass" },
     { OverlayStyle::Neon, "neon" },
-    { OverlayStyle::Capsule, "capsule" },
+    { OverlayStyle::Rtss, "rtss" },
+    { OverlayStyle::Frosted, "frosted" },
     { OverlayStyle::Terminal, "terminal" },
-    { OverlayStyle::Minimal, "minimal" },
+    { OverlayStyle::Cyber, "cyber" },
+    { OverlayStyle::Mono, "mono" },
+    { OverlayStyle::Esport, "esport" },
+    { OverlayStyle::Retro, "retro" },
+};
+
+// Ключи прошлых версий остаются читаемыми: файл настроек лежит рядом с exe и не должен
+// ломать выбор стиля после обновления.
+constexpr StyleKey kLegacyStyles[] = {
+    { OverlayStyle::Frosted, "glass" },
+    { OverlayStyle::Mono, "minimal" },
+    { OverlayStyle::Esport, "capsule" },
 };
 
 std::string_view trim(std::string_view text)
@@ -171,6 +182,12 @@ std::string_view accentKey(Accent accent)
 bool parseOverlayStyle(std::string_view text, OverlayStyle& style)
 {
     for (const StyleKey& item : kStyles) {
+        if (item.key == text) {
+            style = item.style;
+            return true;
+        }
+    }
+    for (const StyleKey& item : kLegacyStyles) {
         if (item.key == text) {
             style = item.style;
             return true;

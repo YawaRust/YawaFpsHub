@@ -91,13 +91,16 @@ void drawLabelValue(Renderer& renderer, const Rect& rect, std::wstring_view labe
 }
 
 void drawChip(Renderer& renderer, const Rect& rect, std::wstring_view label, bool active, const Theme& theme,
-    TextRole role)
+    TextRole role, bool hovered)
 {
     renderer.fillRoundRect(rect, 9.0f, active ? theme.accentSoft : theme.panelSoft);
     if (active) {
         renderer.strokeRoundRect(rect, 9.0f, theme.accentGlow, 1.0f);
+    } else if (hovered) {
+        renderer.strokeRoundRect(rect, 9.0f, theme.lineStrong, 1.0f);
     }
-    renderer.text(label, rect, role, active ? theme.accent : theme.textDim, TextAlign::Center);
+    renderer.text(label, rect, role, active ? theme.accent : (hovered ? theme.text : theme.textDim),
+        TextAlign::Center);
 }
 
 void drawBar(Renderer& renderer, const Rect& rect, float fraction, const Color& color, const Theme& theme)
