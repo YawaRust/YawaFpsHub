@@ -114,7 +114,9 @@ jobs:
                 [void][YawaWin]::GetClassName($hwnd, $name, 256)
                 if ($name.ToString() -eq "YawaFpsHubOverlay") {
                   $exStyle = [YawaWin]::GetWindowLong($hwnd, -20)
-                  $script:overlayFound = (($exStyle -band 0x00080000) -ne 0) -and (($exStyle -band 0x00000008) -ne 0) -and (($exStyle -band 0x00000020) -ne 0)
+                  # WS_EX_TRANSPARENT больше не нужен: прозрачность для игры даёт
+                  # WM_NCHITTEST -> HTTRANSPARENT, иначе Ctrl+перетаскивание не работает.
+                  $script:overlayFound = (($exStyle -band 0x00080000) -ne 0) -and (($exStyle -band 0x00000008) -ne 0) -and (($exStyle -band 0x00000080) -ne 0)
                   $script:overlayStyle = "0x{0:X8}" -f $exStyle
                 }
               }
@@ -123,7 +125,7 @@ jobs:
             $script:targetPid = $process.Id
             $script:overlayFound = $false
             [void][YawaWin]::EnumWindows($callback, [IntPtr]::Zero)
-            $diagnostics.Add("оверлей layered+topmost+click-through: " + $script:overlayFound + " (" + $script:overlayStyle + ")")
+            $diagnostics.Add("оверлей layered+topmost+toolwindow: " + $script:overlayFound + " (" + $script:overlayStyle + ")")
             if (-not $script:overlayFound) { $fail = "окно оверлея не найдено или не имеет нужных стилей" }
 
             if (-not $process.WaitForExit(40000)) {
