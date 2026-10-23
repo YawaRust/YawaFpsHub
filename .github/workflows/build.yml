@@ -172,9 +172,20 @@ jobs:
           }
           "@
           $exe = (Get-ChildItem -Path .\build -Recurse -Filter YawaFpsHub.exe | Select-Object -First 1).FullName
-          $views = @("dashboard", "sensors", "overlay", "settings")
-          foreach ($view in $views) {
-            $process = Start-Process -FilePath $exe -ArgumentList "--smoke", "--view=$view", "--size=1280x800" -PassThru
+          # Каждая запись: вид, дополнительный аргумент и имя файла. Прокрученный обзор
+          # снимается отдельно — так видно, что содержимое действительно едет.
+          $shots = @(
+            @{ view = "dashboard"; extra = ""; name = "dashboard" },
+            @{ view = "dashboard"; extra = "--scroll=640"; name = "dashboard-scrolled" },
+            @{ view = "sensors"; extra = ""; name = "sensors" },
+            @{ view = "overlay"; extra = ""; name = "overlay" },
+            @{ view = "settings"; extra = ""; name = "settings" }
+          )
+          foreach ($item in $shots) {
+            $view = $item.name
+            $argumentsList = @("--smoke", "--view=$($item.view)", "--size=1280x800")
+            if ($item.extra -ne "") { $argumentsList += $item.extra }
+            $process = Start-Process -FilePath $exe -ArgumentList $argumentsList -PassThru
             Start-Sleep -Seconds 4
             $shot = $null
             for ($i = 0; $i -lt 10 -and -not $shot; $i++) {

@@ -94,6 +94,15 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
         }
     }
 
+    // --scroll=640: стартовый сдвиг содержимого. Нужен CI, чтобы снять прокрученный экран
+    // и проверить, что содержимое действительно едет, а не просто обрезается.
+    float initialScroll = 0.0f;
+    const std::size_t scrollFlag = arguments.find(L"--scroll=");
+    if (scrollFlag != std::wstring_view::npos) {
+        initialScroll = static_cast<float>(std::wcstol(
+            std::wstring(arguments.substr(scrollFlag + 9)).c_str(), nullptr, 10));
+    }
+
     // Монитор FPS не должен влиять на картинку в игре: сначала сообщаем Windows, что
     // приложение само управляет масштабом, и только потом создаём окна.
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -124,6 +133,9 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
     window.setInitialView(initialView);
     if (initialWidth > 0 && initialHeight > 0) {
         window.setInitialSize(initialWidth, initialHeight);
+    }
+    if (initialScroll > 0.0f) {
+        window.setInitialScroll(initialScroll);
     }
     if (hasStyle) {
         window.setInitialStyle(initialStyle);

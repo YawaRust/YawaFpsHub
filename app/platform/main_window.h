@@ -36,6 +36,8 @@ public:
     // CI снимает экраны при фиксированном размере: иначе размер окна зависит от
     // разрешения раннера и сравнивать со скриншотом прототипа нечем.
     void setInitialSize(int width, int height);
+    // Стартовая прокрутка содержимого: CI снимает экран до и после сдвига.
+    void setInitialScroll(float offset) { m_model.contentScroll = offset; }
     // Стартовый стиль оверлея: нужен CI, чтобы снять все пять стилей одного экрана.
     // Вызывается после create(), поэтому применяем сразу, а не через флаг.
     void setInitialStyle(OverlayStyle style)
