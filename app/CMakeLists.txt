@@ -27,7 +27,7 @@ add_executable(YawaFpsHub WIN32
 )
 
 target_include_directories(YawaFpsHub PRIVATE ${CMAKE_SOURCE_DIR}/app)
-target_link_libraries(YawaFpsHub PRIVATE d2d1 dwrite dxgi dwmapi pdh psapi shell32 user32 gdi32 advapi32 ole32)
+target_link_libraries(YawaFpsHub PRIVATE d2d1 dwrite dxgi dwmapi pdh psapi shell32 user32 gdi32 advapi32 ole32 windowscodecs)
 target_compile_definitions(YawaFpsHub PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 target_compile_features(YawaFpsHub PRIVATE cxx_std_20)
 

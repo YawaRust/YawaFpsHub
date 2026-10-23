@@ -32,8 +32,9 @@ public:
     bool create(HINSTANCE instance, Log& log, std::string& error);
     void setInitialView(View view) { m_model.view = view; }
     void setOverlayVisible(bool visible);
+    void exportOverlayStyles();
     // smokeSeconds > 0 — самопроверка для CI: окно живёт заданное время и закрывается само.
-    int run(int smokeSeconds = 0);
+    int run(int smokeSeconds = 0, const std::wstring& overlayShotDir = std::wstring());
 
 private:
     static LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
@@ -79,6 +80,7 @@ private:
     bool m_running = false;
     bool m_trayCreated = false;
     float m_dpiScale = 1.0f;
+    std::wstring m_overlayShotDir;
 };
 
 } // namespace yawa

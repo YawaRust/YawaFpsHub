@@ -4,6 +4,7 @@
 #include "platform/win_util.h"
 
 #include <windows.h>
+#include <objbase.h>
 
 #include <string>
 #include <string_view>
@@ -61,6 +62,9 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
     // приложение само управляет масштабом, и только потом создаём окна.
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
+    // COM нужен WIC: оверлей сохраняет свои PNG для скриншотов в CI.
+    const HRESULT comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+
     if (isAlreadyRunning()) {
         MessageBoxW(nullptr, L"YawaFpsHub уже запущен — окно свёрнуто в трей.", L"YawaFpsHub",
             MB_OK | MB_ICONINFORMATION);
@@ -85,7 +89,16 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
     if (arguments.find(L"--overlay") != std::wstring_view::npos) {
         window.setOverlayVisible(true);
     }
-    const int result = window.run(smoke ? smokeSeconds : 0);
+    std::wstring overlayShotDir;
+    const std::size_t shotFlag = arguments.find(L"--overlay-shots=");
+    if (shotFlag != std::wstring_view::npos) {
+        overlayShotDir = std::wstring(arguments.substr(shotFlag + 16));
+    }
+
+    const int result = window.run(smoke ? smokeSeconds : 0, overlayShotDir);
     log.info("остановка");
+    if (SUCCEEDED(comResult)) {
+        CoUninitialize();
+    }
     return result;
 }

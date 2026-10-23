@@ -11,6 +11,7 @@
 #include <shellapi.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 
 namespace yawa {
@@ -19,6 +20,7 @@ namespace {
 constexpr wchar_t kClassName[] = L"YawaFpsHubMain";
 constexpr UINT kTrayMessage = WM_APP + 1;
 constexpr UINT kTickMessage = WM_APP + 2;
+constexpr UINT kExportMessage = WM_APP + 3;
 constexpr UINT kTrayIconId = 1;
 constexpr UINT kHotkeyOverlay = 1;
 constexpr UINT kHotkeyPosition = 2;
@@ -136,6 +138,38 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
     return true;
 }
 
+void MainWindow::exportOverlayStyles()
+{
+    if (m_overlayShotDir.empty()) {
+        return;
+    }
+
+    static constexpr std::array<std::wstring_view, 5> kStyles{
+        L"glass", L"neon", L"capsule", L"terminal", L"minimal" };
+
+    OverlaySettings original;
+    {
+        std::lock_guard<std::mutex> guard(m_modelMutex);
+        original = m_model.settings.overlay;
+        m_overlay.setContent(m_model.store, m_model.fps,
+            m_model.activeGpu < m_model.gpuNames.size() ? m_model.gpuNames[m_model.activeGpu] : L"");
+    }
+
+    for (std::size_t index = 0; index < kStyles.size(); ++index) {
+        OverlaySettings settings = original;
+        settings.style = static_cast<OverlayStyle>(index);
+        m_overlay.setSettings(settings);
+
+        std::string error;
+        const std::wstring path = m_overlayShotDir + L"overlay-" + std::wstring(kStyles[index]) + L".png";
+        if (!m_overlay.capturePng(path, error) && m_log != nullptr) {
+            m_log->warning("скриншот оверлея: " + error);
+        }
+    }
+
+    m_overlay.setSettings(original);
+}
+
 void MainWindow::setOverlayVisible(bool visible)
 {
     if (visible != m_overlay.isVisible()) {
@@ -144,15 +178,23 @@ void MainWindow::setOverlayVisible(bool visible)
     m_model.overlayVisible = m_overlay.isVisible();
 }
 
-int MainWindow::run(int smokeSeconds)
+int MainWindow::run(int smokeSeconds, const std::wstring& overlayShotDir)
 {
+    m_overlayShotDir = overlayShotDir;
+
     std::thread smoke;
     if (smokeSeconds > 0) {
         // WM_CLOSE в трей-приложении не завершает процесс, поэтому самопроверка
         // ставит WM_QUIT прямо в очередь главного потока.
         const DWORD mainThread = GetCurrentThreadId();
-        smoke = std::thread([smokeSeconds, mainThread]() {
-            std::this_thread::sleep_for(std::chrono::seconds(smokeSeconds));
+        smoke = std::thread([smokeSeconds, mainThread, this]() {
+            if (!m_overlayShotDir.empty()) {
+                std::this_thread::sleep_for(std::chrono::seconds(3));
+                PostMessageW(m_window, kExportMessage, 0, 0);
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+            } else {
+                std::this_thread::sleep_for(std::chrono::seconds(smokeSeconds));
+            }
             PostThreadMessageW(mainThread, WM_QUIT, 0, 0);
         });
     }
@@ -252,6 +294,10 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         }
         return 0;
     }
+
+    case kExportMessage:
+        exportOverlayStyles();
+        return 0;
 
     case kTickMessage:
         onTick();

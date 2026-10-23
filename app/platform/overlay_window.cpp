@@ -5,6 +5,9 @@
 #include <dwrite.h>
 
 #include <algorithm>
+#include <wincodec.h>
+
+#include <cstring>
 #include <cmath>
 
 namespace yawa {
@@ -320,19 +323,8 @@ void OverlayWindow::drawRow(float y, float scale, const std::wstring& key, const
     (void)emphasize;
 }
 
-void OverlayWindow::render()
+void OverlayWindow::drawScene(float scale)
 {
-    if (m_window == nullptr) {
-        return;
-    }
-
-    const UINT width = static_cast<UINT>(GetSystemMetrics(SM_CXSCREEN));
-    const UINT height = static_cast<UINT>(GetSystemMetrics(SM_CYSCREEN));
-    if (m_target == nullptr && !ensureRenderTarget(width, height)) {
-        return;
-    }
-
-    const float scale = static_cast<float>(std::clamp(m_settings.scalePercent, 70, 160)) / 100.0f;
     m_theme = makeTheme(Accent::Mint);
 
     m_target->BeginDraw();
@@ -345,6 +337,21 @@ void OverlayWindow::render()
     }
 
     m_target->EndDraw();
+}
+
+void OverlayWindow::render()
+{
+    if (m_window == nullptr) {
+        return;
+    }
+
+    const UINT width = static_cast<UINT>(GetSystemMetrics(SM_CXSCREEN));
+    const UINT height = static_cast<UINT>(GetSystemMetrics(SM_CYSCREEN));
+    if (m_target == nullptr && !ensureRenderTarget(width, height)) {
+        return;
+    }
+
+    drawScene(static_cast<float>(std::clamp(m_settings.scalePercent, 70, 160)) / 100.0f);
 
     HDC screen = GetDC(nullptr);
     POINT source{ 0, 0 };
@@ -366,6 +373,7 @@ void OverlayWindow::drawPlates(float scale)
     const float top = isBottom(m_settings.position) ? m_bitmapHeight - height - kMargin : kMargin;
 
     const D2D1_RECT_F frame = D2D1::RectF(left, top, left + width, top + height);
+    m_contentRect = frame;
     drawBackground(frame, scale);
 
     float y = top + 8.0f * scale;
@@ -397,7 +405,8 @@ void OverlayWindow::drawLine(float scale)
     const float left = alignFor(m_settings.position) == 0 ? kMargin : m_bitmapWidth - width - kMargin;
     const float top = isBottom(m_settings.position) ? m_bitmapHeight - height - kMargin : kMargin;
 
-    drawBackground(D2D1::RectF(left, top, left + width, top + height), scale);
+    m_contentRect = D2D1::RectF(left, top, left + width, top + height);
+    drawBackground(m_contentRect, scale);
 
     const std::wstring text = wideText(m_settings.labels[0]) + L" "
         + std::to_wstring(static_cast<int>(std::lround(m_fps.currentFps))) + L" fps   "
@@ -414,6 +423,107 @@ void OverlayWindow::drawLine(float scale)
             D2D1::RectF(left + 14.0f, top, left + width - 14.0f, top + height), brush);
         brush->Release();
     }
+}
+
+bool OverlayWindow::capturePng(const std::wstring& path, std::string& error)
+{
+    if (m_window == nullptr) {
+        error = "окно оверлея не создано";
+        return false;
+    }
+
+    const UINT screenWidth = static_cast<UINT>(GetSystemMetrics(SM_CXSCREEN));
+    const UINT screenHeight = static_cast<UINT>(GetSystemMetrics(SM_CYSCREEN));
+    if (m_target == nullptr && !ensureRenderTarget(screenWidth, screenHeight)) {
+        error = "не удалось подготовить поверхность оверлея";
+        return false;
+    }
+
+    drawScene(static_cast<float>(std::clamp(m_settings.scalePercent, 70, 160)) / 100.0f);
+
+    if (m_pixels == nullptr || m_contentRect.right <= m_contentRect.left) {
+        error = "оверлей ничего не нарисовал";
+        return false;
+    }
+
+    // Обрезаем прозрачные поля вокруг содержимого: в PNG попадает только сам оверлей.
+    const LONG left = std::max(0L, static_cast<LONG>(m_contentRect.left) - 2L);
+    const LONG top = std::max(0L, static_cast<LONG>(m_contentRect.top) - 2L);
+    const LONG right = std::min(static_cast<LONG>(m_bitmapWidth),
+        static_cast<LONG>(m_contentRect.right) + 2L);
+    const LONG bottom = std::min(static_cast<LONG>(m_bitmapHeight),
+        static_cast<LONG>(m_contentRect.bottom) + 2L);
+
+    const UINT width = static_cast<UINT>(right - left);
+    const UINT height = static_cast<UINT>(bottom - top);
+    const auto* source = static_cast<const std::uint8_t*>(m_pixels);
+    const std::size_t stride = static_cast<std::size_t>(m_bitmapWidth) * 4U;
+
+    std::vector<std::uint8_t> cropped(static_cast<std::size_t>(width) * height * 4U);
+    for (UINT row = 0; row < height; ++row) {
+        const std::uint8_t* from = source + (static_cast<std::size_t>(top + static_cast<LONG>(row)) * stride)
+            + static_cast<std::size_t>(left) * 4U;
+        std::memcpy(cropped.data() + static_cast<std::size_t>(row) * width * 4U, from,
+            static_cast<std::size_t>(width) * 4U);
+    }
+
+    IWICImagingFactory* factory = nullptr;
+    if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+            IID_PPV_ARGS(&factory)))) {
+        error = "WIC недоступен";
+        return false;
+    }
+
+    IWICStream* stream = nullptr;
+    IWICBitmapEncoder* encoder = nullptr;
+    IWICBitmapFrameEncode* frame = nullptr;
+    IWICBitmap* bitmap = nullptr;
+    bool ok = false;
+
+    do {
+        if (FAILED(factory->CreateBitmapFromMemory(width, height, GUID_WICPixelFormat32bppPBGRA, width * 4U,
+                static_cast<UINT>(cropped.size()), cropped.data(), &bitmap))) {
+            error = "WIC не принял пиксели оверлея";
+            break;
+        }
+        if (FAILED(factory->CreateStream(&stream))
+            || FAILED(stream->InitializeFromFilename(path.c_str(), GENERIC_WRITE))) {
+            error = "не удалось открыть " + std::string(path.begin(), path.end());
+            break;
+        }
+        if (FAILED(factory->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder))
+            || FAILED(encoder->Initialize(stream, WICBitmapEncoderNoCache))) {
+            error = "не удалось создать PNG-кодировщик";
+            break;
+        }
+        if (FAILED(encoder->CreateNewFrame(&frame, nullptr)) || FAILED(frame->Initialize(nullptr))) {
+            error = "не удалось создать кадр PNG";
+            break;
+        }
+        WICPixelFormatGUID format = GUID_WICPixelFormat32bppPBGRA;
+        if (FAILED(frame->SetSize(width, height)) || FAILED(frame->SetPixelFormat(&format))
+            || FAILED(frame->WriteSource(bitmap, nullptr)) || FAILED(frame->Commit())
+            || FAILED(encoder->Commit())) {
+            error = "не удалось записать PNG";
+            break;
+        }
+        ok = true;
+    } while (false);
+
+    if (bitmap != nullptr) {
+        bitmap->Release();
+    }
+    if (frame != nullptr) {
+        frame->Release();
+    }
+    if (encoder != nullptr) {
+        encoder->Release();
+    }
+    if (stream != nullptr) {
+        stream->Release();
+    }
+    factory->Release();
+    return ok;
 }
 
 } // namespace yawa

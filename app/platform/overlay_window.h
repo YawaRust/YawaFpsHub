@@ -37,10 +37,15 @@ public:
 
     void repaint();
 
+    // Рисует текущее содержимое заново и сохраняет его в PNG. Нужно для скриншотов
+    // в CI: layered-окно обычным PrintWindow не снимается.
+    bool capturePng(const std::wstring& path, std::string& error);
+
 private:
     static LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
     bool ensureRenderTarget(UINT width, UINT height);
     void render();
+    void drawScene(float scale);
     void drawPlates(float scale);
     void drawLine(float scale);
     void drawBackground(const D2D1_RECT_F& frame, float scale);
@@ -67,6 +72,7 @@ private:
     MetricStore m_store;
     FpsSummary m_fps;
     std::wstring m_gpuName;
+    D2D1_RECT_F m_contentRect{};
     bool m_visible = false;
     bool m_hasContent = false;
 };
