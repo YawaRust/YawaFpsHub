@@ -458,47 +458,58 @@ void Renderer::drawSeries(const ChartSeries& series, const Rect& rect, float min
         return;
     }
 
-    ID2D1PathGeometry* geometry = nullptr;
-    if (FAILED(m_d2d->CreatePathGeometry(&geometry)) || geometry == nullptr) {
-        return;
-    }
-
-    ID2D1GeometrySink* sink = nullptr;
-    if (FAILED(geometry->Open(&sink)) || sink == nullptr) {
-        geometry->Release();
-        return;
-    }
-
     const float step = rect.width() / static_cast<float>(series.count - 1);
     const auto toY = [&](float value) {
         const float normalized = (value - minimum) / (maximum - minimum);
         return rect.bottom - std::clamp(normalized, 0.0f, 1.0f) * rect.height();
     };
 
-    sink->BeginFigure(D2D1::Point2F(rect.left, toY(series.values[0])), D2D1_FIGURE_BEGIN_FILLED);
-    for (std::size_t index = 1; index < series.count; ++index) {
-        sink->AddLine(D2D1::Point2F(rect.left + step * static_cast<float>(index), toY(series.values[index])));
-    }
+    // Одна и та же ломаная используется дважды: закрытая — для заливки под графиком,
+    // открытая — для самой линии. Иначе заливка съедала линию и закрашивала карточку.
+    const auto buildPath = [&](bool closed) -> ID2D1PathGeometry* {
+        ID2D1PathGeometry* geometry = nullptr;
+        if (FAILED(m_d2d->CreatePathGeometry(&geometry)) || geometry == nullptr) {
+            return nullptr;
+        }
+        ID2D1GeometrySink* sink = nullptr;
+        if (FAILED(geometry->Open(&sink)) || sink == nullptr) {
+            geometry->Release();
+            return nullptr;
+        }
+        sink->BeginFigure(D2D1::Point2F(rect.left, toY(series.values[0])),
+            closed ? D2D1_FIGURE_BEGIN_FILLED : D2D1_FIGURE_BEGIN_HOLLOW);
+        for (std::size_t index = 1; index < series.count; ++index) {
+            sink->AddLine(
+                D2D1::Point2F(rect.left + step * static_cast<float>(index), toY(series.values[index])));
+        }
+        if (closed) {
+            sink->AddLine(D2D1::Point2F(rect.right, rect.bottom));
+            sink->AddLine(D2D1::Point2F(rect.left, rect.bottom));
+            sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+        } else {
+            sink->EndFigure(D2D1_FIGURE_END_OPEN);
+        }
+        sink->Close();
+        sink->Release();
+        return geometry;
+    };
 
     if (series.filled) {
-        sink->AddLine(D2D1::Point2F(rect.right, rect.bottom));
-        sink->AddLine(D2D1::Point2F(rect.left, rect.bottom));
-    }
-
-    sink->EndFigure(D2D1_FIGURE_END_CLOSED);
-    sink->Close();
-
-    ID2D1SolidColorBrush* brush = brushFor(series.color);
-    if (brush != nullptr) {
-        if (series.filled) {
-            m_target->FillGeometry(geometry, brush);
-        } else {
-            m_target->DrawGeometry(geometry, brush, thickness);
+        // Мягкая подложка как в прототипе: насыщенность только у линии.
+        if (ID2D1PathGeometry* area = buildPath(true)) {
+            if (ID2D1SolidColorBrush* brush = brushFor(series.color.withAlpha(0.16f))) {
+                m_target->FillGeometry(area, brush);
+            }
+            area->Release();
         }
     }
 
-    sink->Release();
-    geometry->Release();
+    if (ID2D1PathGeometry* line = buildPath(false)) {
+        if (ID2D1SolidColorBrush* brush = brushFor(series.color)) {
+            m_target->DrawGeometry(line, brush, thickness);
+        }
+        line->Release();
+    }
 }
 
 } // namespace yawa
