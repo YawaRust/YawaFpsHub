@@ -253,11 +253,11 @@ void drawCpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
 
         for (std::size_t index = 0; index < count; ++index) {
             const MetricId id = static_cast<MetricId>(static_cast<std::size_t>(MetricId::Core0Load) + index);
-            const double load = std::clamp(model.store.value(id) / 100.0, 0.0, 1.0);
+            const double ratio = std::clamp(model.store.value(id) / 100.0, 0.0, 1.0);
             const float left = inner.left + static_cast<float>(index) * (barWidth + gap);
             renderer.fillRoundRect(Rect{ left, base - height, left + barWidth, base }, 2.0f,
                 theme.panelSoft);
-            const float filled = std::max(2.0f, height * static_cast<float>(load));
+            const float filled = std::max(2.0f, height * static_cast<float>(ratio));
             renderer.fillRoundRect(Rect{ left, base - filled, left + barWidth, base }, 2.0f, theme.cpu);
         }
     }
@@ -314,11 +314,11 @@ void drawGpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
         if (model.gpuMenuOpen) {
             const float listTop = inner.top + 34.0f;
             for (std::size_t index = 0; index < model.gpuNames.size(); ++index) {
-                const float top = listTop + static_cast<float>(index) * 26.0f;
-                if (top + 24.0f > inner.bottom - 30.0f) {
+                const float optionTop = listTop + static_cast<float>(index) * 26.0f;
+                if (optionTop + 24.0f > inner.bottom - 30.0f) {
                     break;
                 }
-                const Rect row{ inner.left, top, inner.right, top + 24.0f };
+                const Rect row{ inner.left, optionTop, inner.right, optionTop + 24.0f };
                 const bool active = index == model.activeGpu;
                 renderer.fillRoundRect(row, 7.0f, active ? theme.accentSoft : theme.panelSoft);
                 renderer.text(std::to_wstring(index + 1) + L". " + model.gpuNames[index],
