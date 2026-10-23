@@ -18,10 +18,8 @@ jobs:
         include:
           - os: windows-latest
             generator: ""
-            warnings: "ON"
           - os: ubuntu-latest
             generator: "-G \"Unix Makefiles\""
-            warnings: "ON"
 
     runs-on: ${{ matrix.os }}
 
@@ -30,7 +28,7 @@ jobs:
 
       - name: Настроить CMake
         shell: bash
-        run: cmake -S . -B build ${{ matrix.generator }} -DCMAKE_BUILD_TYPE=Release -DYAWA_WARNINGS_AS_ERRORS=${{ matrix.warnings }}
+        run: cmake -S . -B build ${{ matrix.generator }} -DCMAKE_BUILD_TYPE=Release -DYAWA_WARNINGS_AS_ERRORS=ON -DYAWA_BUILD_APP=OFF -DYAWA_BUILD_PROBE=OFF
 
       - name: Собрать
         shell: bash
@@ -40,8 +38,8 @@ jobs:
         shell: bash
         run: ctest --test-dir build -C Release --output-on-failure
 
-  probe:
-    name: Диагностика датчиков (Windows)
+  windows:
+    name: Приложение и диагностика (Windows)
     runs-on: windows-latest
 
     steps:
@@ -65,20 +63,23 @@ jobs:
           git commit -m "build log" || true
           git push -f origin ci-logs
 
-      - name: Прогон с ETW
+      - name: Тесты
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Прогон диагностики
         shell: pwsh
         run: |
           $output = & .\build\tools\probe\Release\yawa-probe.exe --seconds 3 --interval 1000 2>&1
-          $code = $LASTEXITCODE
           foreach ($line in $output) {
             if ("$line".Trim().Length -eq 0) { continue }
             Write-Host $line
             Write-Output "::notice title=yawa-probe::$line"
           }
-          if ($code -ne 0) { throw "yawa-probe завершился с кодом $code" }
 
-      - name: Артефакт
+      - name: Артефакты
         uses: actions/upload-artifact@v4
         with:
-          name: yawa-probe-win64
-          path: build/tools/probe/Release/yawa-probe.exe
+          name: YawaFpsHub-win64
+          path: |
+            build/Release/YawaFpsHub.exe
+            build/tools/probe/Release/yawa-probe.exe

@@ -33,6 +33,10 @@ public:
     double value(MetricId id) const { return slot(id).stats.current; }
     bool hasValue(MetricId id) const { return slot(id).stats.initialized; }
 
+    // Копирует историю в порядке от старой к новой: графику нужен непрерывный массив,
+    // а кольцевой буфер отдаёт данные через orderedIndex.
+    std::size_t copyHistory(MetricId id, float* destination, std::size_t capacity) const;
+
     void reset();
 
 private:

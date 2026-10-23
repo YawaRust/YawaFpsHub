@@ -62,6 +62,20 @@ void testMetricsDoNotMix()
     CHECK_NEAR(store.value(MetricId::GpuLoad), 93.0, 1e-9);
 }
 
+void testCopyHistoryKeepsOrder()
+{
+    MetricStore store;
+    for (int index = 1; index <= 300; ++index) {
+        store.set(MetricId::Fps, static_cast<double>(index));
+    }
+
+    float buffer[128]{};
+    const std::size_t count = store.copyHistory(MetricId::Fps, buffer, 128);
+    CHECK(count == 128);
+    CHECK_NEAR(buffer[127], 300.0, 1e-3);
+    CHECK_NEAR(buffer[0], 173.0, 1e-3);
+}
+
 void testReset()
 {
     MetricStore store;
@@ -81,6 +95,7 @@ void runMetricStoreTests()
     testHistoryOrder();
     testHistoryKeepsLastSamples();
     testMetricsDoNotMix();
+    testCopyHistoryKeepsOrder();
     testReset();
 }
 

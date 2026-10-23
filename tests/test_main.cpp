@@ -10,6 +10,7 @@ void runMetricStoreTests();
 void runSystemSamplerTests();
 void runGpuRegistryTests();
 void runFrameTrackerTests();
+void runSettingsTests();
 
 } // namespace yawa::test
 
@@ -21,6 +22,7 @@ int main()
     yawa::test::runSystemSamplerTests();
     yawa::test::runGpuRegistryTests();
     yawa::test::runFrameTrackerTests();
+    yawa::test::runSettingsTests();
 
     if (yawa::test::failureCount() == 0) {
         std::printf("все тесты пройдены\n");

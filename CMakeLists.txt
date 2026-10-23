@@ -19,7 +19,7 @@ else()
 endif()
 
 # Графическое приложение появится на этапе 4 вместе с Direct2D-рендером.
-option(YAWA_BUILD_APP "Собирать приложение (появится на этапе 4)" OFF)
+option(YAWA_BUILD_APP "Собирать приложение YawaFpsHub (Windows)" ON)
 # Диагностическая утилита: показывает, какие датчики реально доступны на машине.
 option(YAWA_BUILD_PROBE "Собирать yawa-probe (Windows)" ON)
 
@@ -31,6 +31,7 @@ add_library(yawa_metrics STATIC
     app/metrics/system_sampler.cpp
     app/metrics/frame_tracker.cpp
     app/metrics/gpu_registry.cpp
+    app/ui/settings.cpp
 )
 
 target_include_directories(yawa_metrics PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/app)

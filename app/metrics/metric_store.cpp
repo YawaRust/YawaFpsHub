@@ -39,6 +39,18 @@ MetricSlot& MetricStore::slot(MetricId id)
     return m_slots[metricIndex(id)];
 }
 
+std::size_t MetricStore::copyHistory(MetricId id, float* destination, std::size_t capacity) const
+{
+    const MetricSlot& source = slot(id);
+    const std::size_t count = source.historyCount < capacity ? source.historyCount : capacity;
+    const std::size_t offset = source.historyCount - count;
+
+    for (std::size_t index = 0; index < count; ++index) {
+        destination[index] = source.history[source.orderedIndex(offset + index)];
+    }
+    return count;
+}
+
 void MetricStore::reset()
 {
     for (MetricSlot& item : m_slots) {
