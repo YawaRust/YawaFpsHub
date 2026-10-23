@@ -72,6 +72,11 @@ public:
     void drawArc(float centerX, float centerY, float radius, float thickness, float sweepFraction,
         const Color& color);
 
+    // Прямоугольный клип: длинные таблицы рисуются только в видимой части.
+    // Вызовы обязаны идти парами pushClip/popClip.
+    void pushClip(const Rect& rect);
+    void popClip();
+
     void text(std::wstring_view value, const Rect& rect, TextRole role, const Color& color,
         TextAlign align = TextAlign::Left);
     float measureText(std::wstring_view value, TextRole role);

@@ -57,8 +57,11 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
     windowClass.lpszClassName = kClassName;
     RegisterClassExW(&windowClass);
 
-    m_window = CreateWindowExW(0, kClassName, L"YawaFpsHub", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
-        1280, 800, nullptr, nullptr, instance, this);
+    // WS_POPUP + WS_THICKFRAME: рамка нужна только для изменения размера, заголовок
+    // рисуем сами — системный светлый caption выбивался из тёмного интерфейса.
+    m_window = CreateWindowExW(WS_EX_APPWINDOW, kClassName, L"YawaFpsHub",
+        WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU, CW_USEDEFAULT, CW_USEDEFAULT, 1280,
+        800, nullptr, nullptr, instance, this);
 
     if (m_window == nullptr) {
         error = "не удалось создать главное окно";
@@ -69,6 +72,10 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
     // рядом с тёмным интерфейсом выглядит чужой.
     const BOOL darkTitle = TRUE;
     DwmSetWindowAttribute(m_window, 20, &darkTitle, sizeof(darkTitle));
+
+    // Скруглённые углы Windows 11: своя рамка без них выглядит угловатой.
+    const int cornerPreference = 2; // DWMWCP_ROUND
+    DwmSetWindowAttribute(m_window, 33, &cornerPreference, sizeof(cornerPreference));
 
     if (!m_renderer.initialize(error)) {
         return false;
@@ -238,7 +245,51 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         if (m_renderer.isReady()) {
             m_renderer.resize(LOWORD(lParam), HIWORD(lParam), m_dpiScale);
         }
+        m_model.maximized = IsZoomed(m_window) != FALSE;
         return 0;
+
+    case WM_GETMINMAXINFO: {
+        // Ниже этого размера карточки начинают наезжать друг на друга.
+        auto* info = reinterpret_cast<MINMAXINFO*>(lParam);
+        info->ptMinTrackSize.x = static_cast<LONG>(980.0f * m_dpiScale);
+        info->ptMinTrackSize.y = static_cast<LONG>(680.0f * m_dpiScale);
+        return 0;
+    }
+
+    case WM_NCCALCSIZE:
+        // Заголовок убираем полностью: клиентская область занимает всё окно.
+        // В развёрнутом состоянии Windows добавляет рамку, её компенсируем.
+        if (wParam == TRUE) {
+            auto* params = reinterpret_cast<NCCALCSIZE_PARAMS*>(lParam);
+            if (IsZoomed(m_window) != FALSE) {
+                const int borderX = GetSystemMetrics(SM_CXSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+                const int borderY = GetSystemMetrics(SM_CYSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+                params->rgrc[0].left += borderX;
+                params->rgrc[0].right -= borderX;
+                params->rgrc[0].top += borderY;
+                params->rgrc[0].bottom -= borderY;
+            }
+            return 0;
+        }
+        break;
+
+    case WM_NCHITTEST: {
+        const LRESULT base = DefWindowProcW(m_window, message, wParam, lParam);
+        if (base != HTCLIENT) {
+            return base;
+        }
+
+        POINT cursor{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        ScreenToClient(m_window, &cursor);
+        const float x = static_cast<float>(cursor.x) / m_dpiScale;
+        const float y = static_cast<float>(cursor.y) / m_dpiScale;
+
+        // Кнопки заголовка остаются обычной клиентской областью: на них приходят клики.
+        if (y < kTitleBarHeight && !titleBarButtonAt(x, y, m_renderer.width())) {
+            return HTCAPTION;
+        }
+        return HTCLIENT;
+    }
 
     case WM_DPICHANGED: {
         m_dpiScale = static_cast<float>(HIWORD(wParam)) / 96.0f;
@@ -298,7 +349,25 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         return 0;
     }
 
-    case WM_MOUSEMOVE:
+    case WM_MOUSEMOVE: {
+        const float cursorX = static_cast<float>(GET_X_LPARAM(lParam)) / m_dpiScale;
+        const float cursorY = static_cast<float>(GET_Y_LPARAM(lParam)) / m_dpiScale;
+        if (!m_trackingMouse) {
+            TRACKMOUSEEVENT track{};
+            track.cbSize = sizeof(track);
+            track.dwFlags = TME_LEAVE;
+            track.hwndTrack = m_window;
+            m_trackingMouse = TrackMouseEvent(&track) != FALSE;
+        }
+        const bool inTitleBar = cursorY < kTitleBarHeight;
+        const bool wasInTitleBar = m_model.cursorY < kTitleBarHeight;
+        m_model.cursorX = cursorX;
+        m_model.cursorY = cursorY;
+        m_model.cursorInside = true;
+        if (inTitleBar || wasInTitleBar) {
+            InvalidateRect(m_window, nullptr, FALSE);
+        }
+
         if (m_dragAction == ActionKind::DragOverlay) {
             const float x = static_cast<float>(GET_X_LPARAM(lParam)) / m_dpiScale;
             const float y = static_cast<float>(GET_Y_LPARAM(lParam)) / m_dpiScale;
@@ -315,6 +384,23 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             return 0;
         }
         break;
+    }
+
+    case WM_MOUSELEAVE:
+        m_trackingMouse = false;
+        m_model.cursorInside = false;
+        InvalidateRect(m_window, nullptr, FALSE);
+        return 0;
+
+    case WM_MOUSEWHEEL: {
+        if (m_model.view != View::Sensors) {
+            break;
+        }
+        const int delta = GET_WHEEL_DELTA_WPARAM(wParam);
+        m_model.sensorScroll = std::clamp(m_model.sensorScroll - delta / WHEEL_DELTA * 3, 0, 4096);
+        InvalidateRect(m_window, nullptr, FALSE);
+        return 0;
+    }
 
     case WM_LBUTTONUP:
         if (m_dragAction == ActionKind::SetScale || m_dragAction == ActionKind::SetOpacity) {
@@ -336,6 +422,9 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         if (m_model.editingLabel >= 0) {
             editLabelChar(static_cast<wchar_t>(wParam));
             InvalidateRect(m_window, nullptr, FALSE);
+        } else if (m_model.sensorSearchActive) {
+            editSensorQuery(static_cast<wchar_t>(wParam));
+            InvalidateRect(m_window, nullptr, FALSE);
         }
         return 0;
 
@@ -356,7 +445,7 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     case kTrayMessage:
         if (LOWORD(lParam) == WM_RBUTTONUP || LOWORD(lParam) == WM_CONTEXTMENU) {
             showTrayMenu();
-        } else if (LOWORD(lParam) == WM_LBUTTONDBLCLK) {
+        } else if (LOWORD(lParam) == WM_LBUTTONUP || LOWORD(lParam) == WM_LBUTTONDBLCLK) {
             toggleVisibilityFromTray();
         }
         return 0;
@@ -370,6 +459,7 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             m_overlay.toggle();
             break;
         case 1003:
+            m_quitRequested = true;
             PostMessageW(m_window, WM_CLOSE, 0, 0);
             break;
         default:
@@ -379,7 +469,9 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     }
 
     case WM_CLOSE:
-        if (m_model.settings.ui.closeToTray) {
+        // Крестик прячет окно в трей, если так настроено; «Выход» в меню трея
+        // и снятая галочка «сворачивать в трей» закрывают приложение по-настоящему.
+        if (!m_quitRequested && m_model.settings.ui.closeToTray) {
             ShowWindow(m_window, SW_HIDE);
             return 0;
         }
@@ -401,7 +493,7 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
 
 Rect MainWindow::contentArea() const
 {
-    const float top = kTopBarHeight + 8.0f;
+    const float top = kTitleBarHeight + kTopBarHeight + 8.0f;
     const float bottom = m_renderer.height() - kStatusBarHeight - 10.0f;
     return Rect{ kRailWidth + 20.0f, top, m_renderer.width() - 20.0f, bottom };
 }
@@ -437,9 +529,11 @@ void MainWindow::paint()
     // Снимок модели снимается под мьютексом: сборщик пишет в него с другого потока.
     std::lock_guard<std::mutex> guard(m_modelMutex);
 
+    m_model.maximized = IsZoomed(m_window) != FALSE;
     m_renderer.clear(m_theme.background);
     m_hits = buildHits();
     drawRail(m_renderer, m_model, m_theme, m_hits);
+    drawTitleBar(m_renderer, m_model, m_theme, m_hits);
     drawTopBar(m_renderer, m_model, m_theme, m_hits);
     drawStatusBar(m_renderer, m_model, m_theme);
 
@@ -451,6 +545,7 @@ void MainWindow::handleClick(float x, float y)
     if (m_model.editingLabel >= 0) {
         m_model.editingLabel = -1;
     }
+    m_model.sensorSearchActive = false;
 
     for (const UiHit& hit : m_hits) {
         if (!hit.rect.contains(x, y)) {
@@ -487,6 +582,36 @@ void MainWindow::applySlider(ActionKind action, const Rect& rect, float x)
 
     applyAction(hit);
     InvalidateRect(m_window, nullptr, FALSE);
+}
+
+void MainWindow::editSensorQuery(wchar_t symbol)
+{
+    if (symbol == 27) { // Esc
+        m_model.sensorSearchActive = false;
+        m_model.sensorScroll = 0;
+        return;
+    }
+    if (symbol == L'\r' || symbol == L'\n') {
+        m_model.sensorSearchActive = false;
+        return;
+    }
+
+    std::string& query = m_model.sensorQuery;
+    if (symbol == L'\b') {
+        // Стираем целый UTF-8 символ, иначе от кириллицы остаются обрывки байтов.
+        while (!query.empty() && (static_cast<unsigned char>(query.back()) & 0xC0) == 0x80) {
+            query.pop_back();
+        }
+        if (!query.empty()) {
+            query.pop_back();
+        }
+    } else if (symbol == 127) {
+        query.clear();
+    } else if (symbol >= 32) {
+        query += narrow(std::wstring(1, symbol));
+    }
+
+    m_model.sensorScroll = 0;
 }
 
 void MainWindow::editLabelChar(wchar_t symbol)
@@ -722,6 +847,27 @@ void MainWindow::applyAction(const UiHit& hit)
         m_model.paused = !m_model.paused;
         break;
 
+    case ActionKind::WindowMinimize:
+        ShowWindow(m_window, SW_MINIMIZE);
+        break;
+
+    case ActionKind::WindowMaximize:
+        ShowWindow(m_window, IsZoomed(m_window) != FALSE ? SW_RESTORE : SW_MAXIMIZE);
+        break;
+
+    case ActionKind::WindowClose:
+        PostMessageW(m_window, WM_CLOSE, 0, 0);
+        break;
+
+    case ActionKind::FocusSensorSearch:
+        m_model.sensorSearchActive = true;
+        break;
+
+    case ActionKind::ToggleOverlayOnly:
+        m_model.overlayOnly = !m_model.overlayOnly;
+        m_model.sensorScroll = 0;
+        break;
+
     case ActionKind::DragOverlay:
         // Само перетаскивание обрабатывается в WM_MOUSEMOVE, сюда попадает только клик.
         break;
@@ -901,8 +1047,10 @@ void MainWindow::showTrayMenu()
     POINT cursor{};
     GetCursorPos(&cursor);
     SetForegroundWindow(m_window);
-    TrackPopupMenu(menu, TPM_RIGHTBUTTON, cursor.x, cursor.y, 0, m_window, nullptr);
+    TrackPopupMenu(menu, TPM_RIGHTBUTTON | TPM_RETURNCMD, cursor.x, cursor.y, 0, m_window, nullptr);
     DestroyMenu(menu);
+    // Без этого меню иногда остаётся висеть: окно должно получить хотя бы одно сообщение.
+    PostMessageW(m_window, WM_NULL, 0, 0);
 }
 
 void MainWindow::toggleVisibilityFromTray()

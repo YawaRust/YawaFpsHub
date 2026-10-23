@@ -4,6 +4,9 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <cctype>
+#include <string>
+#include <string_view>
 
 namespace yawa {
 namespace {
@@ -32,6 +35,45 @@ struct NvmlApi {
     NvmlReturn (*deviceGetFanSpeedRpm)(NvmlDevice, unsigned*) = nullptr;
 };
 
+std::wstring lowercase(std::string_view text)
+{
+    std::wstring result;
+    result.reserve(text.size());
+    for (const char symbol : text) {
+        result.push_back(static_cast<wchar_t>(std::tolower(static_cast<unsigned char>(symbol))));
+    }
+    return result;
+}
+
+// nvml.dll лежит в System32 только у новых драйверов; у большинства установок
+// он остаётся в папке NVSMI, поэтому ищем по известным местам, а не только в PATH.
+HMODULE loadNvmlLibrary()
+{
+    if (HMODULE module = LoadLibraryW(L"nvml.dll"); module != nullptr) {
+        return module;
+    }
+
+    wchar_t buffer[MAX_PATH]{};
+    if (GetSystemDirectoryW(buffer, MAX_PATH) != 0) {
+        const std::wstring path = std::wstring(buffer) + L"\\nvml.dll";
+        if (HMODULE module = LoadLibraryW(path.c_str()); module != nullptr) {
+            return module;
+        }
+    }
+
+    const wchar_t* roots[] = { L"ProgramW6432", L"ProgramFiles" };
+    for (const wchar_t* root : roots) {
+        if (GetEnvironmentVariableW(root, buffer, MAX_PATH) == 0) {
+            continue;
+        }
+        const std::wstring path = std::wstring(buffer) + L"\\NVIDIA Corporation\\NVSMI\\nvml.dll";
+        if (HMODULE module = LoadLibraryW(path.c_str()); module != nullptr) {
+            return module;
+        }
+    }
+    return nullptr;
+}
+
 template <typename T>
 bool loadSymbol(HMODULE module, const char* name, T& target)
 {
@@ -56,7 +98,7 @@ bool NvmlSensors::initialize(std::string& error)
 {
     shutdown();
 
-    HMODULE module = LoadLibraryW(L"nvml.dll");
+    HMODULE module = loadNvmlLibrary();
     if (module == nullptr) {
         error = "nvml.dll не найден: драйвер NVIDIA не установлен";
         return false;
@@ -122,7 +164,7 @@ void NvmlSensors::selectDevice(const std::wstring& nameHint)
         return;
     }
 
-    const std::string hint = narrow(nameHint);
+    const std::wstring hint = lowercase(narrow(nameHint));
     for (unsigned index = 0; index < m_impl->deviceCount; ++index) {
         NvmlDevice device = nullptr;
         if (m_impl->api.deviceGetHandleByIndex(index, &device) != kNvmlSuccess || device == nullptr) {
@@ -134,9 +176,9 @@ void NvmlSensors::selectDevice(const std::wstring& nameHint)
             continue;
         }
 
-        const std::string deviceName(name);
-        if (deviceName == hint || deviceName.find(hint) != std::string::npos
-            || hint.find(deviceName) != std::string::npos) {
+        const std::wstring deviceName = lowercase(name);
+        if (!hint.empty() && (deviceName.find(hint) != std::wstring::npos
+                                 || hint.find(deviceName) != std::wstring::npos)) {
             m_impl->device = device;
             return;
         }

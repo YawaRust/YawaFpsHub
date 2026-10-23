@@ -48,6 +48,11 @@ enum class ActionKind : std::uint8_t {
     ApplyLabelPreset,
     OffsetX,
     OffsetY,
+    WindowMinimize,
+    WindowMaximize,
+    WindowClose,
+    FocusSensorSearch,
+    ToggleOverlayOnly,
 };
 
 struct UiHit {
@@ -81,6 +86,16 @@ struct AppModel {
     std::string logPath;
     std::string sessionsPath;
     std::wstring foregroundApp;
+    // Строка поиска на экране датчиков и фильтр «только в оверлее».
+    std::string sensorQuery;
+    bool sensorSearchActive = false;
+    bool overlayOnly = false;
+    int sensorScroll = 0;
+    // Состояние окна для своего заголовка: перетаскивание и кнопки рисуются вручную.
+    bool maximized = false;
+    float cursorX = -100.0f;
+    float cursorY = -100.0f;
+    bool cursorInside = false;
 };
 
 constexpr std::size_t kFavoriteHistoryPoints = 240;

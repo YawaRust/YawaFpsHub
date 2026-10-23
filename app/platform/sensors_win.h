@@ -65,6 +65,8 @@ private:
     PdhWildcardCounter m_netReceived;
     PdhWildcardCounter m_netSent;
     PdhWildcardCounter m_gpuEngine;
+    // ACPI-термозона: отдаёт температуру без прав администратора и без MSR-драйвера.
+    PdhWildcardCounter m_thermalZone;
 
     SensorAvailability m_availability;
     std::size_t m_activeGpu = 0;

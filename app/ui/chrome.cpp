@@ -70,6 +70,65 @@ void drawBrand(Renderer& renderer, const Theme& theme)
 
 } // namespace
 
+namespace {
+
+bool hovered(const AppModel& model, const Rect& rect)
+{
+    return model.cursorInside && rect.contains(model.cursorX, model.cursorY);
+}
+
+void drawWindowButtons(Renderer& renderer, const AppModel& model, const Theme& theme, std::vector<UiHit>& hits)
+{
+    const float top = (kTitleBarHeight - kWindowButtonHeight) * 0.5f;
+    float right = renderer.width() - 8.0f;
+
+    // Закрытие: обычная кнопка, при наведении — красная, как принято в Windows.
+    const Rect close{ right - kWindowButtonWidth, top, right, top + kWindowButtonHeight };
+    if (hovered(model, close)) {
+        renderer.fillRoundRect(close, 8.0f, theme.danger.withAlpha(0.85f));
+    }
+    const Color closeColor = hovered(model, close) ? theme.background : theme.textDim;
+    const float closeCenterX = close.centerX();
+    const float closeCenterY = close.centerY();
+    renderer.drawLine(closeCenterX - 5.0f, closeCenterY - 5.0f, closeCenterX + 5.0f, closeCenterY + 5.0f, closeColor,
+        1.2f);
+    renderer.drawLine(closeCenterX + 5.0f, closeCenterY - 5.0f, closeCenterX - 5.0f, closeCenterY + 5.0f, closeColor,
+        1.2f);
+    hits.push_back(UiHit{ close, ActionKind::WindowClose, 0 });
+    right = close.left;
+
+    const Rect maximize{ right - kWindowButtonWidth, top, right, top + kWindowButtonHeight };
+    if (hovered(model, maximize)) {
+        renderer.fillRoundRect(maximize, 8.0f, theme.panelSoft);
+    }
+    const Color maximizeColor = hovered(model, maximize) ? theme.text : theme.textDim;
+    if (model.maximized) {
+        const Rect back{ maximize.centerX() - 3.0f, maximize.centerY() - 6.0f, maximize.centerX() + 6.0f,
+            maximize.centerY() + 3.0f };
+        renderer.strokeRoundRect(back, 1.5f, maximizeColor, 1.1f);
+        const Rect front{ maximize.centerX() - 6.0f, maximize.centerY() - 3.0f, maximize.centerX() + 3.0f,
+            maximize.centerY() + 6.0f };
+        renderer.fillRoundRect(front, 1.5f, theme.background);
+        renderer.strokeRoundRect(front, 1.5f, maximizeColor, 1.1f);
+    } else {
+        renderer.strokeRoundRect(Rect{ maximize.centerX() - 5.0f, maximize.centerY() - 5.0f,
+                                   maximize.centerX() + 5.0f, maximize.centerY() + 5.0f },
+            2.0f, maximizeColor, 1.1f);
+    }
+    hits.push_back(UiHit{ maximize, ActionKind::WindowMaximize, 0 });
+    right = maximize.left;
+
+    const Rect minimize{ right - kWindowButtonWidth, top, right, top + kWindowButtonHeight };
+    if (hovered(model, minimize)) {
+        renderer.fillRoundRect(minimize, 8.0f, theme.panelSoft);
+    }
+    renderer.drawLine(minimize.centerX() - 5.0f, minimize.centerY() + 1.0f, minimize.centerX() + 5.0f,
+        minimize.centerY() + 1.0f, hovered(model, minimize) ? theme.text : theme.textDim, 1.2f);
+    hits.push_back(UiHit{ minimize, ActionKind::WindowMinimize, 0 });
+}
+
+} // namespace
+
 std::string_view viewTitle(View view)
 {
     switch (view) {
@@ -100,10 +159,34 @@ std::string_view viewEyebrow(View view)
     return "МОНИТОРИНГ";
 }
 
+bool titleBarButtonAt(float x, float y, float windowWidth)
+{
+    if (y < 0.0f || y > kTitleBarHeight) {
+        return false;
+    }
+    const float buttonsLeft = windowWidth - 8.0f - kWindowButtonWidth * 3.0f - 8.0f;
+    return x >= buttonsLeft;
+}
+
+void drawTitleBar(Renderer& renderer, const AppModel& model, const Theme& theme, std::vector<UiHit>& hits)
+{
+    const Rect bar{ kRailWidth, 0.0f, renderer.width(), kTitleBarHeight };
+    renderer.fillRect(bar, theme.background);
+    renderer.drawLine(kRailWidth, kTitleBarHeight - 0.5f, renderer.width(), kTitleBarHeight - 0.5f, theme.line, 1.0f);
+
+    renderer.text(L"YawaFpsHub", Rect{ kRailWidth + 20.0f, 8.0f, kRailWidth + 160.0f, 24.0f }, TextRole::Small,
+        theme.textDim);
+    renderer.fillCircle(kRailWidth + 22.0f, 30.0f, 2.0f, model.etwRunning ? theme.accent : theme.textFaint);
+    renderer.text(model.etwRunning ? L"мониторинг активен" : L"мониторинг остановлен",
+        Rect{ kRailWidth + 30.0f, 23.0f, kRailWidth + 220.0f, 38.0f }, TextRole::Tiny, theme.textFaint);
+
+    drawWindowButtons(renderer, model, theme, hits);
+}
+
 void drawRail(Renderer& renderer, const AppModel& model, const Theme& theme, std::vector<UiHit>& hits)
 {
     renderer.fillRect(Rect{ 0.0f, 0.0f, kRailWidth, renderer.height() }, theme.panel.withAlpha(0.85f));
-    renderer.drawLine(kRailWidth - 1.0f, 0.0f, kRailWidth - 1.0f, renderer.height(), theme.line, 1.0f);
+    renderer.drawLine(kRailWidth - 1.0f, kTitleBarHeight, kRailWidth - 1.0f, renderer.height(), theme.line, 1.0f);
 
     drawBrand(renderer, theme);
 
@@ -111,7 +194,9 @@ void drawRail(Renderer& renderer, const AppModel& model, const Theme& theme, std
     for (std::size_t index = 0; index < kTabNames.size(); ++index) {
         const Rect button{ 12.0f, top, kRailWidth - 12.0f, top + 44.0f };
         const bool isActive = kTabViews[index] == model.view;
-        renderer.fillRoundRect(button, 12.0f, isActive ? theme.accentSoft : theme.panelSoft.withAlpha(0.6f));
+        const bool isHovered = !isActive && hovered(model, button);
+        renderer.fillRoundRect(button, 12.0f,
+            isActive ? theme.accentSoft : theme.panelSoft.withAlpha(isHovered ? 0.95f : 0.6f));
         if (isActive) {
             renderer.strokeRoundRect(button, 12.0f, theme.accentGlow, 1.0f);
         }
@@ -145,24 +230,32 @@ void drawRail(Renderer& renderer, const AppModel& model, const Theme& theme, std
 
 void drawTopBar(Renderer& renderer, const AppModel& model, const Theme& theme, std::vector<UiHit>& hits)
 {
-    renderer.fillRect(Rect{ kRailWidth, 0.0f, renderer.width(), kTopBarHeight }, theme.background);
+    renderer.fillRect(Rect{ kRailWidth, kTitleBarHeight, renderer.width(), kTitleBarHeight + kTopBarHeight },
+        theme.background);
 
     renderer.text(wideText(viewEyebrow(model.view)),
-        Rect{ kRailWidth + 24.0f, 18.0f, kRailWidth + 360.0f, 34.0f }, TextRole::Tiny,
-        theme.accent.withAlpha(0.8f));
+        Rect{ kRailWidth + 24.0f, kTitleBarHeight + 22.0f, kRailWidth + 360.0f, kTitleBarHeight + 38.0f },
+        TextRole::Tiny, theme.accent.withAlpha(0.8f));
     renderer.text(wideText(viewTitle(model.view)),
-        Rect{ kRailWidth + 24.0f, 34.0f, kRailWidth + 460.0f, 72.0f }, TextRole::Value, theme.text);
+        Rect{ kRailWidth + 24.0f, kTitleBarHeight + 38.0f, kRailWidth + 460.0f, kTitleBarHeight + 76.0f },
+        TextRole::Value, theme.text);
 
-    const float top = 24.0f;
-    const float bottom = 58.0f;
+    const float top = kTitleBarHeight + 28.0f;
+    const float bottom = kTitleBarHeight + 62.0f;
     float right = renderer.width() - 20.0f;
 
     const Rect pause{ right - 88.0f, top, right, bottom };
+    if (!model.paused && hovered(model, pause)) {
+        renderer.fillRoundRect(pause, 9.0f, theme.panelSoft);
+    }
     drawChip(renderer, pause, model.paused ? L"Продолжить" : L"Пауза", model.paused, theme);
     hits.push_back(UiHit{ pause, ActionKind::TogglePause, 0 });
     right = pause.left - 8.0f;
 
     const Rect overlayButton{ right - 104.0f, top, right, bottom };
+    if (!model.overlayVisible && hovered(model, overlayButton)) {
+        renderer.strokeRoundRect(overlayButton, 10.0f, theme.lineStrong, 1.0f);
+    }
     renderer.fillRoundRect(overlayButton, 10.0f, model.overlayVisible ? theme.accentSoft : theme.panelSoft);
     renderer.fillCircle(overlayButton.left + 12.0f, overlayButton.centerY(), 3.0f,
         model.overlayVisible ? theme.accent : theme.textFaint);
@@ -220,6 +313,12 @@ void drawStatusBar(Renderer& renderer, const AppModel& model, const Theme& theme
         + L" · сессия " + formatClock(model.elapsedMs);
     renderer.text(right, Rect{ renderer.width() - 520.0f, top, renderer.width() - 18.0f, renderer.height() },
         TextRole::Tiny, theme.textFaint, TextAlign::Right);
+
+    const wchar_t* hints = L"F10 — оверлей · F11 — положение · F12 — окно";
+    const float hintsWidth = renderer.measureText(hints, TextRole::Tiny);
+    renderer.text(hints, Rect{ renderer.width() * 0.5f - hintsWidth * 0.5f, top,
+                             renderer.width() * 0.5f + hintsWidth * 0.5f, renderer.height() },
+        TextRole::Tiny, theme.textFaint, TextAlign::Center);
 }
 
 } // namespace yawa

@@ -99,6 +99,14 @@ void SystemSensors::initializeCpu(Log& log)
     if (!m_availability.cpuClock) {
         log.warning("CPU: частота недоступна, нет счётчика % Processor Performance");
     }
+
+    // Температура: ACPI-термозона читается через PDH, драйвер не нужен.
+    // Счётчик есть не на каждой машине — тогда честно остаётся «нет данных».
+    if (m_thermalZone.open(L"\\Thermal Zone Information(*)\\Temperature")) {
+        log.info("CPU: термозона ACPI подключена");
+    } else {
+        log.info("CPU: температура недоступна без MSR-драйвера");
+    }
 }
 
 bool SystemSensors::initializeGpu(Log& log, std::string& error)
@@ -186,6 +194,22 @@ void SystemSensors::sampleCpu(SystemSnapshot& snapshot)
     if (m_availability.cpuClock && m_cpuPerformance.collect()) {
         const double percent = std::clamp(m_cpuPerformance.value(), 0.0, 300.0);
         snapshot.cpuClockMhz = static_cast<double>(m_nominalCpuMhz) * percent / 100.0;
+    }
+
+    if (m_thermalZone.collect()) {
+        double hottest = -1000.0;
+        for (const auto& [name, value] : m_thermalZone.values()) {
+            (void)name;
+            // Значение приходит в десятых долях Кельвина; на части систем — в Кельвинах.
+            const double celsius = value > 1000.0 ? value / 10.0 - 273.15 : value - 273.15;
+            if (celsius > -20.0 && celsius < 130.0) {
+                hottest = std::max(hottest, celsius);
+            }
+        }
+        if (hottest > -20.0) {
+            snapshot.cpuTemperature = hottest;
+            m_availability.cpuTemperature = true;
+        }
     }
 }
 
@@ -292,6 +316,10 @@ void SystemSensors::sampleGpu(SystemSnapshot& snapshot)
 
     if (m_nvml.isAvailable()) {
         const GpuSensorReading reading = m_nvml.read();
+        // Доступность уточняется на каждом опросе: драйвер может ответить позже,
+        // чем прошла инициализация, и тогда температура появляется сама.
+        m_availability.gpuTemperature = reading.temperature > 0.0;
+        m_availability.gpuPower = reading.powerWatts > 0.0;
         snapshot.gpuTemperature = reading.temperature;
         snapshot.gpuClockMhz = reading.graphicsClockMhz;
         snapshot.gpuMemClockMhz = reading.memoryClockMhz;

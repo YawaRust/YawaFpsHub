@@ -61,7 +61,11 @@ private:
     void applyAction(const UiHit& hit);
     // Ввод подписи: символы приходят из WM_CHAR/WM_IME_CHAR уже в UTF-16.
     void editLabelChar(wchar_t symbol);
+    // Поиск по датчикам: та же логика, что у подписей, но строка живёт в модели.
+    void editSensorQuery(wchar_t symbol);
     void saveSettings();
+    // Закрытие по «Выход» в трее должно завершать процесс, а не прятать окно в трей.
+    bool m_quitRequested = false;
 
     void createTrayIcon();
     void destroyTrayIcon();
@@ -100,6 +104,7 @@ private:
     std::atomic<bool> m_stopRequested{ false };
     bool m_running = false;
     bool m_trayCreated = false;
+    bool m_trackingMouse = false;
     float m_dpiScale = 1.0f;
     std::wstring m_overlayShotDir;
 };

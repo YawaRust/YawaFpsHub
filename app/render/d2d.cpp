@@ -239,6 +239,22 @@ void Renderer::strokeRoundRect(const Rect& rect, float radius, const Color& colo
         brush, thickness);
 }
 
+void Renderer::pushClip(const Rect& rect)
+{
+    if (m_target == nullptr) {
+        return;
+    }
+    m_target->PushAxisAlignedClip(D2D1::RectF(rect.left, rect.top, rect.right, rect.bottom),
+        D2D1_ANTIALIAS_MODE_ALIASED);
+}
+
+void Renderer::popClip()
+{
+    if (m_target != nullptr) {
+        m_target->PopAxisAlignedClip();
+    }
+}
+
 void Renderer::fillCircle(float centerX, float centerY, float radius, const Color& color)
 {
     ID2D1SolidColorBrush* brush = brushFor(color);
