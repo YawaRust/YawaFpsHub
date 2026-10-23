@@ -24,12 +24,10 @@ constexpr UINT kTrayMessage = WM_APP + 1;
 constexpr UINT kTickMessage = WM_APP + 2;
 constexpr UINT kExportMessage = WM_APP + 3;
 constexpr UINT kTrayIconId = 1;
-constexpr UINT kHotkeyOverlay = 1;
-constexpr UINT kHotkeyPosition = 2;
-constexpr UINT kHotkeyWindow = 3;
-
-constexpr int kHotkeyToggleOverlay = 1;
-constexpr int kHotkeyCyclePosition = 2;
+// Идентификаторы WM_HOTKEY: RegisterHotKey принимает int, поэтому и константы int.
+constexpr int kHotkeyOverlay = 1;
+constexpr int kHotkeyPosition = 2;
+constexpr int kHotkeyWindow = 3;
 
 } // namespace
 
@@ -484,7 +482,9 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         }
         break;
 
+    // F10 приходит как WM_SYSKEYDOWN, поэтому захват клавиши слушаем в обоих сообщениях.
     case WM_KEYDOWN:
+    case WM_SYSKEYDOWN:
         if (m_model.hotkeyEditing >= 0) {
             // Esc — отмена, Delete — отключить клавишу, всё остальное становится хоткеем.
             unsigned int* slot = nullptr;
@@ -503,7 +503,10 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
                 m_model.hotkeyEditing = -1;
                 registerHotkeys();
                 saveSettings();
-            } else if (wParam < 0x100) {
+            } else if (wParam < 0x100 && wParam != static_cast<WPARAM>(VK_SHIFT)
+                && wParam != static_cast<WPARAM>(VK_CONTROL) && wParam != static_cast<WPARAM>(VK_MENU)
+                && wParam != static_cast<WPARAM>(VK_LWIN) && wParam != static_cast<WPARAM>(VK_RWIN)
+                && wParam != static_cast<WPARAM>(VK_CAPITAL)) {
                 *slot = static_cast<unsigned int>(wParam);
                 m_model.hotkeyEditing = -1;
                 registerHotkeys();
@@ -526,15 +529,16 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         return 0;
 
     case WM_HOTKEY:
-        if (wParam == kHotkeyOverlay) {
+        // wParam — WPARAM, идентификаторы int: сравниваем приведёнными, иначе C4018 при /W4.
+        if (wParam == static_cast<WPARAM>(kHotkeyOverlay)) {
             toggleOverlay();
-        } else if (wParam == kHotkeyPosition) {
+        } else if (wParam == static_cast<WPARAM>(kHotkeyPosition)) {
             const int next = (static_cast<int>(m_model.settings.overlay.position) + 1) % 4;
             m_model.settings.overlay.position = static_cast<OverlayPosition>(next);
             m_overlay.setSettings(m_model.settings.overlay);
             saveSettings();
             InvalidateRect(m_window, nullptr, FALSE);
-        } else if (wParam == kHotkeyWindow) {
+        } else if (wParam == static_cast<WPARAM>(kHotkeyWindow)) {
             toggleVisibilityFromTray();
         }
         return 0;
@@ -1106,6 +1110,7 @@ void MainWindow::samplingLoop()
                     static_cast<std::uint8_t>(m_model.settings.capture.smoothingPercent));
                 m_model.fps = fps;
                 m_model.availability = m_sensors.availability();
+                m_model.cpuCores = m_sensors.coreCount();
                 m_model.etwRunning = m_etw.isRunning();
                 if (!foreground.empty()) {
                     m_model.foregroundApp = foreground;

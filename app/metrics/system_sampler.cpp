@@ -94,6 +94,12 @@ void applySnapshot(MetricStore& store, const SystemSnapshot& snapshot, const Der
     store.set(MetricId::CpuPower, snapshot.cpuPowerWatts);
     store.set(MetricId::GameThreadLoad, snapshot.gameThreadLoad, smoothingPercent);
 
+    const std::size_t cores = std::min<std::size_t>(snapshot.coreCount, snapshot.coreLoadPercent.size());
+    for (std::size_t index = 0; index < cores; ++index) {
+        store.set(static_cast<MetricId>(static_cast<std::size_t>(MetricId::Core0Load) + index),
+            snapshot.coreLoadPercent[index], smoothingPercent);
+    }
+
     store.set(MetricId::GpuLoad, snapshot.gpuLoadPercent, smoothingPercent);
     store.set(MetricId::GpuTemp, snapshot.gpuTemperature);
     store.set(MetricId::GpuHotspot, snapshot.gpuHotspot);

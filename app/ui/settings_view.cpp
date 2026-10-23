@@ -296,7 +296,7 @@ void drawHotkeyCard(Renderer& renderer, const AppModel& model, const Theme& them
     float top = drawCardHeader(renderer, card, L"Горячие клавиши",
         L"нажмите на строку и введите клавишу, Delete отключает", theme);
 
-    const std::array<std::wstring_view, 3> names{ L"Оверлей", L"Положение оверлея", L"Окно поверх игр" };
+    const std::array<std::wstring_view, 3> names{ L"Оверлей", L"Положение оверлея", L"Показать или скрыть окно" };
     const std::array<unsigned int, 3> keys{ model.settings.hotkeys.overlay, model.settings.hotkeys.position,
         model.settings.hotkeys.window };
 

@@ -100,6 +100,25 @@ void SystemSensors::initializeCpu(Log& log)
         log.warning("CPU: частота недоступна, нет счётчика % Processor Performance");
     }
 
+    // Загрузка по ядрам: \Processor Information(0,N)\% Processor Time. Диспетчер задач
+    // берёт те же счётчики, поэтому цифры совпадают.
+    const DWORD coreCount = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+    for (std::size_t index = 0; index < m_coreLoad.size(); ++index) {
+        if (index >= coreCount) {
+            break;
+        }
+        const std::wstring path
+            = L"\\Processor Information(0," + std::to_wstring(index) + L")\\% Processor Time";
+        auto counter = std::make_unique<PdhCounter>();
+        if (counter->open(path.c_str())) {
+            m_coreLoad[index] = std::move(counter);
+            ++m_coreCount;
+        }
+    }
+    if (!m_coreLoad[0]) {
+        log.warning("CPU: счётчики по ядрам недоступны");
+    }
+
     // Температура: ACPI-термозона читается через PDH, драйвер не нужен.
     // Счётчик есть не на каждой машине — тогда честно остаётся «нет данных».
     if (m_thermalZone.open(L"\\Thermal Zone Information(*)\\Temperature")) {
@@ -197,6 +216,16 @@ void SystemSensors::sampleCpu(SystemSnapshot& snapshot)
     }
 
     sampleGameThread(snapshot);
+
+    std::uint32_t cores = 0;
+    for (std::size_t index = 0; index < m_coreLoad.size(); ++index) {
+        if (m_coreLoad[index] == nullptr || !m_coreLoad[index]->collect()) {
+            continue;
+        }
+        snapshot.coreLoadPercent[index] = std::clamp(m_coreLoad[index]->value(), 0.0, 100.0);
+        ++cores;
+    }
+    snapshot.coreCount = cores;
 
     if (m_thermalZone.collect()) {
         double hottest = -1000.0;

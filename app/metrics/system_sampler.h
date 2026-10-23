@@ -31,6 +31,10 @@ struct SystemSnapshot {
     std::uint64_t selfWorkingSetBytes = 0;
     std::uint32_t selfThreads = 0;
 
+    // Загрузка по физическим ядрам: заполняются первые coreCount элементов.
+    std::array<double, 16> coreLoadPercent{};
+    std::uint32_t coreCount = 0;
+
     double cpuTemperature = 0.0;
     double cpuClockMhz = 0.0;
     double cpuPowerWatts = 0.0;

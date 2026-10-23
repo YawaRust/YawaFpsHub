@@ -439,17 +439,18 @@
             <span>60 с</span>
             <span></span>
           </div>
-          <div id="sensorRows"></div>
-          <p class="empty" id="sensorEmpty" hidden>Ничего не найдено. Измените запрос или фильтр.</p>
+          <div class="sensor-viewport" id="sensorViewport">
+            <div id="sensorRows"></div>
+            <p class="empty" id="sensorEmpty" hidden>Ничего не найдено. Измените запрос или фильтр.</p>
+          </div>
+          <p class="footnote footnote--table">Источники: PDH для счётчиков GPU, NtQuerySystemInformation для CPU и памяти,
+            D3DKMT для температур, DXGI для видеопамяти. Значения обновляются с выбранным интервалом опроса.</p>
         </div>
-
-        <p class="footnote">Источники: PDH для счётчиков GPU, NtQuerySystemInformation для CPU и памяти,
-          D3DKMT для температур, DXGI для видеопамяти. Значения обновляются с выбранным интервалом опроса.</p>
       </section>
 
       <section class="view" data-view="overlay">
         <div class="grid">
-          <article class="card span-7">
+                    <article class="card span-7">
             <header class="card__head">
               <div>
                 <h2 class="card__title">Оверлей поверх игры</h2>
@@ -548,6 +549,42 @@
             </div>
 
             <div class="field">
+              <span class="field__label">Оформление</span>
+              <div class="segmented segmented--chips" id="osdChrome">
+                <button class="is-active" data-chrome="background" type="button">Фон</button>
+                <button class="is-active" data-chrome="border" type="button">Рамка</button>
+                <button class="is-active" data-chrome="shadow" type="button">Тень</button>
+              </div>
+            </div>
+
+            <div class="field">
+              <div class="field__label-row">
+                <span class="field__label">Углы</span>
+                <b id="osdRadiusValue">8 px</b>
+              </div>
+              <input class="range" type="range" id="osdRadius" min="0" max="24" step="1" value="8">
+            </div>
+
+            <div class="field">
+              <div class="field__label-row">
+                <span class="field__label">Смещение</span>
+                <b id="osdOffsetValue">0 / 0 px</b>
+              </div>
+              <div class="steppers">
+                <div class="stepper">
+                  <span>X</span>
+                  <button type="button" data-offset="x" data-delta="-10" aria-label="Сдвинуть влево">−</button>
+                  <button type="button" data-offset="x" data-delta="10" aria-label="Сдвинуть вправо">+</button>
+                </div>
+                <div class="stepper">
+                  <span>Y</span>
+                  <button type="button" data-offset="y" data-delta="-10" aria-label="Сдвинуть вверх">−</button>
+                  <button type="button" data-offset="y" data-delta="10" aria-label="Сдвинуть вниз">+</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="field">
               <span class="field__label">Состав</span>
               <ul class="toggles">
                 <li>
@@ -591,7 +628,7 @@
           </article>
 
 
-          <article class="card span-7">
+                    <article class="card span-7">
             <header class="card__head">
               <div>
                 <h2 class="card__title">Стиль оформления</h2>
@@ -891,34 +928,36 @@
             </div>
           </article>
 
+
+
+
           <article class="card span-6">
             <header class="card__head">
               <div>
-                <h2 class="card__title">О программе</h2>
-                <p class="card__sub">YawaFpsHub 0.1.0 · Windows 10/11 x64</p>
+                <h2 class="card__title">Горячие клавиши</h2>
+                <p class="card__sub">нажмите на строку и введите клавишу, Delete отключает</p>
               </div>
-              <span class="tag tag--live"><i></i>0,3% CPU</span>
             </header>
 
-            <ul class="metrics-list">
-              <li><span>Собственное потребление</span><b><span data-metric="procCpu">0,3</span>% CPU · <span data-metric="procRam">24,6</span> МБ</b></li>
-              <li><span>Сборщик</span><b>MSVC 2022, C++20</b></li>
-              <li><span>Зависимости</span><b>только Windows SDK</b></li>
-              <li><span>Потоков</span><b>3</b></li>
+            <ul class="hotkeys" id="hotkeyList">
+              <li class="hotkey" data-hotkey="overlay" tabindex="0">
+                <span class="hotkey__name">Оверлей</span>
+                <span class="hotkey__key">F10</span>
+              </li>
+              <li class="hotkey" data-hotkey="position" tabindex="0">
+                <span class="hotkey__name">Положение оверлея</span>
+                <span class="hotkey__key">F11</span>
+              </li>
+              <li class="hotkey" data-hotkey="window" tabindex="0">
+                <span class="hotkey__name">Показать или скрыть окно</span>
+                <span class="hotkey__key">F12</span>
+              </li>
             </ul>
 
-            <p class="field__hint">Показатели читаются теми же счётчиками, что использует диспетчер задач, поэтому
-              значения совпадают с ним. ETW-сессия работает без инъекций в процессы игр.</p>
-
-            <div class="actions">
-              <button class="btn btn--ghost" type="button">Проверить обновления</button>
-              <button class="btn btn--ghost" type="button">Горячие клавиши</button>
-            </div>
+            <p class="field__hint">Esc — отмена, Delete — выключить. Если клавишу занял другой процесс, привязка не сработает.</p>
           </article>
 
-
-
-          <article class="card span-12">
+          <article class="card span-7">
             <header class="card__head">
               <div>
                 <h2 class="card__title">Источники данных</h2>
@@ -967,48 +1006,34 @@
             </ul>
           </article>
 
-          <article class="card span-12">
+       </div>
+
+          <article class="card span-5">
             <header class="card__head">
               <div>
-                <h2 class="card__title">Профили по играм</h2>
-                <p class="card__sub">Настройки оверлея и опроса переключаются по запущенному процессу</p>
+                <h2 class="card__title">О программе</h2>
+                <p class="card__sub">YawaFpsHub 0.1.0 · Windows 10/11 x64</p>
               </div>
-              <button class="btn btn--ghost" type="button">Добавить игру</button>
+              <span class="tag tag--live"><i></i>0,3% CPU</span>
             </header>
 
-            <div class="profile-table">
-              <div class="profile-row profile-row--head">
-                <span>Игра</span>
-                <span>Пресет</span>
-                <span>Опрос</span>
-                <span>Оверлей</span>
-                <span></span>
-              </div>
-              <div class="profile-row">
-                <span class="profile-row__game"><i>CP</i>Cyberpunk 2077</span>
-                <span>Стандарт</span>
-                <span>500 мс</span>
-                <span class="toggle-state">включён</span>
-                <button class="profile-row__more" type="button" aria-label="Изменить профиль">•••</button>
-              </div>
-              <div class="profile-row">
-                <span class="profile-row__game"><i>VA</i>Valorant</span>
-                <span>Минимум</span>
-                <span>1000 мс</span>
-                <span class="toggle-state">включён</span>
-                <button class="profile-row__more" type="button" aria-label="Изменить профиль">•••</button>
-              </div>
-              <div class="profile-row">
-                <span class="profile-row__game"><i>CS</i>Counter-Strike 2</span>
-                <span>Диагностика</span>
-                <span>500 мс</span>
-                <span class="toggle-state is-off">выключен</span>
-                <button class="profile-row__more" type="button" aria-label="Изменить профиль">•••</button>
-              </div>
+            <ul class="metrics-list">
+              <li><span>Собственное потребление</span><b><span data-metric="procCpu">0,3</span>% CPU · <span data-metric="procRam">24,6</span> МБ</b></li>
+              <li><span>Сборщик</span><b>MSVC 2022, C++20</b></li>
+              <li><span>Зависимости</span><b>только Windows SDK</b></li>
+              <li><span>Потоков</span><b>3</b></li>
+            </ul>
+
+            <p class="field__hint">Показатели читаются теми же счётчиками, что использует диспетчер задач, поэтому
+              значения совпадают с ним. ETW-сессия работает без инъекций в процессы игр.</p>
+
+            <div class="actions">
+              <button class="btn btn--ghost" type="button">Проверить обновления</button>
+              <button class="btn btn--ghost" type="button">Горячие клавиши</button>
             </div>
           </article>
-        </div>
-      </section>
+
+        </section>
 
     </main>
 

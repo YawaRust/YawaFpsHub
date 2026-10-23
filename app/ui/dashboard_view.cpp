@@ -242,6 +242,25 @@ void drawCpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
         drawLabelValue(renderer, Rect{ rowsLeft, rowTop, inner.right, rowTop + 16.0f }, label, value, theme);
         rowTop += 24.0f;
     }
+
+    // Полоски по ядрам, как в демо: видно, что процессор действительно опрашивается.
+    if (model.cpuCores > 0 && inner.bottom - rowTop >= 22.0f) {
+        const std::size_t count = std::min<std::size_t>(model.cpuCores, 16);
+        const float gap = 3.0f;
+        const float barWidth = (inner.width() - gap * static_cast<float>(count - 1)) / static_cast<float>(count);
+        const float base = inner.bottom;
+        const float height = std::min(18.0f, inner.bottom - rowTop);
+
+        for (std::size_t index = 0; index < count; ++index) {
+            const MetricId id = static_cast<MetricId>(static_cast<std::size_t>(MetricId::Core0Load) + index);
+            const double load = std::clamp(model.store.value(id) / 100.0, 0.0, 1.0);
+            const float left = inner.left + static_cast<float>(index) * (barWidth + gap);
+            renderer.fillRoundRect(Rect{ left, base - height, left + barWidth, base }, 2.0f,
+                theme.panelSoft);
+            const float filled = std::max(2.0f, height * static_cast<float>(load));
+            renderer.fillRoundRect(Rect{ left, base - filled, left + barWidth, base }, 2.0f, theme.cpu);
+        }
+    }
 }
 
 void drawGpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card,

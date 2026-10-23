@@ -37,6 +37,9 @@
     { id: "cpuClock", label: "Частота CPU", group: "cpu", unit: "МГц", decimals: 0 },
     { id: "cpuPower", label: "Питание CPU", group: "cpu", unit: "Вт", decimals: 0 },
     { id: "cpuGameThread", label: "Поток игры", group: "cpu", unit: "%", decimals: 0 },
+    ...Array.from({ length: 8 }, (_, index) => ({
+      id: `core${index}`, label: `Ядро ${index + 1}`, group: "cpu", unit: "%", decimals: 0
+    })),
 
     { id: "gpu", label: "Загрузка видеокарты", group: "gpu", unit: "%", decimals: 0, pinned: true },
     { id: "gpuTemp", label: "Температура GPU", group: "gpu", unit: "°C", decimals: 0, pinned: true },
@@ -99,6 +102,9 @@
       case "cpuClock": return 4925;
       case "cpuPower": return 78;
       case "cpuGameThread": return 62;
+      case "core0": case "core1": case "core2": case "core3":
+      case "core4": case "core5": case "core6": case "core7":
+        return 38 + Number(id.slice(4)) * 2.4;
       case "gpu": return 93;
       case "gpuTemp": return 71;
       case "gpuHotspot": return 79;
@@ -221,6 +227,10 @@
       cpuClock: clamp(4980 - (100 - state.cpu) * 2.4 + between(-35, 35), 3600, 5050),
       cpuPower: clamp(46 + state.cpu * 0.76 + between(-2, 2), 22, 142),
       cpuGameThread: clamp(state.cpu * 1.35 + between(-4, 4), 20, 100),
+      ...Object.fromEntries(Array.from({ length: 8 }, (_, index) => [
+        `core${index}`,
+        clamp(state.cpu + Math.sin(second / (2.3 + index * 0.31) + index) * 26 + between(-6, 6), 2, 100)
+      ])),
       gpu: state.gpu,
       gpuTemp: clamp(profile.tempBase + state.gpu * profile.tempK + between(-0.4, 0.4), 28, 92),
       gpuHotspot: clamp(profile.hotspotBase + state.gpu * profile.hotspotK + between(-0.6, 0.6), 30, 106),

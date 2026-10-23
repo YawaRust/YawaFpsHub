@@ -7,7 +7,9 @@
 #include "platform/pdh_query.h"
 
 #include <cstddef>
+#include <array>
 #include <cstdint>
+#include <memory>
 #include <string>
 
 namespace yawa {
@@ -48,6 +50,7 @@ public:
     const SensorAvailability& availability() const { return m_availability; }
 
     std::wstring activeGpuName() const;
+    std::uint32_t coreCount() const { return m_coreCount; }
 
 private:
     void initializeCpu(Log& log);
@@ -69,10 +72,13 @@ private:
     PdhWildcardCounter m_gpuEngine;
     // ACPI-термозона: отдаёт температуру без прав администратора и без MSR-драйвера.
     PdhWildcardCounter m_thermalZone;
+    // Счётчик загрузки на каждое физическое ядро; nullptr — ядра с таким номером нет.
+    std::array<std::unique_ptr<PdhCounter>, 16> m_coreLoad;
 
     SensorAvailability m_availability;
     std::size_t m_activeGpu = 0;
     std::uint32_t m_nominalCpuMhz = 0;
+    std::uint32_t m_coreCount = 0;
     double m_gpuLoad = 0.0;
 
     // Поток игры: главный поток активного окна. Считаем по разнице времён, как диспетчер задач.

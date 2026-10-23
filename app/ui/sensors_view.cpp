@@ -24,13 +24,19 @@ constexpr float kToolbarHeight = 36.0f;
 constexpr float kRowHeight = 26.0f;
 constexpr float kGroupHeight = 24.0f;
 
-std::vector<Group> makeGroups()
+std::vector<Group> makeGroups(std::uint32_t cores)
 {
+    std::vector<MetricId> cpu{ MetricId::CpuLoad, MetricId::CpuTemp, MetricId::CpuClock, MetricId::CpuPower,
+        MetricId::GameThreadLoad };
+    // Ядра добавляются только реально существующие: пустых строк «Ядро 17» быть не должно.
+    for (std::uint32_t index = 0; index < std::min<std::uint32_t>(cores, 16); ++index) {
+        cpu.push_back(static_cast<MetricId>(static_cast<std::size_t>(MetricId::Core0Load) + index));
+    }
+
     return {
         { L"Кадры", { MetricId::Fps, MetricId::FrameTime, MetricId::Low1Fps, MetricId::Low01Fps, MetricId::AvgFps,
                         MetricId::DroppedFrames } },
-        { L"Процессор", { MetricId::CpuLoad, MetricId::CpuTemp, MetricId::CpuClock, MetricId::CpuPower,
-                            MetricId::GameThreadLoad } },
+        { L"Процессор", std::move(cpu) },
         { L"Видеокарта", { MetricId::GpuLoad, MetricId::GpuTemp, MetricId::GpuHotspot, MetricId::GpuClock,
                              MetricId::GpuMemClock, MetricId::GpuPower, MetricId::GpuFan, MetricId::VramUsed,
                              MetricId::VramTotal } },
@@ -180,17 +186,35 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
         overlayOn ? theme.accent : theme.textFaint);
     hits.push_back(UiHit{ overlaySwitch, ActionKind::ToggleOverlayOnly, 0 });
 
+    // Фильтры подстраиваются под ширину окна: на 1040 px последний чип раньше обрезался.
     float filterLeft = search.right + 10.0f;
+    const float filterRight = overlaySwitch.left - 8.0f;
+    float gap = 6.0f;
+    float padding = 12.0f;
+    float textWidth = 0.0f;
+    for (std::wstring_view name : kFilterNames) {
+        textWidth += renderer.measureText(name, TextRole::Small);
+    }
+    const float available = filterRight - filterLeft;
+    if (textWidth + padding * 2.0f * static_cast<float>(kFilterNames.size())
+            + gap * static_cast<float>(kFilterNames.size() - 1)
+        > available) {
+        gap = 4.0f;
+        padding = std::max(6.0f,
+            (available - textWidth - gap * static_cast<float>(kFilterNames.size() - 1))
+                / (2.0f * static_cast<float>(kFilterNames.size())));
+    }
+
     for (std::size_t index = 0; index < kFilterNames.size(); ++index) {
-        const float width = renderer.measureText(kFilterNames[index], TextRole::Small) + 24.0f;
-        if (filterLeft + width > overlaySwitch.left - 8.0f) {
+        const float width = renderer.measureText(kFilterNames[index], TextRole::Small) + padding * 2.0f;
+        if (filterLeft + width > filterRight) {
             break;
         }
         const Rect chip{ filterLeft, area.top, filterLeft + width, area.top + kToolbarHeight - 2.0f };
         const bool active = index == 0 ? model.sensorFilter < 0 : model.sensorFilter == static_cast<int>(index) - 1;
         drawChip(renderer, chip, kFilterNames[index], active, theme, TextRole::Small, isHovered(model, chip));
         hits.push_back(UiHit{ chip, ActionKind::SetSensorFilter, index == 0 ? -1 : static_cast<int>(index) - 1 });
-        filterLeft = chip.right + 6.0f;
+        filterLeft = chip.right + gap;
     }
 
     // --- Таблица: одна колонка на весь экран, как в демо.
@@ -222,7 +246,7 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
         theme.textFaint, TextAlign::Right);
     renderer.drawLine(inner.left, inner.top + 20.0f, inner.right, inner.top + 20.0f, theme.line, 1.0f);
 
-    const std::vector<Group> groups = makeGroups();
+    const std::vector<Group> groups = makeGroups(model.cpuCores);
     const std::wstring query = lowerCopy(wideText(model.sensorQuery));
     const int historySamples = std::max(60000 / std::max(model.settings.capture.intervalMs, 100), 2);
 
@@ -310,12 +334,14 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
                 TextRole::Small, known ? theme.textDim : theme.textFaint);
 
             // Значение крупнее остальных, единица — мелким шрифтом через пробел.
-            const std::wstring value = known ? wideText(formatValue(slot.stats.current, info.decimals)) : L"—";
+            // Недоступный датчик пишет причину словами: прочерк читался как сломанный интерфейс.
+            const std::wstring value = known ? wideText(formatValue(slot.stats.current, info.decimals))
+                                             : L"нет данных";
             const std::wstring unit = known ? wideText(unitSuffix(info.unit)) : std::wstring();
             const float unitWidth = unit.empty() ? 0.0f : renderer.measureText(unit, TextRole::Tiny) + 3.0f;
-            renderer.text(value, Rect{ valueRight - 100.0f - unitWidth, rowTop, valueRight - unitWidth,
+            renderer.text(value, Rect{ valueRight - 104.0f - unitWidth, rowTop, valueRight - unitWidth,
                                    rowTop + kRowHeight },
-                TextRole::Small, known ? theme.text : theme.textFaint, TextAlign::Right);
+                known ? TextRole::Small : TextRole::Tiny, known ? theme.text : theme.textFaint, TextAlign::Right);
             if (!unit.empty()) {
                 renderer.text(unit, Rect{ valueRight - unitWidth, rowTop + kRowHeight * 0.5f, valueRight,
                                        rowTop + kRowHeight },
@@ -383,7 +409,7 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
     }
 
     renderer.text(L"ETW для кадров, PDH для счётчиков диспетчера задач, DXGI для видеопамяти, NVML для температур"
-                  L" NVIDIA, ACPI-термозона для процессора. «—» — источник не отвечает на этом железе.",
+                  L" NVIDIA, ACPI-термозона для процессора. «нет данных» — источник не отвечает на этом железе.",
         Rect{ inner.left, inner.bottom - 18.0f, inner.right - 14.0f, inner.bottom }, TextRole::Tiny,
         theme.textFaint);
 }

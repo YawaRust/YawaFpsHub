@@ -101,6 +101,12 @@
     style: "frosted",
     scale: 100,
     opacity: 72,
+    radius: 8,
+    background: true,
+    border: true,
+    shadow: true,
+    offsetX: 0,
+    offsetY: 0,
     labels: { ...DEFAULT_LABELS }
   };
 
@@ -497,6 +503,112 @@
     osd.dataset.style = overlayState.style;
     osd.style.setProperty("--osd-scale", (overlayState.scale / 100).toFixed(2));
     osd.style.setProperty("--osd-bg", (overlayState.opacity / 100).toFixed(2));
+    osd.style.setProperty("--osd-radius", `${overlayState.radius}px`);
+    osd.style.setProperty("--osd-shift-x", `${overlayState.offsetX}px`);
+    osd.style.setProperty("--osd-shift-y", `${overlayState.offsetY}px`);
+    osd.classList.toggle("no-background", !overlayState.background);
+    osd.classList.toggle("no-border", !overlayState.border);
+    osd.classList.toggle("no-shadow", !overlayState.shadow);
+
+    const radiusValue = $("#osdRadiusValue");
+    if (radiusValue) radiusValue.textContent = `${overlayState.radius} px`;
+    const offsetValue = $("#osdOffsetValue");
+    if (offsetValue) offsetValue.textContent = `${overlayState.offsetX} / ${overlayState.offsetY} px`;
+    const radius = $("#osdRadius");
+    if (radius) {
+      radius.value = String(overlayState.radius);
+      radius.style.setProperty("--fill", `${(overlayState.radius / 24) * 100}%`);
+    }
+  }
+
+  function bindOsdChrome() {
+    const chips = $$("#osdChrome button");
+    chips.forEach((chip) => {
+      chip.classList.toggle("is-active", Boolean(overlayState[chip.dataset.chrome]));
+      chip.addEventListener("click", () => {
+        overlayState[chip.dataset.chrome] = !overlayState[chip.dataset.chrome];
+        chip.classList.toggle("is-active", overlayState[chip.dataset.chrome]);
+        applyOverlay();
+      });
+    });
+
+    const radius = $("#osdRadius");
+    radius.addEventListener("input", () => {
+      overlayState.radius = Number(radius.value);
+      applyOverlay();
+    });
+
+    $$("[data-offset]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const axis = button.dataset.offset;
+        const delta = Number(button.dataset.delta);
+        const next = (axis === "x" ? overlayState.offsetX : overlayState.offsetY) + delta;
+        const clamped = Math.max(-200, Math.min(200, next));
+        if (axis === "x") overlayState.offsetX = clamped;
+        else overlayState.offsetY = clamped;
+        applyOverlay();
+      });
+    });
+  }
+
+  // Горячие клавиши: клик по строке, затем любая клавиша. Esc — отмена, Delete — выключить.
+  const VK_NAMES = {
+    Space: "Space", Insert: "Insert", Delete: "Delete", Home: "Home", End: "End",
+    PageUp: "PgUp", PageDown: "PgDn", PrintScreen: "PrtScr", Pause: "Pause", ScrollLock: "ScrollLock"
+  };
+  const hotkeys = { overlay: "F10", position: "F11", window: "F12" };
+  let hotkeyEditing = null;
+
+  function bindHotkeys() {
+    const list = $("#hotkeyList");
+    if (!list) return;
+
+    const render = () => {
+      for (const row of list.querySelectorAll(".hotkey")) {
+        const key = hotkeys[row.dataset.hotkey];
+        const editing = hotkeyEditing === row.dataset.hotkey;
+        row.classList.toggle("is-editing", editing);
+        row.querySelector(".hotkey__key").textContent = editing ? "нажмите клавишу" : key || "выключено";
+      }
+    };
+
+    list.addEventListener("click", (event) => {
+      const row = event.target.closest(".hotkey");
+      if (!row) return;
+      hotkeyEditing = row.dataset.hotkey;
+      row.focus();
+      render();
+    });
+
+    list.addEventListener("keydown", (event) => {
+      if (!hotkeyEditing) return;
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (event.key === "Escape") {
+        hotkeyEditing = null;
+        render();
+        return;
+      }
+      if (event.key === "Delete" || event.key === "Backspace") {
+        hotkeys[hotkeyEditing] = "";
+        hotkeyEditing = null;
+        render();
+        toast("Клавиша отключена");
+        return;
+      }
+
+      let name = "";
+      if (/^F([1-9]|1[0-9]|2[0-4])$/.test(event.key)) name = event.key;
+      else if (event.key.length === 1 && /[a-z0-9]/i.test(event.key)) name = event.key.toUpperCase();
+      else if (VK_NAMES[event.key]) name = VK_NAMES[event.key];
+      if (!name) return;
+
+      hotkeys[hotkeyEditing] = name;
+      hotkeyEditing = null;
+      render();
+      toast(`Горячая клавиша: ${name}`);
+    });
   }
 
   function bindOsdStyles() {
@@ -728,7 +840,9 @@
   bindAccents();
   bindOverlay();
   bindOsdStyles();
+  bindOsdChrome();
   bindLabels();
+  bindHotkeys();
   bindGpuPicker();
   bindSettings();
   bindSensors();

@@ -59,6 +59,24 @@ enum class MetricId : std::uint8_t {
     SelfCpu,
     SelfRam,
     SelfThreads,
+
+    // Загрузка физических ядер: тот же счётчик, что показывает диспетчер задач.
+    Core0Load,
+    Core1Load,
+    Core2Load,
+    Core3Load,
+    Core4Load,
+    Core5Load,
+    Core6Load,
+    Core7Load,
+    Core8Load,
+    Core9Load,
+    Core10Load,
+    Core11Load,
+    Core12Load,
+    Core13Load,
+    Core14Load,
+    Core15Load,
 };
 
 struct MetricInfo {
@@ -69,7 +87,7 @@ struct MetricInfo {
     std::uint8_t decimals;
 };
 
-constexpr std::size_t kMetricCount = 33;
+constexpr std::size_t kMetricCount = 49;
 
 inline constexpr std::array<MetricInfo, kMetricCount> kMetricTable{{
     { MetricId::Fps, "fps", "FPS", MetricUnit::Count, 0 },
@@ -110,6 +128,23 @@ inline constexpr std::array<MetricInfo, kMetricCount> kMetricTable{{
     { MetricId::SelfCpu, "self_cpu", "Собственное потребление CPU", MetricUnit::Percent, 1 },
     { MetricId::SelfRam, "self_ram", "Собственное потребление ОЗУ", MetricUnit::Gigabytes, 2 },
     { MetricId::SelfThreads, "self_threads", "Потоков в процессе", MetricUnit::Count, 0 },
+
+    { MetricId::Core0Load, "core0_load", "Ядро 1", MetricUnit::Percent, 0 },
+    { MetricId::Core1Load, "core1_load", "Ядро 2", MetricUnit::Percent, 0 },
+    { MetricId::Core2Load, "core2_load", "Ядро 3", MetricUnit::Percent, 0 },
+    { MetricId::Core3Load, "core3_load", "Ядро 4", MetricUnit::Percent, 0 },
+    { MetricId::Core4Load, "core4_load", "Ядро 5", MetricUnit::Percent, 0 },
+    { MetricId::Core5Load, "core5_load", "Ядро 6", MetricUnit::Percent, 0 },
+    { MetricId::Core6Load, "core6_load", "Ядро 7", MetricUnit::Percent, 0 },
+    { MetricId::Core7Load, "core7_load", "Ядро 8", MetricUnit::Percent, 0 },
+    { MetricId::Core8Load, "core8_load", "Ядро 9", MetricUnit::Percent, 0 },
+    { MetricId::Core9Load, "core9_load", "Ядро 10", MetricUnit::Percent, 0 },
+    { MetricId::Core10Load, "core10_load", "Ядро 11", MetricUnit::Percent, 0 },
+    { MetricId::Core11Load, "core11_load", "Ядро 12", MetricUnit::Percent, 0 },
+    { MetricId::Core12Load, "core12_load", "Ядро 13", MetricUnit::Percent, 0 },
+    { MetricId::Core13Load, "core13_load", "Ядро 14", MetricUnit::Percent, 0 },
+    { MetricId::Core14Load, "core14_load", "Ядро 15", MetricUnit::Percent, 0 },
+    { MetricId::Core15Load, "core15_load", "Ядро 16", MetricUnit::Percent, 0 },
 }};
 
 constexpr std::size_t metricIndex(MetricId id)
