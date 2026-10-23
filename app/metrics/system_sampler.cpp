@@ -85,7 +85,8 @@ void applySnapshot(MetricStore& store, const SystemSnapshot& snapshot, const Der
     store.set(MetricId::Low1Fps, fps.low1Fps);
     store.set(MetricId::Low01Fps, fps.low01Fps);
     store.set(MetricId::AvgFps, fps.averageFps);
-    store.set(MetricId::DroppedFrames, fps.droppedShare);
+    // В хранилище доля хранится в процентах: иначе в интерфейсе «1» читалось бы как 1 %.
+    store.set(MetricId::DroppedFrames, fps.droppedShare * 100.0);
 
     store.set(MetricId::CpuLoad, values.cpuLoad, smoothingPercent);
     store.set(MetricId::CpuTemp, snapshot.cpuTemperature);

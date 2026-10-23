@@ -582,7 +582,10 @@ void MainWindow::onTick()
 
     m_overlay.repaint();
 
-    InvalidateRect(m_window, nullptr, FALSE);
+    // Свёрнутое или скрытое в трей окно не перерисовываем: это экономит CPU в простое.
+    if (IsWindowVisible(m_window) != FALSE && IsIconic(m_window) == FALSE) {
+        InvalidateRect(m_window, nullptr, FALSE);
+    }
 }
 
 void MainWindow::createTrayIcon()
