@@ -1196,6 +1196,8 @@ void MainWindow::samplingLoop()
                 m_model.fps = fps;
                 m_model.availability = m_sensors.availability();
                 m_model.cpuCores = m_sensors.coreCount();
+                m_model.cpuThreads = m_sensors.cpuThreads();
+                m_model.cpuName = m_sensors.cpuName();
                 m_model.etwRunning = m_etw.isRunning();
                 if (!foreground.empty()) {
                     m_model.foregroundApp = foreground;

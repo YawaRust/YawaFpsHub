@@ -53,6 +53,10 @@ public:
 
     std::wstring activeGpuName() const;
     std::uint32_t coreCount() const { return m_coreCount; }
+    // Имя процессора и число логических потоков: без них подзаголовок карточки
+    // «Процессор» отличался от демо.
+    std::wstring cpuName() const;
+    std::uint32_t cpuThreads() const;
 
 private:
     void initializeCpu(Log& log);

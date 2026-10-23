@@ -85,7 +85,9 @@ void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
     drawCardHeader(renderer, card, L"Кадры в секунду", subtitle, theme);
     drawTag(renderer, card, model.etwRunning ? L"LIVE" : L"НЕТ ДАННЫХ", model.etwRunning, theme);
 
-    const float numberTop = inner.top + 24.0f;
+    // Заголовок карточки занимает 36 px: крупное число начинается ниже, иначе
+    // подзаголовок «игра · цель 60 Гц» проступал сквозь цифры.
+    const float numberTop = inner.top + 38.0f;
     const std::wstring value = wideNumber(model.fps.currentFps, MetricUnit::Count, 0);
     const float valueWidth = renderer.measureText(value, TextRole::Display);
     renderer.text(value, Rect{ inner.left - 2.0f, numberTop, inner.left + valueWidth + 8.0f, numberTop + 58.0f },
@@ -98,11 +100,11 @@ void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
         const double delta = (model.fps.currentFps - model.fps.averageFps) / model.fps.averageFps * 100.0;
         const std::wstring text = signedPercent(delta);
         const float width = renderer.measureText(text, TextRole::Tiny) + 16.0f;
-        const Rect chip{ inner.left, numberTop + 58.0f, inner.left + width, numberTop + 76.0f };
+        const Rect chip{ inner.left, numberTop + 54.0f, inner.left + width, numberTop + 72.0f };
         const Color color = delta >= 0.0 ? theme.accent : theme.warn;
         renderer.fillRoundRect(chip, 9.0f, color.withAlpha(0.16f));
         renderer.text(text, chip, TextRole::Tiny, color, TextAlign::Center);
-        renderer.text(L"к среднему за сессию", Rect{ chip.right + 8.0f, chip.top, inner.left + 240.0f, chip.bottom },
+        renderer.text(L"к среднему за сессию", Rect{ chip.right + 8.0f, chip.top, chip.right + 150.0f, chip.bottom },
             TextRole::Tiny, theme.textFaint);
     }
 
@@ -124,7 +126,9 @@ void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
             stats[index][1], theme);
     }
 
-    const float chartTop = numberTop + 88.0f;
+    // График прижимается к низу карточки и не залезает под чип разницы:
+    // в коротком окне он просто становится ниже.
+    const float chartTop = std::max(numberTop + 78.0f, inner.bottom - 74.0f);
     const Rect chart{ inner.left, chartTop, inner.right, inner.bottom };
     if (chart.height() < 22.0f) {
         return;
@@ -144,7 +148,7 @@ void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
     const float budgetY = chart.bottom - std::clamp(static_cast<float>(budget) / maximum, 0.0f, 1.0f) * chart.height();
     renderer.drawDashedLine(chart.left, budgetY, chart.right, budgetY, theme.lineStrong, 1.0f);
     renderer.text(L"бюджет " + wideNumber(budget, MetricUnit::Milliseconds, 1),
-        Rect{ chart.left, chart.bottom - 14.0f, chart.right, chart.bottom }, TextRole::Tiny, theme.textFaint,
+        Rect{ chart.left, chart.top - 14.0f, chart.right, chart.top }, TextRole::Tiny, theme.textFaint,
         TextAlign::Right);
 
     if (count < 2) {
@@ -218,18 +222,28 @@ void drawCpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
-    std::wstring subtitle = L"счётчик загрузки как в диспетчере задач";
-    if (model.cpuCores > 0) {
-        subtitle += L" · " + std::to_wstring(model.cpuCores) + L" ядер";
+    // Подзаголовок как в демо: модель процессора и число ядер с потоками.
+    std::wstring subtitle = L"загрузка как в диспетчере задач";
+    if (!model.cpuName.empty()) {
+        subtitle = model.cpuName;
+        if (model.cpuCores > 0) {
+            subtitle += L" · " + std::to_wstring(model.cpuCores) + L" ядер";
+        }
+        if (model.cpuThreads > 0) {
+            subtitle += L" / " + std::to_wstring(model.cpuThreads) + L" потоков";
+        }
     }
-    const float top = drawCardHeader(renderer, card, L"Процессор", subtitle, theme);
+    const float top = drawCardHeader(renderer, card, L"Процессор", std::wstring_view{}, theme);
+    renderer.text(subtitle, Rect{ inner.left, inner.top + 18.0f, inner.right - 4.0f, inner.top + 34.0f },
+        TextRole::Tiny, theme.textFaint);
 
     const double load = model.store.value(MetricId::CpuLoad);
     drawGaugeCard(renderer, Rect{ inner.left, top, inner.right, inner.bottom }, load, theme.cpu, theme);
 
-    const float radius = gaugeRadius(Rect{ inner.left, top, inner.right, inner.bottom });
+    const Rect gaugeArea{ inner.left, top, inner.right, inner.bottom };
+    const float radius = gaugeRadius(gaugeArea);
     const float rowsLeft = inner.left + radius * 2.0f + 20.0f;
-    float rowTop = top + 6.0f;
+    float rowTop = top + 2.0f;
     // Четыре строки, как в демо: частота, температура, питание и поток игры.
     const std::array<std::pair<std::wstring, std::wstring>, 4> rows{
         std::pair<std::wstring, std::wstring>{ L"Частота",
@@ -248,12 +262,16 @@ void drawCpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
                 : L"нет данных" },
     };
 
+    // Шаг строк подстраивается под высоту карточки: при 790 px все четыре строки
+    // обязаны быть видны, а раньше «Поток игры» молча обрезался.
+    const float rowsHeight = std::max(inner.bottom - rowTop, 1.0f);
+    const float rowStep = std::clamp(rowsHeight / static_cast<float>(rows.size()), 15.0f, 22.0f);
     for (const auto& [label, value] : rows) {
-        if (rowTop + 16.0f > inner.bottom) {
+        if (rowTop + 14.0f > inner.bottom) {
             break;
         }
-        drawLabelValue(renderer, Rect{ rowsLeft, rowTop, inner.right, rowTop + 16.0f }, label, value, theme);
-        rowTop += 22.0f;
+        drawLabelValue(renderer, Rect{ rowsLeft, rowTop, inner.right, rowTop + 14.0f }, label, value, theme);
+        rowTop += rowStep;
     }
 
     // Полоски по ядрам, как в демо: видно, что процессор действительно опрашивается.
@@ -306,10 +324,10 @@ void drawGpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
     };
 
     for (const auto& [label, value] : rows) {
-        if (rowTop + 16.0f > inner.bottom) {
+        if (rowTop + 14.0f > inner.bottom) {
             break;
         }
-        drawLabelValue(renderer, Rect{ rowsLeft, rowTop, inner.right, rowTop + 16.0f }, label, value, theme);
+        drawLabelValue(renderer, Rect{ rowsLeft, rowTop, inner.right, rowTop + 14.0f }, label, value, theme);
         rowTop += 22.0f;
     }
 

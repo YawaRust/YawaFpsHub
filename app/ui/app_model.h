@@ -86,6 +86,8 @@ struct AppModel {
     double selfRamGb = 0.0;
     std::uint32_t selfThreads = 0;
     std::uint32_t cpuCores = 0;
+    std::uint32_t cpuThreads = 0;
+    std::wstring cpuName;
     bool etwRunning = false;
     bool paused = false;
     bool overlayVisible = false;

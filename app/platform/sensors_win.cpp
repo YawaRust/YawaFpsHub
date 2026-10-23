@@ -30,6 +30,42 @@ std::uint32_t readNominalCpuMhz()
     return status == ERROR_SUCCESS ? mhz : 0;
 }
 
+// «AMD Ryzen 7 7800X3D 8-Core Processor» -> «Ryzen 7 7800X3D»: в карточке нужна
+// короткая подпись, как в демо, а не полное имя из реестра на две строки.
+std::wstring shortenCpuName(std::wstring raw)
+{
+    for (const std::wstring_view noise : { std::wstring_view(L"(R)"), std::wstring_view(L"(TM)"),
+             std::wstring_view(L"(tm)"), std::wstring_view(L" CPU") }) {
+        for (std::size_t at = raw.find(noise); at != std::wstring::npos; at = raw.find(noise)) {
+            raw.erase(at, noise.size());
+        }
+    }
+
+    std::wstring result;
+    std::size_t start = 0;
+    while (start < raw.size()) {
+        std::size_t end = raw.find(L' ', start);
+        if (end == std::wstring::npos) {
+            end = raw.size();
+        }
+        const std::wstring token = raw.substr(start, end - start);
+        start = end + 1;
+
+        const bool vendor = token == L"AMD" || token == L"Intel";
+        const bool suffix = token == L"Processor" || token == L"CPU" || token == L"@"
+            || token.find(L"-Core") != std::wstring::npos || token.find(L"GHz") != std::wstring::npos
+            || token.find(L"Core(TM)") != std::wstring::npos;
+        if (token.empty() || vendor || suffix) {
+            continue;
+        }
+        if (!result.empty()) {
+            result += L' ';
+        }
+        result += token;
+    }
+    return result.empty() ? raw : result;
+}
+
 bool isLoopbackName(std::wstring_view name)
 {
     return name.find(L"Loopback") != std::wstring_view::npos
@@ -274,6 +310,26 @@ void SystemSensors::sampleCpu(SystemSnapshot& snapshot)
             m_availability.cpuTemperature = true;
         }
     }
+}
+
+std::wstring SystemSensors::cpuName() const
+{
+    static const std::wstring name = [] {
+        wchar_t buffer[256]{};
+        DWORD size = sizeof(buffer);
+        const LSTATUS status = RegGetValueW(HKEY_LOCAL_MACHINE,
+            L"HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0", L"ProcessorNameString", RRF_RT_REG_SZ,
+            nullptr, buffer, &size);
+        return status == ERROR_SUCCESS ? shortenCpuName(buffer) : std::wstring{};
+    }();
+    return name;
+}
+
+std::uint32_t SystemSensors::cpuThreads() const
+{
+    SYSTEM_INFO info{};
+    GetSystemInfo(&info);
+    return info.dwNumberOfProcessors;
 }
 
 bool SystemSensors::queryWmiTemperature(double& celsius)
