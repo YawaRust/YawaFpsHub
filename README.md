@@ -24,7 +24,8 @@
 
 ![Обзор](docs/screenshots/dashboard.png)
 
-Экраны «Датчики» и «Настройки» — `docs/screenshots/sensors.png`, `docs/screenshots/settings.png`.
+Остальные экраны — `docs/screenshots/sensors.png`, `docs/screenshots/overlay.png`,
+`docs/screenshots/settings.png`.
 
 Оверлей — настоящее layered-окно поверх игры, пять стилей, четыре позиции:
 
@@ -83,7 +84,7 @@ cmake --build build --config Release
   справа переключают акцент интерфейса;
 - `YawaFpsHub.exe --smoke` — самопроверка: окно живёт 8 секунд, затем закрывается само
   (`--smoke=22` задаёт своё время, `--overlay` сразу показывает наложение);
-- `--view=sensors|settings` — стартовый экран (используется в CI для скриншотов);
+- `--view=dashboard|sensors|overlay|settings` — стартовый экран (используется в CI для скриншотов);
 - `--overlay-shots=<папка>` — сохраняет PNG всех пяти стилей оверлея (диагностика и демо).
 
 ## Структура

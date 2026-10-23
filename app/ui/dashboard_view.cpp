@@ -196,9 +196,15 @@ void drawSessionCard(Renderer& renderer, const AppModel& model, const Theme& the
         Rect{ inner.left, barTop + 28.0f, inner.right, barTop + 42.0f }, TextRole::Tiny, theme.textFaint);
 }
 
+// Радиус кольца считается от места под карточку: два радиуса плюс подпись снизу.
+float gaugeRadius(const Rect& area)
+{
+    return std::clamp((area.height() - 22.0f) * 0.5f, 16.0f, 40.0f);
+}
+
 void drawGaugeCard(Renderer& renderer, const Rect& inner, double load, const Color& color, const Theme& theme)
 {
-    const float radius = std::min(42.0f, (inner.bottom - inner.top - 52.0f) * 0.5f);
+    const float radius = gaugeRadius(inner);
     const float centerX = inner.left + radius + 4.0f;
     const float centerY = inner.top + 12.0f + radius;
     drawGauge(renderer, centerX, centerY, radius, static_cast<float>(load / 100.0), color, theme.line,
@@ -217,7 +223,7 @@ void drawCpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
     const double load = model.store.value(MetricId::CpuLoad);
     drawGaugeCard(renderer, Rect{ inner.left, top, inner.right, inner.bottom }, load, theme.cpu, theme);
 
-    const float radius = std::min(40.0f, (inner.bottom - top - 44.0f) * 0.5f);
+    const float radius = gaugeRadius(Rect{ inner.left, top, inner.right, inner.bottom });
     const float rowsLeft = inner.left + radius * 2.0f + 20.0f;
     float rowTop = top + 10.0f;
     const std::array<std::pair<std::wstring, std::wstring>, 2> rows{
@@ -250,7 +256,7 @@ void drawGpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
     const double load = model.store.value(MetricId::GpuLoad);
     drawGaugeCard(renderer, Rect{ inner.left, top, inner.right, inner.bottom }, load, theme.gpu, theme);
 
-    const float radius = std::min(40.0f, (inner.bottom - top - 44.0f) * 0.5f);
+    const float radius = gaugeRadius(Rect{ inner.left, top, inner.right, inner.bottom });
     const float rowsLeft = inner.left + radius * 2.0f + 20.0f;
     float rowTop = top + 8.0f;
     const double vramTotal = model.store.value(MetricId::VramTotal);
