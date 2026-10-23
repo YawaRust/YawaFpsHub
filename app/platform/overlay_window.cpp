@@ -4,8 +4,10 @@
 
 #include <d2d1helper.h>
 #include <dwrite.h>
+#include <windowsx.h>
 
 #include <algorithm>
+#include <utility>
 #include <wincodec.h>
 
 #include <cstring>
@@ -39,12 +41,94 @@ OverlayWindow::~OverlayWindow()
 
 LRESULT CALLBACK OverlayWindow::windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
 {
-    if (message == WM_NCHITTEST) {
+    OverlayWindow* self = reinterpret_cast<OverlayWindow*>(GetWindowLongPtrW(window, GWLP_USERDATA));
+
+    switch (message) {
+    case WM_NCCREATE: {
+        auto* create = reinterpret_cast<CREATESTRUCTW*>(lParam);
+        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(create->lpCreateParams));
+        return DefWindowProcW(window, message, wParam, lParam);
+    }
+
+    case WM_NCHITTEST:
+        // Обычно окно прозрачно для мыши и не мешает играть. С зажатым Ctrl оно
+        // принимает клики только над самим оверлеем: так его можно перетащить на месте,
+        // не блокируя остальной экран.
+        if (self != nullptr && (GetKeyState(VK_CONTROL) & 0x8000) != 0) {
+            const int x = GET_X_LPARAM(lParam);
+            const int y = GET_Y_LPARAM(lParam);
+            const D2D1_RECT_F& area = self->m_contentRectD2D;
+            const float fx = static_cast<float>(x);
+            const float fy = static_cast<float>(y);
+            if (area.right > area.left && fx >= area.left - 4.0f && fx <= area.right + 4.0f
+                && fy >= area.top - 4.0f && fy <= area.bottom + 4.0f) {
+                return HTCLIENT;
+            }
+        }
         return HTTRANSPARENT;
-    }
-    if (message == WM_ERASEBKGND) {
+
+    case WM_SETCURSOR:
+        if (self != nullptr) {
+            POINT cursor{};
+            GetCursorPos(&cursor);
+            ScreenToClient(window, &cursor);
+            const D2D1_RECT_F& area = self->m_contentRectD2D;
+            const bool overContent = area.right > area.left && static_cast<float>(cursor.x) >= area.left - 4.0f
+                && static_cast<float>(cursor.x) <= area.right + 4.0f
+                && static_cast<float>(cursor.y) >= area.top - 4.0f
+                && static_cast<float>(cursor.y) <= area.bottom + 4.0f;
+            if ((GetKeyState(VK_CONTROL) & 0x8000) != 0 && overContent) {
+                SetCursor(LoadCursorW(nullptr, IDC_SIZEALL));
+                return TRUE;
+            }
+        }
+        break;
+
+    case WM_LBUTTONDOWN:
+        if (self != nullptr) {
+            self->beginDrag(GET_X_LPARAM(lParam) + static_cast<int>(self->m_monitorRect.left),
+                GET_Y_LPARAM(lParam) + static_cast<int>(self->m_monitorRect.top));
+            SetCapture(window);
+            return 0;
+        }
+        break;
+
+    case WM_MOUSEMOVE:
+        if (self != nullptr && self->m_dragging) {
+            self->updateDrag(GET_X_LPARAM(lParam) + static_cast<int>(self->m_monitorRect.left),
+                GET_Y_LPARAM(lParam) + static_cast<int>(self->m_monitorRect.top));
+            return 0;
+        }
+        break;
+
+    case WM_LBUTTONUP:
+        if (self != nullptr && self->m_dragging) {
+            self->endDrag();
+            ReleaseCapture();
+            return 0;
+        }
+        break;
+
+    case WM_CAPTURECHANGED:
+        if (self != nullptr && self->m_dragging) {
+            self->endDrag();
+        }
+        break;
+
+    case WM_TIMER:
+        if (self != nullptr && wParam == 1) {
+            self->tickAnimation();
+            return 0;
+        }
+        break;
+
+    case WM_ERASEBKGND:
         return 1;
+
+    default:
+        break;
     }
+
     return DefWindowProcW(window, message, wParam, lParam);
 }
 
@@ -63,10 +147,11 @@ bool OverlayWindow::create(HINSTANCE instance, std::string& error)
     const int screenWidth = m_monitorRect.right - m_monitorRect.left;
     const int screenHeight = m_monitorRect.bottom - m_monitorRect.top;
 
-    m_window = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW
-            | WS_EX_NOACTIVATE,
+    // WS_EX_TRANSPARENT не годится: он полностью отсекает мышь, и Ctrl+перетаскивание
+    // становится невозможным. Прозрачность для игры даёт WM_NCHITTEST -> HTTRANSPARENT.
+    m_window = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
         kClassName, L"YawaFpsHub overlay", WS_POPUP, m_monitorRect.left, m_monitorRect.top, screenWidth,
-        screenHeight, nullptr, nullptr, instance, nullptr);
+        screenHeight, nullptr, nullptr, instance, this);
 
     if (m_window == nullptr) {
         error = "не удалось создать окно оверлея";
@@ -154,8 +239,118 @@ void OverlayWindow::setAccent(Accent accent)
 
 void OverlayWindow::setSettings(const OverlaySettings& settings)
 {
+    // Плавный переход считаем от текущего видимого состояния, а не от нового:
+    // иначе анимировать было бы нечего. Сдвиг и подписи анимировать не нужно — при
+    // перетаскивании setSettings приходит на каждое движение мыши.
+    const bool geometryChanged = settings.scalePercent != m_settings.scalePercent
+        || settings.opacityPercent != m_settings.opacityPercent || settings.cornerRadius != m_settings.cornerRadius;
+    const OverlaySettings previous = animatedSettings();
     m_settings = settings;
+    if (geometryChanged) {
+        startAnimation(previous);
+    }
     repaint();
+}
+
+void OverlayWindow::setMoveHandler(std::function<void(int, int, bool)> handler)
+{
+    m_onMove = std::move(handler);
+}
+
+void OverlayWindow::beginDrag(int screenX, int screenY)
+{
+    m_dragging = true;
+    m_dragOrigin = POINT{ screenX, screenY };
+    m_dragOffsetX = m_settings.offsetX;
+    m_dragOffsetY = m_settings.offsetY;
+}
+
+void OverlayWindow::updateDrag(int screenX, int screenY)
+{
+    if (!m_dragging) {
+        return;
+    }
+    // Смещение задаётся в экранных пикселях от выбранного угла: двигаем ровно на столько,
+    // на сколько уехал курсор, без множителей масштаба.
+    m_settings.offsetX = std::clamp(m_dragOffsetX + (screenX - m_dragOrigin.x), -2000, 2000);
+    m_settings.offsetY = std::clamp(m_dragOffsetY + (screenY - m_dragOrigin.y), -2000, 2000);
+    repaint();
+    if (m_onMove) {
+        m_onMove(m_settings.offsetX, m_settings.offsetY, false);
+    }
+}
+
+void OverlayWindow::endDrag()
+{
+    if (!m_dragging) {
+        return;
+    }
+    m_dragging = false;
+    if (m_onMove) {
+        m_onMove(m_settings.offsetX, m_settings.offsetY, true);
+    }
+}
+
+void OverlayWindow::startAnimation(const OverlaySettings& from)
+{
+    if (!m_visible) {
+        m_animProgress = 1.0f;
+        m_animating = false;
+        return;
+    }
+
+    // Плавный переход к новым значениям: переключение стилей больше не «дёргается».
+    m_animFromScale = static_cast<float>(from.scalePercent) / 100.0f;
+    m_animFromOpacity = static_cast<float>(from.opacityPercent) / 100.0f;
+    m_animFromRadius = static_cast<float>(from.cornerRadius);
+    m_animToScale = static_cast<float>(m_settings.scalePercent) / 100.0f;
+    m_animToOpacity = static_cast<float>(m_settings.opacityPercent) / 100.0f;
+    m_animToRadius = static_cast<float>(m_settings.cornerRadius);
+    m_animProgress = 0.0f;
+    m_animating = true;
+    if (m_window != nullptr) {
+        SetTimer(m_window, 1, 16, nullptr);
+    }
+}
+
+void OverlayWindow::tickAnimation()
+{
+    if (!m_animating || !m_visible) {
+        m_animating = false;
+        if (m_window != nullptr) {
+            KillTimer(m_window, 1);
+        }
+        return;
+    }
+
+    m_animProgress = std::min(1.0f, m_animProgress + 0.14f);
+    if (m_animProgress >= 1.0f) {
+        m_animating = false;
+        if (m_window != nullptr) {
+            KillTimer(m_window, 1);
+        }
+    }
+    repaint();
+}
+
+OverlaySettings OverlayWindow::animatedSettings() const
+{
+    if (!m_animating) {
+        return m_settings;
+    }
+
+    // ease-out: быстрый старт и мягкое завершение, как у переходов в демо.
+    const float eased = 1.0f - (1.0f - m_animProgress) * (1.0f - m_animProgress);
+    OverlaySettings result = m_settings;
+    result.scalePercent = static_cast<int>(std::lround((m_animFromScale + (m_animToScale - m_animFromScale) * eased)
+        * 100.0f));
+    result.opacityPercent = static_cast<int>(std::lround(
+        (m_animFromOpacity + (m_animToOpacity - m_animFromOpacity) * eased) * 100.0f));
+    if (m_animFromRadius >= 0.0f && m_animToRadius >= 0.0f) {
+        result.cornerRadius = static_cast<int>(
+            std::lround(m_animFromRadius + (m_animToRadius - m_animFromRadius) * eased));
+    }
+    return result;
 }
 
 void OverlayWindow::setContent(const MetricStore& store, const FpsSummary& fps, const std::wstring& gpuName)
@@ -203,6 +398,8 @@ void OverlayWindow::hide()
         return;
     }
     m_visible = false;
+    m_animating = false;
+    KillTimer(m_window, 1);
     ShowWindow(m_window, SW_HIDE);
 }
 
@@ -346,7 +543,11 @@ bool OverlayWindow::render()
         return false;
     }
 
-    drawScene(static_cast<float>(std::clamp(m_settings.scalePercent, 70, 160)) / 100.0f);
+    const OverlaySettings animated = animatedSettings();
+    const OverlaySettings saved = m_settings;
+    m_settings = animated;
+    drawScene(static_cast<float>(std::clamp(animated.scalePercent, 70, 160)) / 100.0f);
+    m_settings = saved;
 
     HDC screen = GetDC(nullptr);
     POINT destination{ m_monitorRect.left, m_monitorRect.top };

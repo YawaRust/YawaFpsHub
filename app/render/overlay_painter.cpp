@@ -91,24 +91,46 @@ std::wstring tracked(std::wstring_view value, float letterSpacing)
     return result;
 }
 
-// Копия формата с другим размером шрифта. Раньше масштаб двигал только рамку:
-// текст оставался прежним, и оверлей выглядел сломанным.
-IDWriteTextFormat* scaledFormat(IDWriteFactory* factory, IDWriteTextFormat* base, float factor)
+// Семейство шрифта по номеру настройки. Нулевое значение оставляет шрифт пресета.
+const wchar_t* fontFamilyName(int index)
+{
+    switch (index) {
+    case 1:
+        return L"Consolas";
+    case 2:
+        return L"Bahnschrift SemiCondensed";
+    case 3:
+        return L"Impact";
+    default:
+        return nullptr;
+    }
+}
+
+// Копия формата с другим размером, начертанием и семейством. Раньше масштаб двигал только
+// рамку: текст оставался прежним, и оверлей выглядел сломанным.
+IDWriteTextFormat* styledFormat(IDWriteFactory* factory, IDWriteTextFormat* base, float factor,
+    const OverlaySettings& settings)
 {
     if (factory == nullptr || base == nullptr || factor <= 0.0f) {
         return nullptr;
     }
 
     const UINT32 length = base->GetFontFamilyNameLength();
-    std::wstring family(length + 1, L'\0');
+    std::wstring family(static_cast<std::size_t>(length) + 1, L'\0');
     if (FAILED(base->GetFontFamilyName(family.data(), length + 1))) {
         return nullptr;
     }
     family.resize(length);
 
+    if (const wchar_t* chosen = fontFamilyName(settings.fontFamily)) {
+        family = chosen;
+    }
+    const DWRITE_FONT_WEIGHT weight = settings.fontBold ? DWRITE_FONT_WEIGHT_BOLD : base->GetFontWeight();
+    const DWRITE_FONT_STYLE style = settings.fontItalic ? DWRITE_FONT_STYLE_ITALIC : base->GetFontStyle();
+
     IDWriteTextFormat* format = nullptr;
-    if (FAILED(factory->CreateTextFormat(family.c_str(), nullptr, base->GetFontWeight(), base->GetFontStyle(),
-            base->GetFontStretch(), base->GetFontSize() * factor, L"ru-ru", &format))) {
+    if (FAILED(factory->CreateTextFormat(family.c_str(), nullptr, weight, style, base->GetFontStretch(),
+            base->GetFontSize() * factor, L"ru-ru", &format))) {
         return nullptr;
     }
 
@@ -127,13 +149,14 @@ struct OverlayChrome {
 class Painter {
 public:
     Painter(ID2D1RenderTarget* target, const Theme& theme, const OverlayFormats& formats, float scale, float opacity,
-        const OverlayChrome& chrome)
+        const OverlayChrome& chrome, int outline = 0)
         : m_target(target)
         , m_theme(theme)
         , m_formats(formats)
         , m_scale(scale)
         , m_opacity(opacity)
         , m_chrome(chrome)
+        , m_outline(static_cast<float>(std::max(outline, 0)))
     {
     }
 
@@ -221,15 +244,36 @@ public:
             return;
         }
 
-        ID2D1SolidColorBrush* brush = nullptr;
-        if (FAILED(m_target->CreateSolidColorBrush(toD2D(color, alphaScale), &brush))) {
-            return;
-        }
-
         const DWRITE_TEXT_ALIGNMENT previous = format->GetTextAlignment();
         format->SetTextAlignment(align == TextAlign::Right ? DWRITE_TEXT_ALIGNMENT_TRAILING
                 : align == TextAlign::Center                 ? DWRITE_TEXT_ALIGNMENT_CENTER
                                                              : DWRITE_TEXT_ALIGNMENT_LEADING);
+
+        // Обводка: контрастный контур, чтобы текст читался на любом фоне игры.
+        if (m_outline > 0.0f) {
+            const float luminance = color.r * 0.299f + color.g * 0.587f + color.b * 0.114f;
+            const Color edge = luminance > 0.55f ? Color{ 0.02f, 0.03f, 0.05f, 0.9f }
+                                                 : Color{ 0.97f, 0.98f, 1.0f, 0.9f };
+            ID2D1SolidColorBrush* edgeBrush = nullptr;
+            if (SUCCEEDED(m_target->CreateSolidColorBrush(toD2D(edge, alphaScale), &edgeBrush))) {
+                const float step = m_outline * m_scale;
+                const std::array<std::pair<float, float>, 8> shifts{ std::pair<float, float>{ -step, 0.0f },
+                    { step, 0.0f }, { 0.0f, -step }, { 0.0f, step }, { -step, -step }, { step, -step },
+                    { -step, step }, { step, step } };
+                for (const auto& [dx, dy] : shifts) {
+                    m_target->DrawTextW(value.data(), static_cast<UINT32>(value.size()), format,
+                        D2D1::RectF(rect.left + dx, rect.top + dy, rect.right + dx, rect.bottom + dy), edgeBrush);
+                }
+                edgeBrush->Release();
+            }
+        }
+
+        ID2D1SolidColorBrush* brush = nullptr;
+        if (FAILED(m_target->CreateSolidColorBrush(toD2D(color, alphaScale), &brush))) {
+            format->SetTextAlignment(previous);
+            return;
+        }
+
         m_target->DrawTextW(value.data(), static_cast<UINT32>(value.size()), format,
             D2D1::RectF(rect.left, rect.top, rect.right, rect.bottom), brush);
         format->SetTextAlignment(previous);
@@ -285,6 +329,7 @@ private:
     float m_scale = 1.0f;
     float m_opacity = 1.0f;
     OverlayChrome m_chrome;
+    float m_outline = 0.0f;
 };
 
 // Полный визуальный набор стиля: палитра, форма, типографика. Раньше стили отличались
@@ -960,12 +1005,17 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
     const float opacity = static_cast<float>(std::clamp(settings.opacityPercent, 0, 100)) / 100.0f;
     const StyleLook look = lookFor(settings.style);
 
-    // Шрифты масштабируются вместе с рамкой: иначе «Масштаб» растягивал только подложку.
+    // Шрифты масштабируются вместе с рамкой, а семейство, начертание и обводка берутся
+    // из редактора текста: иначе «Масштаб» растягивал только подложку.
     std::array<IDWriteTextFormat*, 4> owned{};
     OverlayFormats scaled = formats;
-    if (scale > 0.0f && (scale < 0.999f || scale > 1.001f) && formats.factory != nullptr) {
-        owned = { scaledFormat(formats.factory, formats.key, scale), scaledFormat(formats.factory, formats.value, scale),
-            scaledFormat(formats.factory, formats.smallText, scale), scaledFormat(formats.factory, formats.mono, scale) };
+    const bool customFont = settings.fontFamily != 0 || settings.fontBold || settings.fontItalic;
+    if (formats.factory != nullptr && (customFont || (scale > 0.0f && (scale < 0.999f || scale > 1.001f)))) {
+        const float factor = scale > 0.0f ? scale : 1.0f;
+        owned = { styledFormat(formats.factory, formats.key, factor, settings),
+            styledFormat(formats.factory, formats.value, factor, settings),
+            styledFormat(formats.factory, formats.smallText, factor, settings),
+            styledFormat(formats.factory, formats.mono, factor, settings) };
         if (owned[0] != nullptr && owned[1] != nullptr && owned[2] != nullptr && owned[3] != nullptr) {
             scaled = OverlayFormats{ formats.factory, owned[0], owned[1], owned[2], owned[3] };
         } else {
@@ -985,7 +1035,7 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
     chrome.shadow = settings.showShadow;
     chrome.radius = settings.cornerRadius >= 0 ? static_cast<float>(settings.cornerRadius) : -1.0f;
 
-    Painter measurer(target, theme, scaled, scale, opacity, chrome);
+    Painter measurer(target, theme, scaled, scale, opacity, chrome, settings.textOutline);
     const float lineWidth = measurer.measure(inlineText(text), look.mono ? TextRole::Mono : TextRole::Small);
     const StyleSpec spec = styleSpec(settings, text, lineWidth);
     const float width = spec.width * scale;
@@ -1008,7 +1058,7 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
     top = std::clamp(top, bounds.top, std::max(bounds.top, bounds.bottom - height));
 
     const Rect frame{ left, top, left + width, top + height };
-    Painter painter(target, theme, scaled, scale, opacity, chrome);
+    Painter painter(target, theme, scaled, scale, opacity, chrome, settings.textOutline);
 
     if (settings.layout == OverlayLayout::Line) {
         drawInline(painter, settings, text, frame, look);

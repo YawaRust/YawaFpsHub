@@ -86,6 +86,13 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
     const int cornerPreference = 2; // DWMWCP_ROUND
     DwmSetWindowAttribute(m_window, 33, &cornerPreference, sizeof(cornerPreference));
 
+    // DWM рисует вокруг окна светлую рамку акцента — на тёмном интерфейсе она читается
+    // как белая полоса. DWMWA_BORDER_COLOR с DWMWA_COLOR_NONE убирает её целиком.
+    // На Windows 10 атрибут неизвестен, вызов просто вернёт ошибку.
+    constexpr DWORD kDwmBorderColor = 34;
+    constexpr COLORREF kDwmColorNone = 0xFFFFFFFE;
+    DwmSetWindowAttribute(m_window, kDwmBorderColor, &kDwmColorNone, sizeof(kDwmColorNone));
+
     if (!m_renderer.initialize(error)) {
         return false;
     }
@@ -138,6 +145,19 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
     } else {
         m_overlay.setAccent(m_model.settings.ui.accent);
         m_overlay.setSettings(m_model.settings.overlay);
+        // Ctrl + перетаскивание прямо по оверлею: сохраняем позицию только по отпускании,
+        // иначе ini переписывался бы сотни раз за одно движение.
+        m_overlay.setMoveHandler([this](int offsetX, int offsetY, bool finished) {
+            {
+                std::lock_guard<std::mutex> guard(m_modelMutex);
+                m_model.settings.overlay.offsetX = offsetX;
+                m_model.settings.overlay.offsetY = offsetY;
+            }
+            if (finished) {
+                saveSettings();
+            }
+            InvalidateRect(m_window, nullptr, FALSE);
+        });
     }
 
     m_model.settingsPath = settingsPath();
@@ -292,6 +312,10 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         return 0;
     }
 
+    case WM_NCACTIVATE:
+        // Рамку рисуем сами: без этого DWM на миг показывает светлую полосу при активации.
+        return TRUE;
+
     case WM_NCCALCSIZE:
         // Заголовок убираем полностью: клиентская область занимает всё окно.
         // В развёрнутом состоянии Windows добавляет рамку, её компенсируем.
@@ -310,13 +334,46 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         break;
 
     case WM_NCHITTEST: {
-        const LRESULT base = DefWindowProcW(m_window, message, wParam, lParam);
-        if (base != HTCLIENT) {
-            return base;
-        }
-
         POINT cursor{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
         ScreenToClient(m_window, &cursor);
+
+        // Края тянем сами: у окна без системного заголовка DefWindowProc не отдаёт
+        // HTLEFT/HTBOTTOM, и за края изменить размер было нельзя.
+        if (IsZoomed(m_window) == FALSE) {
+            const LONG border = static_cast<LONG>(8.0f * m_dpiScale);
+            RECT client{};
+            GetClientRect(m_window, &client);
+
+            const bool left = cursor.x < border;
+            const bool right = cursor.x >= client.right - border;
+            const bool top = cursor.y < border;
+            const bool bottom = cursor.y >= client.bottom - border;
+            if (left && top) {
+                return HTTOPLEFT;
+            }
+            if (right && top) {
+                return HTTOPRIGHT;
+            }
+            if (left && bottom) {
+                return HTBOTTOMLEFT;
+            }
+            if (right && bottom) {
+                return HTBOTTOMRIGHT;
+            }
+            if (left) {
+                return HTLEFT;
+            }
+            if (right) {
+                return HTRIGHT;
+            }
+            if (top) {
+                return HTTOP;
+            }
+            if (bottom) {
+                return HTBOTTOM;
+            }
+        }
+
         const float x = static_cast<float>(cursor.x) / m_dpiScale;
         const float y = static_cast<float>(cursor.y) / m_dpiScale;
 
@@ -604,6 +661,8 @@ std::vector<UiHit> MainWindow::buildHits()
     std::vector<UiHit> hits;
 
     const Rect area = contentArea();
+    // Клип по рабочей области: содержимое карточек не может вылезти в статус-бар.
+    m_renderer.pushClip(area);
     switch (m_model.view) {
     case View::Dashboard:
         drawDashboard(m_renderer, m_model, m_theme, area, hits);
@@ -618,6 +677,7 @@ std::vector<UiHit> MainWindow::buildHits()
         drawSettings(m_renderer, m_model, m_theme, area, hits);
         break;
     }
+    m_renderer.popClip();
     return hits;
 }
 
@@ -819,6 +879,31 @@ void MainWindow::applyAction(const UiHit& hit)
 
     case ActionKind::ToggleOverlayShadow:
         m_model.settings.overlay.showShadow = !m_model.settings.overlay.showShadow;
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
+    case ActionKind::SetOverlayFont:
+        m_model.settings.overlay.fontFamily = std::clamp(hit.value, 0, 3);
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
+    case ActionKind::ToggleOverlayBold:
+        m_model.settings.overlay.fontBold = !m_model.settings.overlay.fontBold;
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
+    case ActionKind::ToggleOverlayItalic:
+        m_model.settings.overlay.fontItalic = !m_model.settings.overlay.fontItalic;
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
+    case ActionKind::ChangeOverlayOutline:
+        m_model.settings.overlay.textOutline
+            = std::clamp(m_model.settings.overlay.textOutline + (hit.value < 0 ? -1 : 1), 0, 3);
         m_overlay.setSettings(m_model.settings.overlay);
         saveSettings();
         break;

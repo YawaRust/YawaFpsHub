@@ -10,6 +10,7 @@
 #include <d2d1.h>
 #include <dwrite.h>
 
+#include <functional>
 #include <string>
 
 namespace yawa {
@@ -41,6 +42,10 @@ public:
 
     void repaint();
 
+    // Перетаскивание прямо по оверлею: Ctrl + левая кнопка мыши. Приложение получает
+    // новые смещения и сохраняет их в ini (finished == true — отпустили кнопку).
+    void setMoveHandler(std::function<void(int offsetX, int offsetY, bool finished)> handler);
+
     // Рисует текущее содержимое заново и сохраняет его в PNG. Нужно для скриншотов
     // в CI: layered-окно обычным PrintWindow не снимается.
     bool capturePng(const std::wstring& path, std::string& error);
@@ -58,6 +63,12 @@ private:
     void drawBackground(const D2D1_RECT_F& frame, float scale);
     void drawRow(float y, float scale, const std::wstring& key, const std::wstring& value,
         const std::wstring& unit, bool emphasize);
+    void beginDrag(int screenX, int screenY);
+    void updateDrag(int screenX, int screenY);
+    void endDrag();
+    void startAnimation(const OverlaySettings& from);
+    void tickAnimation();
+    OverlaySettings animatedSettings() const;
 
     HWND m_window = nullptr;
     ID2D1DCRenderTarget* m_target = nullptr;
@@ -84,6 +95,22 @@ private:
     bool m_visible = false;
     bool m_hasContent = false;
     RECT m_monitorRect{};
+
+    // Перетаскивание и плавные переходы.
+    std::function<void(int, int, bool)> m_onMove;
+    bool m_dragging = false;
+    POINT m_dragOrigin{};
+    int m_dragOffsetX = 0;
+    int m_dragOffsetY = 0;
+    bool m_animating = false;
+    float m_animProgress = 1.0f;
+    // Значения, между которыми идёт переход.
+    float m_animFromScale = 1.0f;
+    float m_animToScale = 1.0f;
+    float m_animFromOpacity = 0.72f;
+    float m_animToOpacity = 0.72f;
+    float m_animFromRadius = -1.0f;
+    float m_animToRadius = -1.0f;
 };
 
 } // namespace yawa

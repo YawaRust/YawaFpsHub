@@ -12,6 +12,8 @@
 #include <memory>
 #include <string>
 
+struct IWbemServices;
+
 namespace yawa {
 
 class Log;
@@ -57,6 +59,8 @@ private:
     bool initializeGpu(Log& log, std::string& error);
     void sampleCpu(SystemSnapshot& snapshot);
     void sampleGameThread(SystemSnapshot& snapshot);
+    // ACPI-термозона через WMI: работает там, где PDH-счётчик тепловых зон молчит.
+    bool queryWmiTemperature(double& celsius);
     void sampleMemory(SystemSnapshot& snapshot);
     void sampleDiskAndNetwork(SystemSnapshot& snapshot);
     void sampleGpu(SystemSnapshot& snapshot);
@@ -79,6 +83,10 @@ private:
     std::size_t m_activeGpu = 0;
     std::uint32_t m_nominalCpuMhz = 0;
     std::uint32_t m_coreCount = 0;
+    // Кэш WMI-температуры: запрос дорогой, поэтому не чаще раза в 15 секунд.
+    double m_wmiTemperature = 0.0;
+    std::uint64_t m_wmiQueriedAt = 0;
+    bool m_wmiAvailable = false;
     double m_gpuLoad = 0.0;
 
     // Поток игры: главный поток активного окна. Считаем по разнице времён, как диспетчер задач.

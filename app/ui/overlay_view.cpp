@@ -80,7 +80,7 @@ void drawPreviewCard(Renderer& renderer, const AppModel& model, const Theme& the
 
     renderer.text(L"Оверлей поверх игры", Rect{ inner.left, inner.top, inner.right, inner.top + 22.0f },
         TextRole::Heading, theme.text);
-    renderer.text(L"предпросмотр на макете сцены: перетащите его, чтобы поставить оверлей точно",
+    renderer.text(L"Ctrl + мышь по оверлею — перетащить; здесь — предпросмотр на макете сцены",
         Rect{ inner.left, inner.top + 20.0f, inner.right - 60.0f, inner.top + 38.0f }, TextRole::Tiny, theme.textFaint);
 
     const Rect tag{ inner.right - 72.0f, inner.top, inner.right, inner.top + 20.0f };
@@ -231,7 +231,39 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
     const int radiusValue = overlay.cornerRadius >= 0 ? overlay.cornerRadius : 8;
     drawSlider(renderer, Rect{ inner.left, top, inner.right, top + 34.0f }, radiusValue, 0, 24, L"Углы", theme, hits,
         ActionKind::SetOverlayRadius, L" px");
-    top += 42.0f;
+    top += 40.0f;
+
+    // Редактор текста: шрифт, начертание и обводка — как в RivaTuner и FPS Monitor.
+    renderer.text(L"Шрифт", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
+    top += 18.0f;
+    const std::array<std::wstring_view, 4> fontNames{ L"Сего", L"Моно", L"Узкий", L"Плотный" };
+    const float fontWidth = (inner.width() - 3.0f * 6.0f) / 4.0f;
+    for (std::size_t index = 0; index < fontNames.size(); ++index) {
+        const Rect chip{ inner.left + static_cast<float>(index) * (fontWidth + 6.0f), top,
+            inner.left + static_cast<float>(index) * (fontWidth + 6.0f) + fontWidth, top + 24.0f };
+        drawChip(renderer, chip, fontNames[index], overlay.fontFamily == static_cast<int>(index), theme,
+            TextRole::Tiny, isHovered(model, chip));
+        hits.push_back(UiHit{ chip, ActionKind::SetOverlayFont, static_cast<int>(index) });
+    }
+    top += 30.0f;
+
+    const Rect bold{ inner.left, top, inner.left + 30.0f, top + 24.0f };
+    const Rect italic{ bold.right + 6.0f, top, bold.right + 36.0f, top + 24.0f };
+    drawChip(renderer, bold, L"Ж", overlay.fontBold, theme, TextRole::Small, isHovered(model, bold));
+    drawChip(renderer, italic, L"К", overlay.fontItalic, theme, TextRole::Small, isHovered(model, italic));
+    hits.push_back(UiHit{ bold, ActionKind::ToggleOverlayBold, 0 });
+    hits.push_back(UiHit{ italic, ActionKind::ToggleOverlayItalic, 0 });
+
+    const Rect outlineMinus{ inner.left + 60.0f, top, inner.left + 86.0f, top + 24.0f };
+    const Rect outlinePlus{ inner.left + 168.0f, top, inner.left + 194.0f, top + 24.0f };
+    drawChip(renderer, outlineMinus, L"−", false, theme, TextRole::Small, isHovered(model, outlineMinus));
+    drawChip(renderer, outlinePlus, L"+", false, theme, TextRole::Small, isHovered(model, outlinePlus));
+    renderer.text(L"Обводка " + std::to_wstring(overlay.textOutline) + L" px",
+        Rect{ outlineMinus.right, top, outlinePlus.left, top + 24.0f }, TextRole::Tiny, theme.textDim,
+        TextAlign::Center);
+    hits.push_back(UiHit{ outlineMinus, ActionKind::ChangeOverlayOutline, -1 });
+    hits.push_back(UiHit{ outlinePlus, ActionKind::ChangeOverlayOutline, 1 });
+    top += 32.0f;
 
     renderer.text(L"Смещение", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
     top += 20.0f;

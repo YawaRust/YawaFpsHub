@@ -5,6 +5,7 @@
 #include <windows.h>
 #include <psapi.h>
 #include <tlhelp32.h>
+#include <wbemidl.h>
 
 #include <algorithm>
 #include <string_view>
@@ -120,11 +121,20 @@ void SystemSensors::initializeCpu(Log& log)
     }
 
     // Температура: ACPI-термозона читается через PDH, драйвер не нужен.
-    // Счётчик есть не на каждой машине — тогда честно остаётся «нет данных».
+    // Счётчик есть не на каждой машине — тогда пробуем WMI (см. queryWmiTemperature).
     if (m_thermalZone.open(L"\\Thermal Zone Information(*)\\Temperature")) {
         log.info("CPU: термозона ACPI подключена");
     } else {
-        log.info("CPU: термозона ACPI не отдала счётчик, температура недоступна");
+        log.info("CPU: PDH-термозона молчит, включаем WMI MSAcpi_ThermalZoneTemperature");
+        double celsius = 0.0;
+        if (queryWmiTemperature(celsius)) {
+            m_wmiTemperature = celsius;
+            m_wmiAvailable = true;
+            m_availability.cpuTemperature = true;
+            log.info("CPU: температура через WMI доступна");
+        } else {
+            log.info("CPU: температура недоступна без драйвера MSR");
+        }
     }
 }
 
@@ -242,6 +252,106 @@ void SystemSensors::sampleCpu(SystemSnapshot& snapshot)
             m_availability.cpuTemperature = true;
         }
     }
+
+    // Запасной источник — WMI. Опрашиваем нечасто: запрос идёт через COM и стоит
+    // десятки миллисекунд, а температура меняется медленно.
+    if (snapshot.cpuTemperature <= 0.0 && !m_wmiFailed) {
+        const std::uint64_t now = GetTickCount64();
+        if (!m_wmiAvailable || now - m_wmiQueriedAt > 15000) {
+            m_wmiQueriedAt = now;
+            double celsius = 0.0;
+            if (queryWmiTemperature(celsius)) {
+                m_wmiTemperature = celsius;
+                m_wmiAvailable = true;
+                m_availability.cpuTemperature = true;
+            } else if (!m_wmiAvailable) {
+                // Один раз не получилось — больше не дёргаем COM каждую секунду.
+                m_wmiFailed = true;
+            }
+        }
+        if (m_wmiAvailable) {
+            snapshot.cpuTemperature = m_wmiTemperature;
+            m_availability.cpuTemperature = true;
+        }
+    }
+}
+
+bool SystemSensors::queryWmiTemperature(double& celsius)
+{
+    // COM инициализируется на потоке один раз за жизнь приложения.
+    thread_local const bool comReady = [] {
+        const HRESULT result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        return SUCCEEDED(result) || result == RPC_E_CHANGED_MODE;
+    }();
+    if (!comReady) {
+        return false;
+    }
+
+    IWbemLocator* locator = nullptr;
+    if (FAILED(CoCreateInstance(CLSID_WbemLocator, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&locator)))
+        || locator == nullptr) {
+        return false;
+    }
+
+    IWbemServices* services = nullptr;
+    BSTR ns = SysAllocString(L"ROOT\\WMI");
+    const HRESULT connect = ns != nullptr
+        ? locator->ConnectServer(ns, nullptr, nullptr, nullptr, 0, nullptr, nullptr, &services)
+        : E_OUTOFMEMORY;
+    SysFreeString(ns);
+    locator->Release();
+    if (FAILED(connect) || services == nullptr) {
+        return false;
+    }
+
+    CoSetProxyBlanket(services, RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE, nullptr, RPC_C_AUTHN_LEVEL_CALL,
+        RPC_C_IMP_LEVEL_IMPERSONATE, nullptr, EOAC_NONE);
+
+    IEnumWbemClassObject* enumerator = nullptr;
+    BSTR language = SysAllocString(L"WQL");
+    BSTR wql = SysAllocString(L"SELECT CurrentTemperature FROM MSAcpi_ThermalZoneTemperature");
+    HRESULT query = E_OUTOFMEMORY;
+    if (language != nullptr && wql != nullptr) {
+        query = services->ExecQuery(language, wql, WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, nullptr,
+            &enumerator);
+    }
+    SysFreeString(language);
+    SysFreeString(wql);
+    services->Release();
+    if (FAILED(query) || enumerator == nullptr) {
+        return false;
+    }
+
+    double hottest = 0.0;
+    for (int index = 0; index < 16; ++index) {
+        IWbemClassObject* object = nullptr;
+        ULONG returned = 0;
+        if (FAILED(enumerator->Next(200, 1, &object, &returned)) || returned == 0 || object == nullptr) {
+            break;
+        }
+
+        VARIANT value;
+        VariantInit(&value);
+        if (SUCCEEDED(object->Get(L"CurrentTemperature", 0, &value, nullptr, nullptr))
+            && (value.vt == VT_I4 || value.vt == VT_UI4)) {
+            // Значение приходит в десятых долях Кельвина.
+            const double kelvinTenths = value.vt == VT_I4 ? static_cast<double>(value.lVal)
+                                                          : static_cast<double>(value.ulVal);
+            const double parsed = kelvinTenths / 10.0 - 273.15;
+            if (parsed > -20.0 && parsed < 130.0) {
+                hottest = std::max(hottest, parsed);
+            }
+        }
+        VariantClear(&value);
+        object->Release();
+    }
+    enumerator->Release();
+
+    if (hottest <= 0.0) {
+        return false;
+    }
+    celsius = hottest;
+    return true;
 }
 
 void SystemSensors::sampleGameThread(SystemSnapshot& snapshot)

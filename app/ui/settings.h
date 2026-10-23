@@ -44,6 +44,13 @@ struct OverlaySettings {
     bool showShadow = true;
     // -1 — радиус из пресета, иначе 0…24 в тех же единицах, что и стиль.
     int cornerRadius = -1;
+    // Типографика: отдельный редактор текста, как в RivaTuner и FPS Monitor.
+    // 0 — шрифт интерфейса, 1 — моноширинный, 2 — узкий, 3 — плотный.
+    int fontFamily = 0;
+    bool fontBold = false;
+    bool fontItalic = false;
+    // 0 — без обводки, 1…3 — толщина в пикселях.
+    int textOutline = 0;
     // Состав: какие строки вообще показывать (fps, cpu, gpu, ram, vram).
     std::array<bool, kLabelCount> visible{ true, true, true, true, true };
     std::array<std::string, kLabelCount> labels{ "FPS", "CPU", "GPU", "RAM", "VRAM" };

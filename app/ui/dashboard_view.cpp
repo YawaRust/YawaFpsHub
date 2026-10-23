@@ -230,13 +230,22 @@ void drawCpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
     const float radius = gaugeRadius(Rect{ inner.left, top, inner.right, inner.bottom });
     const float rowsLeft = inner.left + radius * 2.0f + 20.0f;
     float rowTop = top + 6.0f;
-    const std::array<std::pair<std::wstring, std::wstring>, 2> rows{
+    // Четыре строки, как в демо: частота, температура, питание и поток игры.
+    const std::array<std::pair<std::wstring, std::wstring>, 4> rows{
         std::pair<std::wstring, std::wstring>{ L"Частота",
             model.availability.cpuClock ? wideMetric(MetricId::CpuClock, model.store.value(MetricId::CpuClock))
                                         : L"нет данных" },
         { L"Температура",
             model.availability.cpuTemperature ? wideMetric(MetricId::CpuTemp, model.store.value(MetricId::CpuTemp))
                                               : L"нет данных" },
+        { L"Питание",
+            model.store.value(MetricId::CpuPower) > 0.0
+                ? wideMetric(MetricId::CpuPower, model.store.value(MetricId::CpuPower))
+                : L"нет данных" },
+        { L"Поток игры",
+            model.store.value(MetricId::GameThreadLoad) > 0.0
+                ? wideMetric(MetricId::GameThreadLoad, model.store.value(MetricId::GameThreadLoad))
+                : L"нет данных" },
     };
 
     for (const auto& [label, value] : rows) {
@@ -583,26 +592,43 @@ void drawDashboard(Renderer& renderer, const AppModel& model, const Theme& theme
 {
     const Columns columns{ area };
 
-    const float usable = area.height() - kGap * 3.0f;
-    const float first = std::max(168.0f, usable * 0.33f);
-    const float second = std::max(128.0f, usable * 0.245f);
-    const float third = std::max(100.0f, usable * 0.21f);
-    const float fourth = std::max(90.0f, usable - first - second - third);
+    // Доли без жёстких минимумов: раньше сумма минимумов превышала высоту окна,
+    // и нижний ряд уезжал под статус-бар.
+    const float usable = std::max(area.height() - kGap * 3.0f, 120.0f);
+    const float first = usable * 0.315f;
+    const float second = usable * 0.25f;
+    const float third = usable * 0.205f;
+    const float fourth = usable - first - second - third;
 
     const float row1 = area.top;
     const float row2 = row1 + first + kGap;
     const float row3 = row2 + second + kGap;
     const float row4 = row3 + third + kGap;
 
-    drawFpsCard(renderer, model, theme, columns.span(0.0f, 8.0f, row1, first));
-    drawSessionCard(renderer, model, theme, columns.span(8.0f, 4.0f, row1, first));
-    drawCpuCard(renderer, model, theme, columns.span(0.0f, 4.0f, row2, second));
-    drawGpuCard(renderer, model, theme, columns.span(4.0f, 4.0f, row2, second), hits);
-    drawMemoryCard(renderer, model, theme, columns.span(8.0f, 4.0f, row2, second));
-    drawPerformanceCard(renderer, model, theme, columns.span(0.0f, 8.0f, row3, third));
-    drawDiskNetCard(renderer, model, theme, columns.span(8.0f, 4.0f, row3, third));
-    drawTemperaturesCard(renderer, model, theme, columns.span(0.0f, 6.0f, row4, fourth));
-    drawAlertsCard(renderer, model, theme, columns.span(6.0f, 6.0f, row4, fourth));
+    const auto drawClipped = [&](const Rect& card, const auto& draw) {
+        renderer.pushClip(card);
+        draw(card);
+        renderer.popClip();
+    };
+
+    drawClipped(columns.span(0.0f, 8.0f, row1, first),
+        [&](const Rect& card) { drawFpsCard(renderer, model, theme, card); });
+    drawClipped(columns.span(8.0f, 4.0f, row1, first),
+        [&](const Rect& card) { drawSessionCard(renderer, model, theme, card); });
+    drawClipped(columns.span(0.0f, 4.0f, row2, second),
+        [&](const Rect& card) { drawCpuCard(renderer, model, theme, card); });
+    drawClipped(columns.span(4.0f, 4.0f, row2, second),
+        [&](const Rect& card) { drawGpuCard(renderer, model, theme, card, hits); });
+    drawClipped(columns.span(8.0f, 4.0f, row2, second),
+        [&](const Rect& card) { drawMemoryCard(renderer, model, theme, card); });
+    drawClipped(columns.span(0.0f, 8.0f, row3, third),
+        [&](const Rect& card) { drawPerformanceCard(renderer, model, theme, card); });
+    drawClipped(columns.span(8.0f, 4.0f, row3, third),
+        [&](const Rect& card) { drawDiskNetCard(renderer, model, theme, card); });
+    drawClipped(columns.span(0.0f, 6.0f, row4, fourth),
+        [&](const Rect& card) { drawTemperaturesCard(renderer, model, theme, card); });
+    drawClipped(columns.span(6.0f, 6.0f, row4, fourth),
+        [&](const Rect& card) { drawAlertsCard(renderer, model, theme, card); });
 }
 
 } // namespace yawa

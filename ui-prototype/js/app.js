@@ -107,6 +107,10 @@
     shadow: true,
     offsetX: 0,
     offsetY: 0,
+    font: 0,
+    bold: false,
+    italic: false,
+    outline: 0,
     labels: { ...DEFAULT_LABELS }
   };
 
@@ -509,6 +513,14 @@
     else osd.style.setProperty("--osd-radius", `${overlayState.radius}px`);
     osd.style.setProperty("--osd-shift-x", `${overlayState.offsetX}px`);
     osd.style.setProperty("--osd-shift-y", `${overlayState.offsetY}px`);
+    const fonts = ["inherit", "'Consolas', monospace", "'Bahnschrift SemiCondensed', 'Arial Narrow', sans-serif", "Impact, 'Arial Black', sans-serif"];
+    osd.style.setProperty("--osd-font", fonts[overlayState.font] || fonts[0]);
+    osd.style.setProperty("--osd-weight", overlayState.bold ? "650" : "inherit");
+    osd.style.setProperty("--osd-style", overlayState.italic ? "italic" : "normal");
+    osd.style.setProperty("--osd-outline", overlayState.outline > 0
+      ? `0 0 ${overlayState.outline}px #000, 0 0 ${overlayState.outline * 2}px #000`
+      : "none");
+
     osd.classList.toggle("no-background", !overlayState.background);
     osd.classList.toggle("no-border", !overlayState.border);
     osd.classList.toggle("no-shadow", !overlayState.shadow);
@@ -523,6 +535,70 @@
       radius.value = String(shown);
       radius.style.setProperty("--fill", `${(shown / 24) * 100}%`);
     }
+  }
+
+  function bindOsdText() {
+    const fonts = $$("#osdFont button");
+    fonts.forEach((button) => {
+      button.addEventListener("click", () => {
+        overlayState.font = Number(button.dataset.font);
+        fonts.forEach((node) => node.classList.toggle("is-active", node === button));
+        applyOverlay();
+      });
+    });
+
+    $$("[data-style-toggle]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const key = button.dataset.styleToggle;
+        overlayState[key] = !overlayState[key];
+        button.classList.toggle("is-active", overlayState[key]);
+        applyOverlay();
+      });
+    });
+
+    const outlines = $$("#osdOutline button");
+    outlines.forEach((button) => {
+      button.addEventListener("click", () => {
+        overlayState.outline = Number(button.dataset.outline);
+        outlines.forEach((node) => node.classList.toggle("is-active", node === button));
+        applyOverlay();
+      });
+    });
+  }
+
+  // Оверлей в предпросмотре тянется мышью — как Ctrl + мышь по настоящему оверлею.
+  function bindOsdDrag() {
+    const osd = $("#osdPreview");
+    let drag = null;
+
+    osd.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      drag = {
+        x: event.clientX,
+        y: event.clientY,
+        offsetX: overlayState.offsetX,
+        offsetY: overlayState.offsetY
+      };
+      osd.setPointerCapture(event.pointerId);
+      osd.classList.add("is-dragging");
+      event.preventDefault();
+    });
+
+    osd.addEventListener("pointermove", (event) => {
+      if (!drag) return;
+      overlayState.offsetX = Math.max(-260, Math.min(260, drag.offsetX + (event.clientX - drag.x)));
+      overlayState.offsetY = Math.max(-200, Math.min(200, drag.offsetY + (event.clientY - drag.y)));
+      applyOverlay();
+    });
+
+    const release = (event) => {
+      if (!drag) return;
+      drag = null;
+      osd.classList.remove("is-dragging");
+      if (osd.hasPointerCapture(event.pointerId)) osd.releasePointerCapture(event.pointerId);
+    };
+    osd.addEventListener("pointerup", release);
+    osd.addEventListener("pointercancel", release);
   }
 
   function bindOsdChrome() {
@@ -867,6 +943,8 @@
   bindOverlay();
   bindOsdStyles();
   bindOsdChrome();
+  bindOsdText();
+  bindOsdDrag();
   bindLabels();
   bindHotkeys();
   bindGpuPicker();

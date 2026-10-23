@@ -344,15 +344,23 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
             } else if (key == "opacity") {
                 target.overlay.opacityPercent = std::clamp(parseInt(value, target.overlay.opacityPercent), 0, 100);
             } else if (key == "offset_x") {
-                target.overlay.offsetX = std::clamp(parseInt(value, target.overlay.offsetX), -400, 400);
+                target.overlay.offsetX = std::clamp(parseInt(value, target.overlay.offsetX), -2000, 2000);
             } else if (key == "offset_y") {
-                target.overlay.offsetY = std::clamp(parseInt(value, target.overlay.offsetY), -400, 400);
+                target.overlay.offsetY = std::clamp(parseInt(value, target.overlay.offsetY), -2000, 2000);
             } else if (key == "background") {
                 target.overlay.showBackground = parseBool(value, target.overlay.showBackground);
             } else if (key == "border") {
                 target.overlay.showBorder = parseBool(value, target.overlay.showBorder);
             } else if (key == "shadow") {
                 target.overlay.showShadow = parseBool(value, target.overlay.showShadow);
+            } else if (key == "font") {
+                target.overlay.fontFamily = std::clamp(parseInt(value, target.overlay.fontFamily), 0, 3);
+            } else if (key == "bold") {
+                target.overlay.fontBold = parseInt(value, 0) != 0;
+            } else if (key == "italic") {
+                target.overlay.fontItalic = parseInt(value, 0) != 0;
+            } else if (key == "text_outline") {
+                target.overlay.textOutline = std::clamp(parseInt(value, target.overlay.textOutline), 0, 3);
             } else if (key == "corner") {
                 target.overlay.cornerRadius = std::clamp(parseInt(value, target.overlay.cornerRadius), -1, 24);
             } else if (key.size() > 5 && key.substr(0, 5) == "show_") {
@@ -431,6 +439,10 @@ std::string serializeSettings(const Settings& settings)
     text += std::string("border = ") + (settings.overlay.showBorder ? "1" : "0") + "\n";
     text += std::string("shadow = ") + (settings.overlay.showShadow ? "1" : "0") + "\n";
     text += "corner = " + std::to_string(settings.overlay.cornerRadius) + "\n";
+    text += "font = " + std::to_string(settings.overlay.fontFamily) + "\n";
+    text += std::string("bold = ") + (settings.overlay.fontBold ? "1" : "0") + "\n";
+    text += std::string("italic = ") + (settings.overlay.fontItalic ? "1" : "0") + "\n";
+    text += "text_outline = " + std::to_string(settings.overlay.textOutline) + "\n";
     for (std::size_t index = 0; index < kLabelCount; ++index) {
         const auto field = static_cast<LabelField>(index);
         text += std::string("show_") + std::string(labelKey(field)) + " = "
