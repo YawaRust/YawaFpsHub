@@ -1801,4 +1801,4 @@ body.is-paused .tag--live { color: var(--warn); border-color: rgba(255, 179, 71,
   text-shadow: var(--osd-outline, none);
 }
 .osd { cursor: grab; }
-.osd.is-dragging { cursor: grabbing; }
+.osd.is-dragging { cursor: grabbing; transition: none; }
