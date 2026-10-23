@@ -265,7 +265,7 @@ OverlayValues OverlayWindow::currentValues() const
 
 void OverlayWindow::drawScene(float scale)
 {
-    OverlayFormats formats{ m_keyFormat, m_valueFormat, m_smallFormat, m_monoFormat };
+    OverlayFormats formats{ m_dwrite, m_keyFormat, m_valueFormat, m_smallFormat, m_monoFormat };
     const OverlayText text = makeOverlayText(m_settings, currentValues());
     const Rect bounds{ 0.0f, 0.0f, static_cast<float>(m_bitmapWidth), static_cast<float>(m_bitmapHeight) };
     m_contentRectD2D = D2D1::RectF(0.0f, 0.0f, 0.0f, 0.0f);
