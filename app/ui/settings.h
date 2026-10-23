@@ -9,7 +9,7 @@ namespace yawa {
 
 // Набор пресетов взят из Fpsmon2.0: стиль меняет не только подложку, но и палитру,
 // типографику, форму и компоновку оверлея.
-enum class OverlayStyle : std::uint8_t { Frosted, Neon, Rtss, Terminal, Cyber, Mono, Esport, Retro };
+enum class OverlayStyle : std::uint8_t { Neon, Rtss, Frosted, Terminal, Cyber, Mono, Esport, Retro };
 enum class OverlayPosition : std::uint8_t { TopLeft, TopRight, BottomLeft, BottomRight };
 enum class OverlayLayout : std::uint8_t { Plates, Line };
 enum class Accent : std::uint8_t { Mint, Ice, Violet, Amber, Coral };
