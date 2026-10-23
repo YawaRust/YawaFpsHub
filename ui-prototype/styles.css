@@ -1802,3 +1802,6 @@ body.is-paused .tag--live { color: var(--warn); border-color: rgba(255, 179, 71,
 }
 .osd { cursor: grab; }
 .osd.is-dragging { cursor: grabbing; transition: none; }
+
+/* Режим скриншотов: без переходов и анимаций, чтобы снимки совпадали кадр в кадр. */
+.no-fx *, .no-fx *::before, .no-fx *::after { animation: none !important; transition: none !important; }

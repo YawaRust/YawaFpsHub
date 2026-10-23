@@ -258,6 +258,28 @@ jobs:
             }
           }
 
+      - name: Скриншоты демо (эталон)
+        # Эталон интерфейса — HTML-прототип: снимаем его тем же Edge, что стоит на раннере,
+        # чтобы сравнивать с собранным приложением кадр в кадр, а не на глаз.
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $python = (Get-Command python).Source
+          $server = Start-Process -FilePath $python -ArgumentList "-m","http.server","8765","--bind","127.0.0.1","--directory","ui-prototype" -PassThru
+          Start-Sleep -Seconds 2
+          $edge = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+          if (-not (Test-Path $edge)) { $edge = "C:\Program Files\Microsoft\Edge\Application\msedge.exe" }
+          foreach ($view in @("dashboard", "sensors", "overlay", "settings")) {
+            $url = "http://127.0.0.1:8765/index.html?view=$view&nofx=1"
+            Start-Process -FilePath $edge -ArgumentList "--headless=new","--disable-gpu","--hide-scrollbars","--window-size=1280,800","--virtual-time-budget=4000","--screenshot=$PWD\demo-$view.png",$url -Wait
+            if (Test-Path "demo-$view.png") {
+              Write-Output "::notice title=YawaFpsHub::демо $view снято"
+            } else {
+              Write-Output "::warning title=YawaFpsHub::демо $view не снято"
+            }
+          }
+          Stop-Process -Id $server.Id -Force
+
       - name: Опубликовать скриншоты
         # Два прогона на один коммит (push и pull_request) соревнуются за ветку ci-logs,
         # поэтому публикует только push-прогон: второй попытке push не хватает fast-forward.
@@ -269,6 +291,7 @@ jobs:
           mkdir -p /tmp/shots
           mv screenshot-*.png /tmp/shots/ 2>/dev/null || true
           mv style-*.png /tmp/shots/ 2>/dev/null || true
+          mv demo-*.png /tmp/shots/ 2>/dev/null || true
           if [ -d shots ]; then mv shots/*.png /tmp/shots/ 2>/dev/null || true; fi
           git config user.email "ci@yawafpshub.local"
           git config user.name "ci"

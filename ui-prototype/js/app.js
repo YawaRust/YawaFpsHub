@@ -958,4 +958,15 @@
   $$(".spark[data-series]").forEach((canvas) => window.Charts.observe(canvas));
 
   window.Sim.subscribe(onData);
+
+  // Прямые ссылки для скриншотов: ?view=sensors открывает нужный экран,
+  // ?nofx=1 выключает анимации, чтобы снимки были детерминированными.
+  const params = new URLSearchParams(window.location.search);
+  const deepView = params.get("view");
+  if (deepView && VIEWS[deepView]) {
+    switchView(deepView);
+  }
+  if (params.get("nofx") === "1") {
+    document.body.classList.add("no-fx");
+  }
 })();

@@ -24,6 +24,15 @@ constexpr UINT kTrayMessage = WM_APP + 1;
 constexpr UINT kTickMessage = WM_APP + 2;
 constexpr UINT kExportMessage = WM_APP + 3;
 constexpr UINT kTrayIconId = 1;
+// DWMWA_BORDER_COLOR = 34, DWMWA_COLOR_NONE = 0xFFFFFFFE. На Windows 10 атрибут
+// неизвестен, вызов просто вернёт ошибку — там рамку убирает растянутая рамка DWM.
+constexpr DWORD kDwmBorderColor = 34;
+constexpr COLORREF kDwmColorNone = 0xFFFFFFFE;
+
+void removeDwmBorder(HWND window)
+{
+    DwmSetWindowAttribute(window, kDwmBorderColor, &kDwmColorNone, sizeof(kDwmColorNone));
+}
 // Идентификаторы WM_HOTKEY: RegisterHotKey принимает int, поэтому и константы int.
 constexpr int kHotkeyOverlay = 1;
 constexpr int kHotkeyPosition = 2;
@@ -89,9 +98,7 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
     // DWM рисует вокруг окна светлую рамку акцента — на тёмном интерфейсе она читается
     // как белая полоса. DWMWA_BORDER_COLOR с DWMWA_COLOR_NONE убирает её целиком.
     // На Windows 10 атрибут неизвестен, вызов просто вернёт ошибку.
-    constexpr DWORD kDwmBorderColor = 34;
-    constexpr COLORREF kDwmColorNone = 0xFFFFFFFE;
-    DwmSetWindowAttribute(m_window, kDwmBorderColor, &kDwmColorNone, sizeof(kDwmColorNone));
+    removeDwmBorder(m_window);
 
     // На Windows 10 атрибута 34 нет, и DWM дорисовывает вокруг окна светлую кромку.
     // Растянутая рамка (лист стекла) убирает её и на десятке: клиентскую область
@@ -321,6 +328,13 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     case WM_NCACTIVATE:
         // Рамку рисуем сами: без этого DWM на миг показывает светлую полосу при активации.
         return TRUE;
+
+    case WM_ACTIVATE:
+        // При активации DWM пересоздаёт кромку окна: возвращаем «без рамки» каждый раз.
+        if (LOWORD(wParam) != WA_INACTIVE) {
+            removeDwmBorder(m_window);
+        }
+        break;
 
     case WM_NCPAINT:
         // Нестандартную рамку не отдаём DWM: иначе при активации окна по краям
