@@ -15,6 +15,10 @@ target_link_libraries(yawa-probe PRIVATE
     dxgi
     pdh
     psapi
+    # WMI-фолбэк температуры CPU живёт в sensors_win.cpp, поэтому probe линкует те же библиотеки.
+    ole32
+    oleaut32
+    wbemuuid
 )
 
 target_include_directories(yawa-probe PRIVATE ${CMAKE_SOURCE_DIR}/app)
