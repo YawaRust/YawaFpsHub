@@ -32,9 +32,11 @@ public:
     void setAccent(Accent accent);
     void setContent(const MetricStore& store, const FpsSummary& fps, const std::wstring& gpuName);
 
-    void show();
+    // show возвращает false и заполняет error, если поверхность не создалась:
+    // окно тогда не должно считаться показанным.
+    bool show(std::string* error = nullptr);
     void hide();
-    void toggle();
+    void toggle(std::string* error = nullptr);
     bool isVisible() const { return m_visible; }
 
     void repaint();
@@ -46,7 +48,9 @@ public:
 private:
     static LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
     bool ensureRenderTarget(UINT width, UINT height);
-    void render();
+    bool render();
+    // Монитор под курсором: оверлей должен появляться там, где игра, а не только на основном.
+    RECT monitorRect() const;
     void drawScene(float scale);
     OverlayValues currentValues() const;
     void drawPlates(float scale);
@@ -79,6 +83,7 @@ private:
     D2D1_RECT_F m_contentRectD2D{};
     bool m_visible = false;
     bool m_hasContent = false;
+    RECT m_monitorRect{};
 };
 
 } // namespace yawa

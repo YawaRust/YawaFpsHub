@@ -77,6 +77,8 @@ struct AppModel {
     bool etwRunning = false;
     bool paused = false;
     bool overlayVisible = false;
+    // Текст последней ошибки оверлея: показывается в статус-баре вместо подсказок.
+    std::wstring overlayError;
     View view = View::Dashboard;
     int editingLabel = -1;
     // -1 — все группы, иначе номер группы датчиков из списка экрана «Датчики».
@@ -99,5 +101,12 @@ struct AppModel {
 };
 
 constexpr std::size_t kFavoriteHistoryPoints = 240;
+
+// Наведение считается по координатам курсора, которые окно обновляет на WM_MOUSEMOVE.
+// Так экран остаётся «только рисующим» и не заводит собственного состояния.
+inline bool isHovered(const AppModel& model, const Rect& rect)
+{
+    return model.cursorInside && rect.contains(model.cursorX, model.cursorY);
+}
 
 } // namespace yawa

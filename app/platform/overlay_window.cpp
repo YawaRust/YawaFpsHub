@@ -59,13 +59,14 @@ bool OverlayWindow::create(HINSTANCE instance, std::string& error)
     windowClass.lpszClassName = kClassName;
     RegisterClassExW(&windowClass);
 
-    const int screenWidth = GetSystemMetrics(SM_CXSCREEN);
-    const int screenHeight = GetSystemMetrics(SM_CYSCREEN);
+    m_monitorRect = monitorRect();
+    const int screenWidth = m_monitorRect.right - m_monitorRect.left;
+    const int screenHeight = m_monitorRect.bottom - m_monitorRect.top;
 
     m_window = CreateWindowExW(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW
             | WS_EX_NOACTIVATE,
-        kClassName, L"YawaFpsHub overlay", WS_POPUP, 0, 0, screenWidth, screenHeight, nullptr, nullptr, instance,
-        nullptr);
+        kClassName, L"YawaFpsHub overlay", WS_POPUP, m_monitorRect.left, m_monitorRect.top, screenWidth,
+        screenHeight, nullptr, nullptr, instance, nullptr);
 
     if (m_window == nullptr) {
         error = "не удалось создать окно оверлея";
@@ -87,7 +88,26 @@ bool OverlayWindow::create(HINSTANCE instance, std::string& error)
     m_monoFormat = createFormat(m_dwrite, 11.0f, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_LEADING,
         L"Cascadia Mono");
 
+    // Содержимое появляется только после первого опроса. Чтобы оверлей не оказался
+    // пустым при включении, считаем, что рисовать уже есть что: нули честнее пустоты.
+    m_hasContent = true;
     return true;
+}
+
+RECT OverlayWindow::monitorRect() const
+{
+    POINT cursor{};
+    GetCursorPos(&cursor);
+    const HMONITOR monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY);
+
+    MONITORINFO info{};
+    info.cbSize = sizeof(info);
+    if (monitor != nullptr && GetMonitorInfoW(monitor, &info) != FALSE) {
+        return info.rcMonitor;
+    }
+
+    RECT fallback{ 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN) };
+    return fallback;
 }
 
 void OverlayWindow::destroy()
@@ -146,17 +166,35 @@ void OverlayWindow::setContent(const MetricStore& store, const FpsSummary& fps, 
     m_hasContent = true;
 }
 
-void OverlayWindow::show()
+bool OverlayWindow::show(std::string* error)
 {
-    if (m_window == nullptr || m_visible) {
-        return;
+    if (m_window == nullptr) {
+        if (error != nullptr) {
+            *error = "окно оверлея не создано";
+        }
+        return false;
     }
 
+    // Монитор пересчитываем на каждом показе: пользователь мог перетащить игру на другой.
+    m_monitorRect = monitorRect();
+    const int width = m_monitorRect.right - m_monitorRect.left;
+    const int height = m_monitorRect.bottom - m_monitorRect.top;
+
+    SetWindowPos(m_window, HWND_TOPMOST, m_monitorRect.left, m_monitorRect.top, width, height,
+        SWP_NOACTIVATE | SWP_SHOWWINDOW);
     m_visible = true;
+
+    if (!render()) {
+        m_visible = false;
+        ShowWindow(m_window, SW_HIDE);
+        if (error != nullptr) {
+            *error = "не удалось нарисовать оверлей";
+        }
+        return false;
+    }
+
     ShowWindow(m_window, SW_SHOWNOACTIVATE);
-    SetWindowPos(m_window, HWND_TOPMOST, 0, 0, 0, 0,
-        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
-    repaint();
+    return true;
 }
 
 void OverlayWindow::hide()
@@ -168,12 +206,12 @@ void OverlayWindow::hide()
     ShowWindow(m_window, SW_HIDE);
 }
 
-void OverlayWindow::toggle()
+void OverlayWindow::toggle(std::string* error)
 {
     if (m_visible) {
         hide();
     } else {
-        show();
+        show(error);
     }
 }
 
@@ -192,7 +230,15 @@ bool OverlayWindow::ensureRenderTarget(UINT width, UINT height)
         const D2D1_RENDER_TARGET_PROPERTIES properties = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT,
             D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
 
-        const HRESULT result = factory->CreateDCRenderTarget(&properties, &m_target);
+        HRESULT result = factory->CreateDCRenderTarget(&properties, &m_target);
+        if (FAILED(result) || m_target == nullptr) {
+            // Запасной путь: программный рендер. Именно он нужен в RDP и на машинах
+            // без аппаратного ускорения Direct2D.
+            const D2D1_RENDER_TARGET_PROPERTIES software = D2D1::RenderTargetProperties(
+                D2D1_RENDER_TARGET_TYPE_SOFTWARE,
+                D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+            result = factory->CreateDCRenderTarget(&software, &m_target);
+        }
         factory->Release();
         if (FAILED(result) || m_target == nullptr) {
             return false;
@@ -236,7 +282,7 @@ bool OverlayWindow::ensureRenderTarget(UINT width, UINT height)
 
 void OverlayWindow::repaint()
 {
-    if (!m_visible || !m_hasContent) {
+    if (!m_visible) {
         return;
     }
     render();
@@ -277,21 +323,25 @@ void OverlayWindow::drawScene(float scale)
     m_target->EndDraw();
 }
 
-void OverlayWindow::render()
+bool OverlayWindow::render()
 {
     if (m_window == nullptr) {
-        return;
+        return false;
     }
 
-    const UINT width = static_cast<UINT>(GetSystemMetrics(SM_CXSCREEN));
-    const UINT height = static_cast<UINT>(GetSystemMetrics(SM_CYSCREEN));
+    if (m_monitorRect.right <= m_monitorRect.left) {
+        m_monitorRect = monitorRect();
+    }
+    const UINT width = static_cast<UINT>(m_monitorRect.right - m_monitorRect.left);
+    const UINT height = static_cast<UINT>(m_monitorRect.bottom - m_monitorRect.top);
     if (m_target == nullptr && !ensureRenderTarget(width, height)) {
-        return;
+        return false;
     }
 
     drawScene(static_cast<float>(std::clamp(m_settings.scalePercent, 70, 160)) / 100.0f);
 
     HDC screen = GetDC(nullptr);
+    const POINT destination{ m_monitorRect.left, m_monitorRect.top };
     POINT source{ 0, 0 };
     SIZE size{ static_cast<LONG>(m_bitmapWidth), static_cast<LONG>(m_bitmapHeight) };
     BLENDFUNCTION blend{};
@@ -299,8 +349,10 @@ void OverlayWindow::render()
     blend.SourceConstantAlpha = 255;
     blend.AlphaFormat = AC_SRC_ALPHA;
 
-    UpdateLayeredWindow(m_window, screen, nullptr, &size, m_memoryDc, &source, 0, &blend, ULW_ALPHA);
+    const BOOL updated = UpdateLayeredWindow(m_window, screen, &destination, &size, m_memoryDc, &source, 0, &blend,
+        ULW_ALPHA);
     ReleaseDC(nullptr, screen);
+    return updated != FALSE;
 }
 
 bool OverlayWindow::capturePng(const std::wstring& path, std::string& error)

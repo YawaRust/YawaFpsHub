@@ -2,6 +2,7 @@
 #include "ui/layout.h"
 
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <iterator>
 
@@ -60,12 +61,65 @@ void drawSlidersIcon(Renderer& renderer, const Rect& box, const Color& color)
     }
 }
 
+// Логотип в рельсе: та же графика, что в app/resources/yawa.ico (спидометр и столбики
+// кадров). Рисуем кодом, а не картинкой: на любом DPI остаётся резким.
+void drawBrandMark(Renderer& renderer, const Rect& badge)
+{
+    const Color background = fromRgba(0xFF0B0F14);
+    const Color border = fromRgba(0xFF2B3644);
+    const Color accent = fromRgba(0xFF5EF29B);
+    const Color accentDark = fromRgba(0xFF2CC977);
+    const Color gpu = fromRgba(0xFF6AA8FF);
+    const Color ram = fromRgba(0xFFB47BFF);
+
+    renderer.fillRoundRect(badge, 12.0f, background);
+    renderer.strokeRoundRect(badge, 12.0f, border, 1.0f);
+
+    const float scale = badge.width() / 36.0f;
+    const float centerX = badge.centerX();
+    const float centerY = badge.top + 17.0f * scale;
+    const float radius = 10.5f * scale;
+    const float thickness = 2.6f * scale;
+
+    // Дуга от 147.5° до 392.5°: открытый сверху спидометр.
+    const int steps = 44;
+    float previousX = centerX;
+    float previousY = centerY;
+    for (int step = 0; step <= steps; ++step) {
+        const float angle = 147.5f + 245.0f * static_cast<float>(step) / static_cast<float>(steps);
+        const float radians = angle * 3.14159265f / 180.0f;
+        const float x = centerX + std::cos(radians) * radius;
+        const float y = centerY - std::sin(radians) * radius;
+        if (step > 0) {
+            renderer.drawLine(previousX, previousY, x, y, step > steps / 2 ? accent : accentDark, thickness);
+        }
+        previousX = x;
+        previousY = y;
+    }
+
+    const float needle = 48.0f * 3.14159265f / 180.0f;
+    renderer.drawLine(centerX, centerY, centerX + std::cos(needle) * radius * 0.78f,
+        centerY - std::sin(needle) * radius * 0.78f, fromRgba(0xFFEAF2FA), 2.4f * scale);
+    renderer.fillCircle(centerX, centerY, 3.6f * scale, accent);
+
+    // Три столбика кадров под шкалой.
+    const float barTop = badge.top + 27.0f * scale;
+    const float barBottom = badge.top + 30.0f * scale;
+    const float barWidth = 3.4f * scale;
+    const float left = centerX - 5.4f * scale;
+    renderer.fillRoundRect(Rect{ left, barTop, left + barWidth, barBottom }, 1.0f, accent);
+    renderer.fillRoundRect(Rect{ left + 5.2f * scale, barTop - 1.4f * scale, left + 5.2f * scale + barWidth, barBottom },
+        1.0f, gpu);
+    renderer.fillRoundRect(Rect{ left + 10.4f * scale, barTop - 2.8f * scale,
+                                 left + 10.4f * scale + barWidth, barBottom },
+        1.0f, ram);
+}
+
 void drawBrand(Renderer& renderer, const Theme& theme)
 {
+    (void)theme;
     const Rect badge{ 16.0f, 16.0f, 52.0f, 52.0f };
-    renderer.fillRoundRect(badge, 12.0f, theme.accentSoft);
-    renderer.strokeRoundRect(badge, 12.0f, theme.accentGlow, 1.0f);
-    renderer.text(L"Y", badge, TextRole::Value, theme.accent, TextAlign::Center);
+    drawBrandMark(renderer, badge);
 }
 
 } // namespace
@@ -314,11 +368,13 @@ void drawStatusBar(Renderer& renderer, const AppModel& model, const Theme& theme
     renderer.text(right, Rect{ renderer.width() - 520.0f, top, renderer.width() - 18.0f, renderer.height() },
         TextRole::Tiny, theme.textFaint, TextAlign::Right);
 
-    const wchar_t* hints = L"F10 — оверлей · F11 — положение · F12 — окно";
-    const float hintsWidth = renderer.measureText(hints, TextRole::Tiny);
-    renderer.text(hints, Rect{ renderer.width() * 0.5f - hintsWidth * 0.5f, top,
+    const std::wstring center = model.overlayError.empty()
+        ? std::wstring(L"F10 — оверлей · F11 — положение · F12 — окно")
+        : model.overlayError;
+    const float hintsWidth = renderer.measureText(center.c_str(), TextRole::Tiny);
+    renderer.text(center, Rect{ renderer.width() * 0.5f - hintsWidth * 0.5f, top,
                              renderer.width() * 0.5f + hintsWidth * 0.5f, renderer.height() },
-        TextRole::Tiny, theme.textFaint, TextAlign::Center);
+        TextRole::Tiny, model.overlayError.empty() ? theme.textFaint : theme.danger, TextAlign::Center);
 }
 
 } // namespace yawa

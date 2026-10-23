@@ -53,7 +53,18 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
     windowClass.lpfnWndProc = &MainWindow::windowProc;
     windowClass.hInstance = instance;
     windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    windowClass.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    // Иконка из ресурса (ID 101, app/resources/resource.rc): она же на ярлыке и в панели задач.
+    HICON appIcon = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(101), IMAGE_ICON,
+        GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR));
+    if (appIcon == nullptr) {
+        appIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    }
+    windowClass.hIcon = appIcon;
+    windowClass.hIconSm = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(101), IMAGE_ICON,
+        GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
+    // Фон класса совпадает с фоном интерфейса: пока не пришёл первый кадр D2D,
+    // окно не мигает белым.
+    windowClass.hbrBackground = CreateSolidBrush(RGB(11, 14, 18));
     windowClass.lpszClassName = kClassName;
     RegisterClassExW(&windowClass);
 
@@ -138,8 +149,13 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
     createTrayIcon();
     registerHotkeys();
 
-    // Первый запуск показывает окно сразу: приложение живёт в трее только после того,
-    // как пользователь сам свернул его или включил «сворачивать в трей».
+    // Сначала рисуем кадр в ещё невидимое окно и только потом показываем его:
+    // так при запуске нет белой полосы неотрисованной клиентской области.
+    RECT client{};
+    GetClientRect(m_window, &client);
+    m_dpiScale = static_cast<float>(GetDpiForWindow(m_window)) / 96.0f;
+    m_renderer.resize(static_cast<UINT>(client.right), static_cast<UINT>(client.bottom), m_dpiScale);
+    paint();
     ShowWindow(m_window, SW_SHOWNORMAL);
     UpdateWindow(m_window);
 
@@ -180,12 +196,34 @@ void MainWindow::exportOverlayStyles()
     m_overlay.setSettings(original);
 }
 
+void MainWindow::toggleOverlay()
+{
+    std::string error;
+    m_overlay.toggle(&error);
+    m_model.overlayVisible = m_overlay.isVisible();
+
+    if (!error.empty()) {
+        // Раньше сбой показа проходил молча, и оверлей «не появлялся». Теперь причина
+        // видна в логе, в статус-баре и в журнале окон.
+        if (m_log != nullptr) {
+            m_log->warning("оверлей: " + error);
+        }
+        m_model.overlayError = L"Оверлей: " + widen(error);
+    } else {
+        m_model.overlayError.clear();
+    }
+
+    InvalidateRect(m_window, nullptr, FALSE);
+    if (m_log != nullptr) {
+        m_log->info(std::string("оверлей ") + (m_model.overlayVisible ? "включён" : "выключен"));
+    }
+}
+
 void MainWindow::setOverlayVisible(bool visible)
 {
     if (visible != m_overlay.isVisible()) {
-        m_overlay.toggle();
+        toggleOverlay();
     }
-    m_model.overlayVisible = m_overlay.isVisible();
 }
 
 int MainWindow::run(int smokeSeconds, const std::wstring& overlayShotDir)
@@ -364,7 +402,20 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         m_model.cursorX = cursorX;
         m_model.cursorY = cursorY;
         m_model.cursorInside = true;
-        if (inTitleBar || wasInTitleBar) {
+
+        // Перерисовка нужна только когда курсор перешёл на другой элемент:
+        // иначе WM_MOUSEMOVE вызывал бы перерисовку всего окна на каждое движение.
+        int hovered = -1;
+        for (std::size_t index = 0; index < m_hits.size(); ++index) {
+            // Учитываем и строки таблиц с ActionKind::None: у них есть подсветка при наведении.
+            if (m_hits[index].rect.contains(cursorX, cursorY)) {
+                hovered = static_cast<int>(index);
+                break;
+            }
+        }
+        const bool repaint = inTitleBar || wasInTitleBar || hovered != m_hoverIndex;
+        m_hoverIndex = hovered;
+        if (repaint) {
             InvalidateRect(m_window, nullptr, FALSE);
         }
 
@@ -385,6 +436,22 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         }
         break;
     }
+
+    case WM_SETCURSOR:
+        if (LOWORD(lParam) == HTCLIENT) {
+            POINT cursor{};
+            GetCursorPos(&cursor);
+            ScreenToClient(m_window, &cursor);
+            const float x = static_cast<float>(cursor.x) / m_dpiScale;
+            const float y = static_cast<float>(cursor.y) / m_dpiScale;
+            for (const UiHit& hit : m_hits) {
+                if (hit.action != ActionKind::None && hit.rect.contains(x, y)) {
+                    SetCursor(LoadCursorW(nullptr, IDC_HAND));
+                    return TRUE;
+                }
+            }
+        }
+        break;
 
     case WM_MOUSELEAVE:
         m_trackingMouse = false;
@@ -430,7 +497,7 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
 
     case WM_HOTKEY:
         if (wParam == kHotkeyOverlay) {
-            m_overlay.toggle();
+            toggleOverlay();
         } else if (wParam == kHotkeyPosition) {
             const int next = (static_cast<int>(m_model.settings.overlay.position) + 1) % 4;
             m_model.settings.overlay.position = static_cast<OverlayPosition>(next);
@@ -456,7 +523,7 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             toggleVisibilityFromTray();
             break;
         case 1002:
-            m_overlay.toggle();
+            toggleOverlay();
             break;
         case 1003:
             m_quitRequested = true;
@@ -839,8 +906,7 @@ void MainWindow::applyAction(const UiHit& hit)
         break;
 
     case ActionKind::ToggleOverlay:
-        m_overlay.toggle();
-        m_model.overlayVisible = m_overlay.isVisible();
+        toggleOverlay();
         break;
 
     case ActionKind::TogglePause:
@@ -1016,7 +1082,11 @@ void MainWindow::createTrayIcon()
     icon.uID = kTrayIconId;
     icon.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
     icon.uCallbackMessage = kTrayMessage;
-    icon.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    icon.hIcon = static_cast<HICON>(LoadImageW(m_instance, MAKEINTRESOURCEW(101), IMAGE_ICON,
+        GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
+    if (icon.hIcon == nullptr) {
+        icon.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    }
     wcscpy_s(icon.szTip, L"YawaFpsHub — мониторинг FPS и системы");
 
     m_trayCreated = Shell_NotifyIconW(NIM_ADD, &icon) != FALSE;

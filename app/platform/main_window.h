@@ -72,6 +72,8 @@ private:
     void showTrayMenu();
     void registerHotkeys();
     void toggleVisibilityFromTray();
+    // Единая точка включения/выключения оверлея: логирует причину, если показать не удалось.
+    void toggleOverlay();
 
     Rect contentArea() const;
     std::vector<UiHit> buildHits();
@@ -105,6 +107,7 @@ private:
     bool m_running = false;
     bool m_trayCreated = false;
     bool m_trackingMouse = false;
+    int m_hoverIndex = -1;
     float m_dpiScale = 1.0f;
     std::wstring m_overlayShotDir;
 };
