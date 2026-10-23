@@ -33,7 +33,12 @@ public:
     bool create(HINSTANCE instance, Log& log, std::string& error);
     void setInitialView(View view) { m_model.view = view; }
     // Стартовый стиль оверлея: нужен CI, чтобы снять все пять стилей одного экрана.
-    void setInitialStyle(OverlayStyle style) { m_initialStyle = style; m_hasInitialStyle = true; }
+    // Вызывается после create(), поэтому применяем сразу, а не через флаг.
+    void setInitialStyle(OverlayStyle style)
+    {
+        m_model.settings.overlay.style = style;
+        m_overlay.setSettings(m_model.settings.overlay);
+    }
     void setOverlayVisible(bool visible);
     void exportOverlayStyles();
     // smokeSeconds > 0 — самопроверка для CI: окно живёт заданное время и закрывается само.
@@ -94,8 +99,6 @@ private:
     std::mutex m_modelMutex;
     std::atomic<bool> m_stopRequested{ false };
     bool m_running = false;
-    OverlayStyle m_initialStyle = OverlayStyle::Glass;
-    bool m_hasInitialStyle = false;
     bool m_trayCreated = false;
     float m_dpiScale = 1.0f;
     std::wstring m_overlayShotDir;

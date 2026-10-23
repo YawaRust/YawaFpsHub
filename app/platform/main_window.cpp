@@ -124,11 +124,6 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
         m_overlay.setSettings(m_model.settings.overlay);
     }
 
-    if (m_hasInitialStyle) {
-        m_model.settings.overlay.style = m_initialStyle;
-        m_overlay.setSettings(m_model.settings.overlay);
-    }
-
     m_model.settingsPath = settingsPath();
     m_model.logPath = logPath();
     m_model.sessionsPath = sessionsDirectory();
