@@ -91,7 +91,7 @@ void drawSessionCard(Renderer& renderer, const AppModel& model, const Theme& the
 
     const float budgetTop = top + 6.0f;
     const float budgetMs = 1000.0f / static_cast<float>(std::max(model.settings.capture.targetHz, 30));
-    const float used = std::clamp(model.fps.frameTimeMs / budgetMs, 0.0f, 1.0f);
+    const float used = std::clamp(static_cast<float>(model.fps.frameTimeMs) / budgetMs, 0.0f, 1.0f);
 
     renderer.text(L"Бюджет кадра", Rect{ inner.left, budgetTop, inner.centerX(), budgetTop + 16.0f }, TextRole::Small,
         theme.textFaint);

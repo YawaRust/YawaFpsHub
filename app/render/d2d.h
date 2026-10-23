@@ -54,8 +54,8 @@ public:
     void resize(UINT width, UINT height, float dpiScale);
     bool isReady() const { return m_target != nullptr; }
 
-    float width() const { return static_cast<float>(m_width); }
-    float height() const { return static_cast<float>(m_height); }
+    float width() const { return m_width; }
+    float height() const { return m_height; }
     float scale() const { return m_dpiScale; }
     float dip(UINT pixels) const { return static_cast<float>(pixels) / m_dpiScale; }
 
@@ -100,8 +100,8 @@ private:
     IDWriteTextFormat* m_mono = nullptr;
 
     HWND m_window = nullptr;
-    UINT m_width = 0;
-    UINT m_height = 0;
+    float m_width = 0.0f;
+    float m_height = 0.0f;
     float m_dpiScale = 1.0f;
     bool m_drawing = false;
     std::vector<ID2D1SolidColorBrush*> m_brushPool;
