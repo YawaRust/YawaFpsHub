@@ -215,7 +215,9 @@ jobs:
           Get-ChildItem .\shots | ForEach-Object { Write-Output "::notice title=YawaFpsHub::оверлей $($_.Name) $([math]::Round($_.Length / 1KB, 1)) КБ" }
 
       - name: Опубликовать скриншоты
-        if: hashFiles('screenshot-*.png') != ''
+        # Два прогона на один коммит (push и pull_request) соревнуются за ветку ci-logs,
+        # поэтому публикует только push-прогон: второй попытке push не хватает fast-forward.
+        if: github.event_name == 'push' && hashFiles('screenshot-*.png') != ''
         shell: bash
         run: |
           # Сначала убираем свежие PNG из рабочего дерева: в ветке ci-logs они уже есть,

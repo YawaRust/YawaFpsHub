@@ -286,15 +286,6 @@ void drawGpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
     }
 }
 
-void drawLegendChip(Renderer& renderer, const Rect& rect, std::wstring_view label, const Color& color,
-    const Theme& theme)
-{
-    const float width = renderer.measureText(label, TextRole::Tiny) + 18.0f;
-    renderer.fillCircle(rect.left + 4.0f, rect.centerY(), 3.0f, color);
-    renderer.text(label, Rect{ rect.left + 12.0f, rect.top, rect.left + width, rect.bottom }, TextRole::Tiny,
-        theme.textDim);
-}
-
 void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card)
 {
     drawCard(renderer, card, theme);
@@ -323,23 +314,18 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
     if (legend.bottom > inner.bottom) {
         return;
     }
-    float left = legend.left;
-    const std::array<std::array<std::wstring, 1>, 3> legendLabels{ std::array<std::wstring, 1>{
-                                                                      L"Приложения "
-                                                                          + wideNumber(used, MetricUnit::Gigabytes, 1) },
-        { L"Кэш " + wideNumber(cache, MetricUnit::Gigabytes, 1) },
-        { L"Свободно " + wideNumber(free, MetricUnit::Gigabytes, 1) } };
-    const std::array<Color, 3> legendColors{ theme.ram, theme.disk, theme.lineStrong };
-
-    for (std::size_t index = 0; index < legendLabels.size(); ++index) {
-        const float width = renderer.measureText(legendLabels[index][0], TextRole::Tiny) + 18.0f;
-        if (left + width > legend.right) {
-            break;
+    std::wstring legendText = L"Приложения " + wideNumber(used, MetricUnit::Gigabytes, 1) + L"  ·  Кэш "
+        + wideNumber(cache, MetricUnit::Gigabytes, 1) + L"  ·  Свободно " + wideNumber(free, MetricUnit::Gigabytes, 1);
+    while (!legendText.empty() && renderer.measureText(legendText, TextRole::Tiny) > legend.width()) {
+        const std::size_t cut = legendText.find_last_of(L'·');
+        legendText = cut == std::wstring::npos ? std::wstring{} : legendText.substr(0, cut);
+        while (!legendText.empty() && legendText.back() == L' ') {
+            legendText.pop_back();
         }
-        drawLegendChip(renderer, Rect{ left, legend.top, left + width, legend.bottom }, legendLabels[index][0],
-            legendColors[index], theme);
-        left += width + 10.0f;
     }
+    renderer.fillCircle(legend.left + 4.0f, legend.centerY(), 3.0f, theme.ram);
+    renderer.text(legendText, Rect{ legend.left + 12.0f, legend.top, legend.right, legend.bottom }, TextRole::Tiny,
+        theme.textDim);
 
     float rowTop = legend.bottom + 8.0f;
     const std::array<std::pair<std::wstring, std::wstring>, 2> rows{
@@ -445,9 +431,8 @@ void drawTemperaturesCard(Renderer& renderer, const AppModel& model, const Theme
         bool available;
     };
 
-    const std::array<Row, 4> rows{ Row{ L"Процессор", MetricId::CpuTemp, model.availability.cpuTemperature },
+    const std::array<Row, 3> rows{ Row{ L"Процессор", MetricId::CpuTemp, model.availability.cpuTemperature },
         { L"Видеокарта", MetricId::GpuTemp, model.availability.gpuTemperature },
-        { L"Hotspot GPU", MetricId::GpuHotspot, model.availability.gpuTemperature },
         { L"NVMe", MetricId::DiskTemp, model.availability.disk } };
 
     float rowTop = top + 2.0f;
@@ -461,7 +446,7 @@ void drawTemperaturesCard(Renderer& renderer, const AppModel& model, const Theme
         renderer.text(known ? wideMetric(row.id, model.store.value(row.id)) : L"нет данных",
             Rect{ inner.centerX(), rowTop, inner.right, rowTop + 15.0f }, TextRole::Body,
             known ? theme.text : theme.textFaint, TextAlign::Right);
-        rowTop += 20.0f;
+        rowTop += 19.0f;
     }
 }
 
@@ -517,7 +502,7 @@ void drawAlertsCard(Renderer& renderer, const AppModel& model, const Theme& them
         }
         drawRuleRow(renderer, Rect{ inner.left, rowTop, inner.right, rowTop + 15.0f }, rule.label, rule.state,
             rule.severity, theme);
-        rowTop += 20.0f;
+        rowTop += 19.0f;
     }
 }
 
@@ -529,9 +514,9 @@ void drawDashboard(Renderer& renderer, const AppModel& model, const Theme& theme
     const Columns columns{ area };
 
     const float usable = area.height() - kGap * 3.0f;
-    const float first = std::max(180.0f, usable * 0.36f);
-    const float second = std::max(140.0f, usable * 0.27f);
-    const float third = std::max(110.0f, usable * 0.20f);
+    const float first = std::max(170.0f, usable * 0.34f);
+    const float second = std::max(132.0f, usable * 0.26f);
+    const float third = std::max(104.0f, usable * 0.19f);
     const float fourth = std::max(90.0f, usable - first - second - third);
 
     const float row1 = area.top;
