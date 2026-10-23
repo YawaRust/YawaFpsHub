@@ -338,34 +338,26 @@ void drawSourcesCard(Renderer& renderer, const AppModel& model, const Theme& the
 void drawSettings(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area,
     std::vector<UiHit>& hits)
 {
-    const float column = (area.width() - kGap) / 2.0f;
-    const float usable = area.height() - kGap * 2.0f;
-    float first = std::max(200.0f, usable * 0.42f);
-    float second = std::max(150.0f, usable * 0.27f);
-    // Нижнему ряду нужен минимум: иначе строки источников наползают на заголовок.
-    const float minimumBottom = 118.0f;
-    while (first + second + minimumBottom > usable && first > 180.0f) {
-        first -= 6.0f;
-        second = std::max(136.0f, second - 4.0f);
-    }
-    const float third = std::max(96.0f, usable - first - second);
+    // Как в прототипе: карточки идут одной колонкой, высоты сняты с демо.
+    const auto drawClipped = [&](const Rect& card, const auto& draw) {
+        renderer.pushClip(card);
+        draw(card);
+        renderer.popClip();
+    };
 
-    const Rect leftTop{ area.left, area.top, area.left + column, area.top + first };
-    const Rect rightTop{ leftTop.right + kGap, area.top, area.right, area.top + first };
-    const Rect leftMiddle{ area.left, leftTop.bottom + kGap, area.left + column, leftTop.bottom + kGap + second };
-    const Rect rightMiddle{ leftTop.right + kGap, leftMiddle.top, area.right, leftMiddle.bottom };
+    float top = area.top;
+    const auto place = [&](float height) {
+        const Rect card{ area.left, top, area.right, top + height };
+        top += height + kGap;
+        return card;
+    };
 
-    // Нижний ряд: источники шире, «О программе» — справа.
-    const float bottomWidth = area.width() * 0.62f;
-    const Rect bottomLeft{ area.left, leftMiddle.bottom + kGap, area.left + bottomWidth, leftMiddle.bottom + kGap + third };
-    const Rect bottomRight{ bottomLeft.right + kGap, bottomLeft.top, area.right, bottomLeft.bottom };
-
-    drawCaptureCard(renderer, model, theme, leftTop, hits);
-    drawAppearanceCard(renderer, model, theme, rightTop, hits);
-    drawPortableCard(renderer, model, theme, leftMiddle, hits);
-    drawHotkeyCard(renderer, model, theme, rightMiddle, hits);
-    drawSourcesCard(renderer, model, theme, bottomLeft);
-    drawAboutCard(renderer, model, theme, bottomRight, hits);
+    drawClipped(place(385.0f), [&](const Rect& card) { drawCaptureCard(renderer, model, theme, card, hits); });
+    drawClipped(place(389.0f), [&](const Rect& card) { drawAppearanceCard(renderer, model, theme, card, hits); });
+    drawClipped(place(260.0f), [&](const Rect& card) { drawSourcesCard(renderer, model, theme, card); });
+    drawClipped(place(232.0f), [&](const Rect& card) { drawHotkeyCard(renderer, model, theme, card, hits); });
+    drawClipped(place(316.0f), [&](const Rect& card) { drawPortableCard(renderer, model, theme, card, hits); });
+    drawClipped(place(200.0f), [&](const Rect& card) { drawAboutCard(renderer, model, theme, card, hits); });
 }
 
 } // namespace yawa

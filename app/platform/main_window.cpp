@@ -710,7 +710,7 @@ float MainWindow::contentDesignHeight() const
     case View::Overlay:
         return contentArea().height();
     case View::Settings:
-        return contentArea().height();
+        return kSettingsHeight;
     }
     return kDashboardHeight;
 }
