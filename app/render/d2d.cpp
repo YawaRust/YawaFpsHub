@@ -64,6 +64,7 @@ void Renderer::createTextFormats()
     }
 
     m_display = createFormat(m_dwrite, kFontFamily, 84.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD);
+    m_number = createFormat(m_dwrite, kFontFamily, 19.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     m_value = createFormat(m_dwrite, kFontFamily, 26.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     m_heading = createFormat(m_dwrite, kFontFamily, 14.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD);
     m_body = createFormat(m_dwrite, kFontFamily, 12.5f, DWRITE_FONT_WEIGHT_NORMAL);
@@ -101,7 +102,8 @@ void Renderer::shutdown()
 {
     releaseDeviceResources();
 
-    IDWriteTextFormat** formats[] = { &m_display, &m_value, &m_heading, &m_body, &m_small, &m_tiny, &m_mono };
+    IDWriteTextFormat** formats[] = { &m_display, &m_number, &m_value, &m_heading, &m_body, &m_small, &m_tiny,
+        &m_mono };
     for (IDWriteTextFormat** format : formats) {
         if (*format != nullptr) {
             (*format)->Release();
@@ -392,6 +394,8 @@ IDWriteTextFormat* Renderer::formatFor(TextRole role) const
     switch (role) {
     case TextRole::Display:
         return m_display;
+    case TextRole::Number:
+        return m_number != nullptr ? m_number : m_value;
     case TextRole::Value:
         return m_value;
     case TextRole::Heading:

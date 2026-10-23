@@ -26,7 +26,7 @@ struct Rect {
     Rect inset(float amount) const { return Rect{ left + amount, top + amount, right - amount, bottom - amount }; }
 };
 
-enum class TextRole { Display, Value, Heading, Body, Small, Tiny, Mono };
+enum class TextRole { Display, Number, Value, Heading, Body, Small, Tiny, Mono };
 enum class TextAlign { Left, Center, Right };
 
 struct ChartSeries {
@@ -106,6 +106,8 @@ private:
     ID2D1SolidColorBrush* m_brush = nullptr;
 
     IDWriteTextFormat* m_display = nullptr;
+    // 19 px — цифры в панелях статистики, как в прототипе.
+    IDWriteTextFormat* m_number = nullptr;
     IDWriteTextFormat* m_value = nullptr;
     IDWriteTextFormat* m_heading = nullptr;
     IDWriteTextFormat* m_body = nullptr;

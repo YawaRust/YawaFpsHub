@@ -70,7 +70,7 @@ void drawStatBlock(Renderer& renderer, const Rect& rect, std::wstring_view label
     const Theme& theme)
 {
     renderer.text(label, Rect{ rect.left, rect.top, rect.right, rect.top + 14.0f }, TextRole::Tiny, theme.textFaint);
-    renderer.text(value, Rect{ rect.left, rect.top + 14.0f, rect.right, rect.top + 38.0f }, TextRole::Value,
+    renderer.text(value, Rect{ rect.left, rect.top + 14.0f, rect.right, rect.top + 38.0f }, TextRole::Number,
         theme.text);
 }
 
@@ -169,7 +169,9 @@ void drawSessionCard(Renderer& renderer, const AppModel& model, const Theme& the
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
-    float rowTop = drawCardHeader(renderer, card, L"Сессия", L"профиль включается по запуску игры", theme) + 6.0f;
+    drawCardHeader(renderer, card, L"Сессия", L"профиль включается по запуску игры", theme);
+    // В демо строки начинаются ниже подзаголовка: 73 px от внутреннего края карточки.
+    float rowTop = inner.top + 73.0f;
 
     // Чип с временем сессии в правом верхнем углу карточки.
     {
