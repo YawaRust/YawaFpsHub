@@ -29,7 +29,16 @@ bool isAlreadyRunning()
 
 int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
 {
-    const bool smoke = commandLine != nullptr && std::wstring_view(commandLine).find(L"--smoke") != std::wstring_view::npos;
+    const std::wstring_view arguments = commandLine != nullptr ? commandLine : L"";
+    const bool smoke = arguments.find(L"--smoke") != std::wstring_view::npos;
+
+    // --view=sensors|settings нужен CI, чтобы снять скриншоты всех экранов.
+    yawa::View initialView = yawa::View::Dashboard;
+    if (arguments.find(L"--view=sensors") != std::wstring_view::npos) {
+        initialView = yawa::View::Sensors;
+    } else if (arguments.find(L"--view=settings") != std::wstring_view::npos) {
+        initialView = yawa::View::Settings;
+    }
     // Монитор FPS не должен влиять на картинку в игре: сначала сообщаем Windows, что
     // приложение само управляет масштабом, и только потом создаём окна.
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
@@ -54,6 +63,7 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
     }
 
     // Самопроверка держит окно открытым, чтобы CI успел снять скриншот интерфейса.
+    window.setInitialView(initialView);
     const int result = window.run(smoke ? 8 : 0);
     log.info("остановка");
     return result;

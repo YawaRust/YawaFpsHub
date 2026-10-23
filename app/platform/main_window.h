@@ -30,6 +30,7 @@ public:
     MainWindow& operator=(const MainWindow&) = delete;
 
     bool create(HINSTANCE instance, Log& log, std::string& error);
+    void setInitialView(View view) { m_model.view = view; }
     // smokeSeconds > 0 — самопроверка для CI: окно живёт заданное время и закрывается само.
     int run(int smokeSeconds = 0);
 

@@ -110,7 +110,7 @@ jobs:
           }
           Write-Output "::notice title=YawaFpsHub::самопроверка ок"
 
-      - name: Скриншот интерфейса
+      - name: Скриншоты интерфейса
         shell: pwsh
         run: |
           Add-Type -AssemblyName System.Drawing
@@ -121,51 +121,54 @@ jobs:
             [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
             [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
             [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
-            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hwnd);
           }
           "@
           $exe = (Get-ChildItem -Path .\build -Recurse -Filter YawaFpsHub.exe | Select-Object -First 1).FullName
-          $process = Start-Process -FilePath $exe -ArgumentList "--smoke" -PassThru
-          # Даём приложению несколько циклов опроса, чтобы графики и счётчики были живыми.
-          Start-Sleep -Seconds 4
-          $shot = $null
-          for ($i = 0; $i -lt 10 -and -not $shot; $i++) {
-            $process.Refresh()
-            $hwnd = $process.MainWindowHandle
-            if ($hwnd -eq [IntPtr]::Zero) { continue }
-            $rect = New-Object YawaShot+RECT
-            if (-not [YawaShot]::GetWindowRect($hwnd, [ref] $rect)) { continue }
-            $width = $rect.Right - $rect.Left
-            $height = $rect.Bottom - $rect.Top
-            if ($width -le 0 -or $height -le 0) { continue }
-            $bitmap = New-Object System.Drawing.Bitmap $width, $height
-            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-            $hdc = $graphics.GetHdc()
-            $ok = [YawaShot]::PrintWindow($hwnd, $hdc, 2)
-            $graphics.ReleaseHdc($hdc)
-            $graphics.Dispose()
-            if ($ok) {
-              $bitmap.Save("$PWD\screenshot.png", [System.Drawing.Imaging.ImageFormat]::Png)
-              $shot = "$PWD\screenshot.png"
+          $views = @("dashboard", "sensors", "settings")
+          foreach ($view in $views) {
+            $process = Start-Process -FilePath $exe -ArgumentList "--smoke", "--view=$view" -PassThru
+            Start-Sleep -Seconds 4
+            $shot = $null
+            for ($i = 0; $i -lt 10 -and -not $shot; $i++) {
+              $process.Refresh()
+              $hwnd = $process.MainWindowHandle
+              if ($hwnd -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 500; continue }
+              $rect = New-Object YawaShot+RECT
+              if (-not [YawaShot]::GetWindowRect($hwnd, [ref] $rect)) { Start-Sleep -Milliseconds 500; continue }
+              $width = $rect.Right - $rect.Left
+              $height = $rect.Bottom - $rect.Top
+              if ($width -le 0 -or $height -le 0) { Start-Sleep -Milliseconds 500; continue }
+              $bitmap = New-Object System.Drawing.Bitmap $width, $height
+              $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+              $hdc = $graphics.GetHdc()
+              $ok = [YawaShot]::PrintWindow($hwnd, $hdc, 2)
+              $graphics.ReleaseHdc($hdc)
+              $graphics.Dispose()
+              if ($ok) {
+                $path = "$PWD\screenshot-$view.png"
+                $bitmap.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+                $shot = $path
+              }
+              $bitmap.Dispose()
+              if (-not $shot) { Start-Sleep -Milliseconds 500 }
             }
-            $bitmap.Dispose()
-          }
-          $process.WaitForExit()
-          if ($shot) {
-            Write-Output "::notice title=YawaFpsHub::скриншот снят $shot"
-          } else {
-            Write-Output "::warning title=YawaFpsHub::скриншот не снят (нет интерактивного рабочего стола)"
+            $process.WaitForExit()
+            if ($shot) {
+              Write-Output "::notice title=YawaFpsHub::скриншот $view снят"
+            } else {
+              Write-Output "::warning title=YawaFpsHub::скриншот $view не снят (нет интерактивного рабочего стола)"
+            }
           }
 
-      - name: Опубликовать скриншот
-        if: hashFiles('screenshot.png') != ''
+      - name: Опубликовать скриншоты
+        if: hashFiles('screenshot-*.png') != ''
         shell: bash
         run: |
           git config user.email "ci@yawafpshub.local"
           git config user.name "ci"
           git checkout -B ci-logs
-          git add -f screenshot.png
-          git commit -m "screenshot" || true
+          git add -f screenshot-*.png
+          git commit -m "screenshots" || true
           git push -f origin ci-logs
 
       - name: Прогон диагностики
