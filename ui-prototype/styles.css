@@ -1451,19 +1451,19 @@ body.is-paused .tag--live { color: var(--warn); border-color: rgba(255, 179, 71,
 .style-tile__preview[data-style="retro"] i { color: #2dff6a; opacity: 1; }
 
 .osd[data-style="frosted"] {
-  background: rgba(243, 246, 251, calc(var(--osd-bg, 0.72) * 0.22));
-  border: 1px solid rgba(255, 255, 255, 0.34);
+  background: rgba(243, 246, 251, calc(0.45 + var(--osd-bg, 0.72) * 0.5));
+  border: 1px solid rgba(51, 65, 92, 0.22);
   border-radius: 14px;
   backdrop-filter: blur(14px);
   box-shadow: 0 18px 40px -24px rgba(0, 0, 0, 0.9);
 }
 
-.osd[data-style="frosted"] .osd__key { color: #dbe6f5; }
-.osd[data-style="frosted"] .osd__val { color: #fff; }
-.osd[data-style="frosted"] [data-osd-item="cpu"] .osd__val { color: #bcd9ff; }
-.osd[data-style="frosted"] [data-osd-item="gpu"] .osd__val { color: #e2c9ff; }
-.osd[data-style="frosted"] [data-osd-item="ram"] .osd__val { color: #ffe6ab; }
-.osd[data-style="frosted"] [data-osd-item="vram"] .osd__val { color: #b6fff0; }
+.osd[data-style="frosted"] .osd__key { color: #33415c; }
+.osd[data-style="frosted"] .osd__val { color: #0b1220; }
+.osd[data-style="frosted"] [data-osd-item="cpu"] .osd__val { color: #123e63; }
+.osd[data-style="frosted"] [data-osd-item="gpu"] .osd__val { color: #3b2a5c; }
+.osd[data-style="frosted"] [data-osd-item="ram"] .osd__val { color: #5a3e12; }
+.osd[data-style="frosted"] [data-osd-item="vram"] .osd__val { color: #0f3b36; }
 
 .osd[data-style="neon"] {
   background: rgba(5, 7, 11, calc(var(--osd-bg, 0.72) * 1.1));

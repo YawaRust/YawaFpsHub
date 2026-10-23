@@ -346,13 +346,14 @@ StyleLook lookFor(OverlayStyle style)
         look.mono = true;
         break;
     case OverlayStyle::Frosted:
+        // Светлое стекло: подложка почти непрозрачная, поэтому и текст тёмный.
         look.background = styleColor(0xF3F6FBu);
         look.border = styleColor(0xFFFFFFu);
-        look.label = styleColor(0xDBE6F5u);
-        look.accent = styleColor(0xFFFFFFu);
-        look.value = styleColor(0xFFFFFFu);
-        look.palette = { styleColor(0xFFFFFFu), styleColor(0xBCD9FFu), styleColor(0xE2C9FFu),
-            styleColor(0xFFE6ABu), styleColor(0xB6FFF0u) };
+        look.label = styleColor(0x33415Cu);
+        look.accent = styleColor(0x0B1220u);
+        look.value = styleColor(0x0B1220u);
+        look.palette = { styleColor(0x0B1220u), styleColor(0x123E63u), styleColor(0x3B2A5Cu),
+            styleColor(0x5A3E12u), styleColor(0x0F3B36u) };
         look.radius = 14.0f;
         look.padding = 12.0f;
         look.rowGap = 4.0f;
@@ -570,15 +571,15 @@ void drawFrosted(Painter& painter, const OverlayText& text, const Rect& frame, c
     const std::array<std::wstring, kLabelCount> values = rowValues(text);
 
     drawShadow(painter, frame, look.radius * scale);
-    painter.plate(frame, look.radius * scale, look.background, 0.16f * (0.4f + painter.opacity()));
-    painter.outline(frame, look.radius * scale, look.border, 1.0f, 0.35f);
+    painter.plate(frame, look.radius * scale, look.background, 0.35f + 0.6f * painter.opacity());
+    painter.outline(frame, look.radius * scale, look.label, 1.0f, 0.25f);
 
     const float left = frame.left + look.padding * scale;
     const float right = frame.right - look.padding * scale;
 
     if (rowShown(text, 0)) {
         const Rect chip{ left, frame.top + 8.0f * scale, left + 66.0f * scale, frame.top + 26.0f * scale };
-        painter.fillRound(chip, 9.0f * scale, look.border, 0.12f);
+        painter.fillRound(chip, 9.0f * scale, look.label, 0.12f);
         painter.text(labels[0], chip, TextRole::Tiny, look.label, TextAlign::Center);
         painter.text(values[0], Rect{ left - 2.0f * scale, frame.top + 24.0f * scale, left + 120.0f * scale,
                                       frame.top + 62.0f * scale },
@@ -907,7 +908,8 @@ OverlaySwatch overlaySwatch(OverlayStyle style)
         swatch.alpha = 0.0f;
         break;
     case OverlayStyle::Frosted:
-        swatch.alpha = 0.22f;
+        // Тёмный текст на светлой подложке читается только при заметной непрозрачности.
+        swatch.alpha = 0.75f;
         break;
     case OverlayStyle::Mono:
         swatch.alpha = 0.35f;
