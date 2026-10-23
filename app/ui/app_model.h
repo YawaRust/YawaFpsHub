@@ -111,6 +111,9 @@ struct AppModel {
     // Выпадающий список выбора GPU на обзоре.
     bool gpuMenuOpen = false;
     int sensorScroll = 0;
+    // Прокрутка содержимого: экран рисуется в «демо-высоте», окно показывает его часть.
+    float contentScroll = 0.0f;
+    float contentHeight = 0.0f;
     // Состояние окна для своего заголовка: перетаскивание и кнопки рисуются вручную.
     bool maximized = false;
     float cursorX = -100.0f;

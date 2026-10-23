@@ -255,6 +255,21 @@ void Renderer::popClip()
     }
 }
 
+void Renderer::pushTranslate(float dx, float dy)
+{
+    if (m_target == nullptr) {
+        return;
+    }
+    m_target->SetTransform(D2D1::Matrix3x2F::Translation(dx, dy));
+}
+
+void Renderer::popTranslate()
+{
+    if (m_target != nullptr) {
+        m_target->SetTransform(D2D1::Matrix3x2F::Identity());
+    }
+}
+
 void Renderer::fillCircle(float centerX, float centerY, float radius, const Color& color)
 {
     ID2D1SolidColorBrush* brush = brushFor(color);

@@ -294,6 +294,10 @@ jobs:
             } else {
               Write-Output "::warning title=YawaFpsHub::демо $view не снято"
             }
+            # Высокий снимок: по нему снимаем настоящие высоты карточек демо,
+            # чтобы приложение повторяло их и прокручивало содержимое, а не сжимало.
+            $tall = "demo-$view-tall.png"
+            Start-Process -FilePath $edge -ArgumentList "--headless=new","--disable-gpu","--hide-scrollbars","--no-first-run","--window-size=$demoWidth,2400","--virtual-time-budget=6000","--screenshot=$PWD\$tall",$url -Wait
           }
           Stop-Process -Id $server.Id -Force
 

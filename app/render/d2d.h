@@ -78,6 +78,9 @@ public:
     // Вызовы обязаны идти парами pushClip/popClip.
     void pushClip(const Rect& rect);
     void popClip();
+    // Сдвиг всей дальнейшей отрисовки: пара pushTranslate/popTranslate.
+    void pushTranslate(float dx, float dy);
+    void popTranslate();
 
     void text(std::wstring_view value, const Rect& rect, TextRole role, const Color& color,
         TextAlign align = TextAlign::Left);
