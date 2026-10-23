@@ -7,6 +7,37 @@
 namespace yawa {
 namespace {
 
+// Ноль у этих датчиков означает не «нет нагрузки», а «источник не отдал значение»
+// (частота, температура, питание нулём не бывают). Показываем честное «нет данных»,
+// а не выдуманный нуль.
+bool isMissing(MetricId id, double value)
+{
+    switch (id) {
+    case MetricId::CpuTemp:
+    case MetricId::CpuClock:
+    case MetricId::CpuPower:
+    case MetricId::GameThreadLoad:
+    case MetricId::GpuTemp:
+    case MetricId::GpuHotspot:
+    case MetricId::GpuClock:
+    case MetricId::GpuMemClock:
+    case MetricId::GpuPower:
+    case MetricId::GpuFan:
+    case MetricId::VramTotal:
+    case MetricId::DiskTemp:
+    case MetricId::ChipsetTemp:
+        return value <= 0.0;
+    default:
+        return false;
+    }
+}
+
+std::wstring metricOrNone(const MetricStore& store, MetricId id)
+{
+    const double value = store.value(id);
+    return isMissing(id, value) ? std::wstring(L"нет данных") : wideMetric(id, value);
+}
+
 void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card)
 {
     drawCard(renderer, card, theme);
@@ -123,17 +154,16 @@ void drawProcessorCard(Renderer& renderer, const AppModel& model, const Theme& t
 
     const float rowsLeft = centerX + radius + 26.0f;
     const std::pair<std::wstring, std::wstring> rows[] = {
-        { L"Частота", wideMetric(MetricId::CpuClock, model.store.value(MetricId::CpuClock)) },
-        { L"Температура", model.availability.cpuTemperature
-                ? wideMetric(MetricId::CpuTemp, model.store.value(MetricId::CpuTemp))
-                : L"нет данных" },
-        { L"Поток игры", wideMetric(MetricId::GameThreadLoad, model.store.value(MetricId::GameThreadLoad)) },
+        { L"Частота", metricOrNone(model.store, MetricId::CpuClock) },
+        { L"Температура", model.availability.cpuTemperature ? metricOrNone(model.store, MetricId::CpuTemp)
+                                                            : std::wstring(L"нет данных") },
+        { L"Питание", metricOrNone(model.store, MetricId::CpuPower) },
     };
 
-    float top = inner.top + 56.0f;
+    float top = inner.top + 58.0f;
     for (const auto& [label, value] : rows) {
         drawLabelValue(renderer, Rect{ rowsLeft, top, inner.right, top + 18.0f }, label, value, theme);
-        top += 26.0f;
+        top += 24.0f;
     }
 }
 
@@ -167,32 +197,38 @@ void drawGraphicsCard(Renderer& renderer, const AppModel& model, const Theme& th
         wideNumber(load, MetricUnit::Percent, 0), theme.text);
 
     const float rowsLeft = centerX + radius + 26.0f;
+    const double vramTotal = model.store.value(MetricId::VramTotal);
+
     const std::pair<std::wstring, std::wstring> rows[] = {
-        { L"Температура", model.availability.gpuTemperature
-                ? wideMetric(MetricId::GpuTemp, model.store.value(MetricId::GpuTemp))
-                : L"нет данных" },
-        { L"Питание", model.availability.gpuPower ? wideMetric(MetricId::GpuPower, model.store.value(MetricId::GpuPower))
-                                                  : L"нет данных" },
-        { L"Частота", wideMetric(MetricId::GpuClock, model.store.value(MetricId::GpuClock)) },
+        { L"Температура", model.availability.gpuTemperature ? metricOrNone(model.store, MetricId::GpuTemp)
+                                                            : std::wstring(L"нет данных") },
+        { L"Питание", model.availability.gpuPower ? metricOrNone(model.store, MetricId::GpuPower)
+                                                  : std::wstring(L"нет данных") },
+        { L"Частота", metricOrNone(model.store, MetricId::GpuClock) },
     };
 
-    float top = inner.top + 56.0f;
+    float top = inner.top + 54.0f;
     for (const auto& [label, value] : rows) {
         drawLabelValue(renderer, Rect{ rowsLeft, top, inner.right, top + 18.0f }, label, value, theme);
-        top += 26.0f;
+        top += 23.0f;
     }
 
-    const float vramTotal = std::max(static_cast<float>(model.store.value(MetricId::VramTotal)), 0.001f);
-    const float used = static_cast<float>(model.store.value(MetricId::VramUsed) / vramTotal);
+    const float vramTop = inner.bottom - 30.0f;
+    renderer.text(L"Видеопамять", Rect{ inner.left, vramTop, inner.left + 120.0f, vramTop + 16.0f }, TextRole::Small,
+        theme.textFaint);
 
-    renderer.text(L"Видеопамять", Rect{ inner.left, inner.bottom - 34.0f, inner.left + 120.0f, inner.bottom - 16.0f },
-        TextRole::Small, theme.textFaint);
-    renderer.text(wideMetric(MetricId::VramUsed, model.store.value(MetricId::VramUsed)) + L" / "
-            + wideMetric(MetricId::VramTotal, vramTotal),
-        Rect{ inner.left + 120.0f, inner.bottom - 34.0f, inner.right, inner.bottom - 16.0f }, TextRole::Small,
-        theme.text, TextAlign::Right);
-    drawBar(renderer, Rect{ inner.left, inner.bottom - 12.0f, inner.right, inner.bottom - 6.0f }, used, theme.gpu,
-        theme.line);
+    if (vramTotal > 0.0) {
+        const double vramUsed = model.store.value(MetricId::VramUsed);
+        renderer.text(wideNumber(vramUsed, MetricUnit::Gigabytes, 1) + L" / "
+                + wideNumber(vramTotal, MetricUnit::Gigabytes, 1),
+            Rect{ inner.left + 120.0f, vramTop, inner.right, vramTop + 16.0f }, TextRole::Small, theme.text,
+            TextAlign::Right);
+        drawBar(renderer, Rect{ inner.left, inner.bottom - 9.0f, inner.right, inner.bottom - 4.0f },
+            static_cast<float>(vramUsed / vramTotal), theme.gpu, theme.line);
+    } else {
+        renderer.text(L"нет данных", Rect{ inner.left + 120.0f, vramTop, inner.right, vramTop + 16.0f },
+            TextRole::Small, theme.textFaint, TextAlign::Right);
+    }
 }
 
 void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card)

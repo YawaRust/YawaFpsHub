@@ -23,18 +23,46 @@ constexpr std::array<SensorGroup, 6> kGroups{ {
     { L"Система", MetricId::ChipsetTemp, 4 },
 } };
 
+// Датчики без источника в приложении (нет MSR-драйвера, нет NVML, поток игры не отслеживается)
+// не должны выглядеть как настоящие нули.
+bool isMeasured(MetricId id, const MetricSlot& slot)
+{
+    if (!slot.stats.initialized) {
+        return false;
+    }
+    switch (id) {
+    case MetricId::CpuTemp:
+    case MetricId::CpuClock:
+    case MetricId::CpuPower:
+    case MetricId::GameThreadLoad:
+    case MetricId::GpuTemp:
+    case MetricId::GpuHotspot:
+    case MetricId::GpuClock:
+    case MetricId::GpuMemClock:
+    case MetricId::GpuPower:
+    case MetricId::GpuFan:
+    case MetricId::VramTotal:
+    case MetricId::DiskTemp:
+    case MetricId::ChipsetTemp:
+        return slot.stats.current > 0.0;
+    default:
+        return true;
+    }
+}
+
 void drawRow(Renderer& renderer, const AppModel& model, const Theme& theme, MetricId id, const Rect& row)
 {
     const MetricInfo& info = metricInfo(id);
     const MetricSlot& slot = model.store.slot(id);
+    const bool measured = isMeasured(id, slot);
 
     renderer.text(wideText(info.label), Rect{ row.left, row.top, row.left + row.width() * 0.42f, row.bottom },
         TextRole::Small, theme.textDim);
-    renderer.text(wideMetric(id, slot.stats.current),
-        Rect{ row.left + row.width() * 0.42f, row.top, row.left + row.width() * 0.66f, row.bottom }, TextRole::Body,
-        theme.text, TextAlign::Right);
+    renderer.text(measured ? wideMetric(id, slot.stats.current) : std::wstring(L"нет данных"),
+        Rect{ row.left + row.width() * 0.42f, row.top, row.left + row.width() * 0.66f, row.bottom },
+        measured ? TextRole::Body : TextRole::Small, measured ? theme.text : theme.textFaint, TextAlign::Right);
 
-    const std::wstring stats = slot.stats.initialized ? wideNumber(slot.stats.minimum, info.unit, info.decimals)
+    const std::wstring stats = measured ? wideNumber(slot.stats.minimum, info.unit, info.decimals)
             + L" · " + wideNumber(slot.stats.average, info.unit, info.decimals) + L" · "
             + wideNumber(slot.stats.maximum, info.unit, info.decimals)
                                                   : L"—";
