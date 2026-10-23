@@ -1,0 +1,353 @@
+name: build
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches: [main, "arena/**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  metrics:
+    name: Ядро метрик (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            generator: ""
+          - os: ubuntu-latest
+            generator: "-G \"Unix Makefiles\""
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Настроить CMake
+        shell: bash
+        run: cmake -S . -B build ${{ matrix.generator }} -DCMAKE_BUILD_TYPE=Release -DYAWA_WARNINGS_AS_ERRORS=ON -DYAWA_BUILD_APP=OFF -DYAWA_BUILD_PROBE=OFF
+
+      - name: Собрать
+        shell: bash
+        run: cmake --build build --config Release --parallel
+
+      - name: Тесты
+        shell: bash
+        run: ctest --test-dir build -C Release --output-on-failure
+
+  windows:
+    name: Приложение и диагностика (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Настроить CMake
+        run: cmake -S . -B build -A x64 -DYAWA_WARNINGS_AS_ERRORS=ON
+
+      - name: Собрать
+        run: cmake --build build --config Release --parallel
+
+      - name: Записать лог сборки при ошибке
+        if: failure()
+        shell: bash
+        run: |
+          cmake --build build --config Release --parallel > build-log.txt 2>&1 || true
+          git config user.email "ci@yawafpshub.local"
+          git config user.name "ci"
+          git checkout -B ci-logs
+          git add -f build-log.txt
+          git commit -m "build log" || true
+          git push -f origin ci-logs
+
+      - name: Тесты
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Самопроверка приложения
+        shell: pwsh
+        run: |
+          Add-Type @"
+          using System;
+          using System.Text;
+          using System.Runtime.InteropServices;
+          public class YawaWin {
+            public delegate bool EnumProc(IntPtr hWnd, IntPtr lParam);
+            [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr lParam);
+            [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+            [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr hWnd, int index);
+            [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder sb, int max);
+          }
+          "@
+          $diagnostics = New-Object System.Collections.Generic.List[string]
+          $found = Get-ChildItem -Path .\build -Recurse -Filter YawaFpsHub.exe | Select-Object -First 1
+          $exe = if ($found) { $found.FullName } else { "" }
+          $outDir = if ($found) { $found.DirectoryName } else { "" }
+          $diagnostics.Add("exe: " + $exe)
+          $fail = $null
+          if (-not (Test-Path $exe)) {
+            $fail = "нет YawaFpsHub.exe"
+          } else {
+            $process = Start-Process -FilePath $exe -ArgumentList "--smoke=22" -PassThru
+            Start-Sleep -Seconds 8
+            $process.Refresh()
+            $cpuBefore = $process.TotalProcessorTime.TotalSeconds
+            $memory = $process.WorkingSet64
+            $diagnostics.Add("память: " + [math]::Round($memory / 1MB, 1) + " МБ")
+            Start-Sleep -Seconds 10
+            $process.Refresh()
+            $cpuUsed = $process.TotalProcessorTime.TotalSeconds - $cpuBefore
+            $cores = [Environment]::ProcessorCount
+            $diagnostics.Add("CPU в простое: " + [math]::Round($cpuUsed / 10.0 * 100 / $cores, 2) + " % от всех ядер")
+            $diagnostics.Add("CPU на ядро: " + [math]::Round($cpuUsed / 10.0 * 100, 2) + " % одного ядра")
+
+            # Оверлей — отдельное окно: проверяем класс и стили layered/topmost/click-through.
+            $overlayFound = $false
+            $callback = [YawaWin+EnumProc] {
+              param($hwnd, $state)
+              $windowPid = 0
+              [void][YawaWin]::GetWindowThreadProcessId($hwnd, [ref] $windowPid)
+              if ($windowPid -eq $script:targetPid) {
+                $name = New-Object System.Text.StringBuilder 256
+                [void][YawaWin]::GetClassName($hwnd, $name, 256)
+                if ($name.ToString() -eq "YawaFpsHubOverlay") {
+                  $exStyle = [YawaWin]::GetWindowLong($hwnd, -20)
+                  # WS_EX_TRANSPARENT больше не нужен: прозрачность для игры даёт
+                  # WM_NCHITTEST -> HTTRANSPARENT, иначе Ctrl+перетаскивание не работает.
+                  $script:overlayFound = (($exStyle -band 0x00080000) -ne 0) -and (($exStyle -band 0x00000008) -ne 0) -and (($exStyle -band 0x00000080) -ne 0)
+                  $script:overlayStyle = "0x{0:X8}" -f $exStyle
+                }
+              }
+              return $true
+            }
+            $script:targetPid = $process.Id
+            $script:overlayFound = $false
+            [void][YawaWin]::EnumWindows($callback, [IntPtr]::Zero)
+            $diagnostics.Add("оверлей layered+topmost+toolwindow: " + $script:overlayFound + " (" + $script:overlayStyle + ")")
+            if (-not $script:overlayFound) { $fail = "окно оверлея не найдено или не имеет нужных стилей" }
+
+            if (-not $process.WaitForExit(40000)) {
+              $process.Kill()
+              if (-not $fail) { $fail = "приложение не закрылось за 30 с" }
+            } else {
+              $diagnostics.Add("exit code: " + $process.ExitCode)
+              if ($process.ExitCode -ne 0 -and -not $fail) { $fail = "код возврата " + $process.ExitCode }
+            }
+          }
+
+          $logPath = Join-Path $outDir "YawaFpsHub.log"
+          if (Test-Path $logPath) {
+            foreach ($line in (Get-Content $logPath)) {
+              if ($line.Trim().Length -eq 0) { continue }
+              $diagnostics.Add("log: " + $line)
+            }
+          } else {
+            $diagnostics.Add("log: нет файла")
+          }
+
+          $ini = Join-Path $outDir "YawaFpsHub.ini"
+          if (-not (Test-Path $ini) -and -not $fail) { $fail = "не создан YawaFpsHub.ini" }
+          $diagnostics.Add("ini: " + (Test-Path $ini))
+
+          foreach ($line in $diagnostics) { Write-Output "::notice title=YawaFpsHub::$line" }
+          if ($fail) {
+            Write-Output "::error title=YawaFpsHub::самопроверка не прошла: $fail"
+            exit 1
+          }
+          Write-Output "::notice title=YawaFpsHub::самопроверка ок"
+
+      - name: Скриншоты интерфейса
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          Add-Type @"
+          using System;
+          using System.Runtime.InteropServices;
+          public class YawaShot {
+            [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+            [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+          }
+          "@
+          $exe = (Get-ChildItem -Path .\build -Recurse -Filter YawaFpsHub.exe | Select-Object -First 1).FullName
+          # Каждая запись: вид, дополнительный аргумент и имя файла. Прокрученный обзор
+          # снимается отдельно — так видно, что содержимое действительно едет.
+          $shots = @(
+            @{ view = "dashboard"; extra = ""; name = "dashboard" },
+            @{ view = "dashboard"; extra = "--scroll=640"; name = "dashboard-scrolled" },
+            @{ view = "sensors"; extra = ""; name = "sensors" },
+            @{ view = "overlay"; extra = ""; name = "overlay" },
+            @{ view = "settings"; extra = ""; name = "settings" }
+          )
+          foreach ($item in $shots) {
+            $view = $item.name
+            $argumentsList = @("--smoke", "--view=$($item.view)", "--size=1280x800")
+            if ($item.extra -ne "") { $argumentsList += $item.extra }
+            $process = Start-Process -FilePath $exe -ArgumentList $argumentsList -PassThru
+            Start-Sleep -Seconds 4
+            $shot = $null
+            for ($i = 0; $i -lt 10 -and -not $shot; $i++) {
+              $process.Refresh()
+              $hwnd = $process.MainWindowHandle
+              if ($hwnd -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 500; continue }
+              $rect = New-Object YawaShot+RECT
+              if (-not [YawaShot]::GetWindowRect($hwnd, [ref] $rect)) { Start-Sleep -Milliseconds 500; continue }
+              $width = $rect.Right - $rect.Left
+              $height = $rect.Bottom - $rect.Top
+              if ($width -le 0 -or $height -le 0) { Start-Sleep -Milliseconds 500; continue }
+              $bitmap = New-Object System.Drawing.Bitmap $width, $height
+              $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+              $hdc = $graphics.GetHdc()
+              $ok = [YawaShot]::PrintWindow($hwnd, $hdc, 2)
+              $graphics.ReleaseHdc($hdc)
+              $graphics.Dispose()
+              if ($ok) {
+                $path = "$PWD\screenshot-$view.png"
+                $bitmap.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+                $shot = $path
+              }
+              $bitmap.Dispose()
+              if (-not $shot) { Start-Sleep -Milliseconds 500 }
+            }
+            $process.WaitForExit()
+            if ($shot) {
+              Write-Output "::notice title=YawaFpsHub::скриншот $view снят"
+            } else {
+              Write-Output "::warning title=YawaFpsHub::скриншот $view не снят (нет интерактивного рабочего стола)"
+            }
+          }
+
+      - name: Скриншоты стилей оверлея
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          Add-Type @"
+          using System;
+          using System.Runtime.InteropServices;
+          public class YawaStyleShot {
+            [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+            [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
+            [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+          }
+          "@
+          $exe = (Get-ChildItem -Path .\build -Recurse -Filter YawaFpsHub.exe | Select-Object -First 1).FullName
+          $styles = @("neon", "rtss", "frosted", "terminal", "cyber", "mono", "esport", "retro")
+          foreach ($style in $styles) {
+            $process = Start-Process -FilePath $exe -ArgumentList "--smoke", "--view=overlay", "--style=$style", "--size=1280x800" -PassThru
+            Start-Sleep -Seconds 4
+            $shot = $null
+            for ($i = 0; $i -lt 10 -and -not $shot; $i++) {
+              $process.Refresh()
+              $hwnd = $process.MainWindowHandle
+              if ($hwnd -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 500; continue }
+              $rect = New-Object YawaStyleShot+RECT
+              if (-not [YawaStyleShot]::GetWindowRect($hwnd, [ref] $rect)) { Start-Sleep -Milliseconds 500; continue }
+              $width = $rect.Right - $rect.Left
+              $height = $rect.Bottom - $rect.Top
+              if ($width -le 0 -or $height -le 0) { Start-Sleep -Milliseconds 500; continue }
+              $bitmap = New-Object System.Drawing.Bitmap $width, $height
+              $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+              $hdc = $graphics.GetHdc()
+              $ok = [YawaStyleShot]::PrintWindow($hwnd, $hdc, 2)
+              $graphics.ReleaseHdc($hdc)
+              $graphics.Dispose()
+              if ($ok) {
+                $path = "$PWD\style-$style.png"
+                $bitmap.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+                $shot = $path
+              }
+              $bitmap.Dispose()
+              if (-not $shot) { Start-Sleep -Milliseconds 500 }
+            }
+            $process.WaitForExit()
+            if ($shot) {
+              Write-Output "::notice title=YawaFpsHub::стиль $style снят"
+            } else {
+              Write-Output "::warning title=YawaFpsHub::стиль $style не снят"
+            }
+          }
+
+      - name: Скриншоты демо (эталон)
+        # Эталон интерфейса — HTML-прототип: снимаем его тем же Edge, что стоит на раннере,
+        # чтобы сравнивать с собранным приложением кадр в кадр, а не на глаз.
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          # Размер кадра берём у скриншота приложения: на раннере окно ограничено
+          # рабочим столом, и сравнивать можно только кадры одинакового размера.
+          $demoWidth = 1280
+          $demoHeight = 800
+          if (Test-Path "screenshot-dashboard.png") {
+            Add-Type -AssemblyName System.Drawing
+            $probe = [System.Drawing.Image]::FromFile("$PWD\screenshot-dashboard.png")
+            $demoWidth = $probe.Width
+            $demoHeight = $probe.Height
+            $probe.Dispose()
+          }
+          Write-Output "::notice title=YawaFpsHub::эталон снимается $($demoWidth)x$($demoHeight)"
+          $python = (Get-Command python).Source
+          $server = Start-Process -FilePath $python -ArgumentList "-m","http.server","8765","--bind","127.0.0.1","--directory","ui-prototype" -PassThru
+          Start-Sleep -Seconds 2
+          $edge = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+          if (-not (Test-Path $edge)) { $edge = "C:\Program Files\Microsoft\Edge\Application\msedge.exe" }
+          foreach ($view in @("dashboard", "sensors", "overlay", "settings")) {
+            $url = "http://127.0.0.1:8765/index.html?view=$view&nofx=1&shot=1"
+            $shot = "demo-$view.png"
+            # Первый запуск Edge бывает медленным: даём две попытки, иначе часть
+            # эталонов теряется и сравнивать не с чем.
+            for ($attempt = 0; $attempt -lt 2 -and -not (Test-Path $shot); $attempt++) {
+              Start-Process -FilePath $edge -ArgumentList "--headless=new","--disable-gpu","--hide-scrollbars","--no-first-run","--window-size=$demoWidth,$demoHeight","--virtual-time-budget=6000","--screenshot=$PWD\$shot",$url -Wait
+            }
+            if (Test-Path $shot) {
+              Write-Output "::notice title=YawaFpsHub::демо $view снято"
+            } else {
+              Write-Output "::warning title=YawaFpsHub::демо $view не снято"
+            }
+            # Высокий снимок: по нему снимаем настоящие высоты карточек демо,
+            # чтобы приложение повторяло их и прокручивало содержимое, а не сжимало.
+            $tall = "demo-$view-tall.png"
+            Start-Process -FilePath $edge -ArgumentList "--headless=new","--disable-gpu","--hide-scrollbars","--no-first-run","--window-size=$demoWidth,2400","--virtual-time-budget=6000","--screenshot=$PWD\$tall",$url -Wait
+          }
+          Stop-Process -Id $server.Id -Force
+
+      - name: Опубликовать скриншоты
+        # Два прогона на один коммит (push и pull_request) соревнуются за ветку ci-logs,
+        # поэтому публикует только push-прогон: второй попытке push не хватает fast-forward.
+        if: github.event_name == 'push' && hashFiles('screenshot-*.png') != ''
+        shell: bash
+        run: |
+          # Сначала убираем свежие PNG из рабочего дерева: в ветке ci-logs они уже есть,
+          # и checkout отказывается перезаписывать неотслеживаемые файлы.
+          mkdir -p /tmp/shots
+          mv screenshot-*.png /tmp/shots/ 2>/dev/null || true
+          mv style-*.png /tmp/shots/ 2>/dev/null || true
+          mv demo-*.png /tmp/shots/ 2>/dev/null || true
+          if [ -d shots ]; then mv shots/*.png /tmp/shots/ 2>/dev/null || true; fi
+          git config user.email "ci@yawafpshub.local"
+          git config user.name "ci"
+          git checkout -B ci-logs
+          cp /tmp/shots/*.png .
+          git add -f ./*.png
+          git commit -m "screenshots" || true
+          git push -f origin ci-logs
+
+      - name: Прогон диагностики
+        shell: pwsh
+        run: |
+          $output = & .\build\tools\probe\Release\yawa-probe.exe --seconds 3 --interval 1000 2>&1
+          foreach ($line in $output) {
+            if ("$line".Trim().Length -eq 0) { continue }
+            Write-Host $line
+            Write-Output "::notice title=yawa-probe::$line"
+          }
+
+      - name: Артефакты
+        uses: actions/upload-artifact@v4
+        with:
+          name: YawaFpsHub-win64
+          path: |
+            build/**/YawaFpsHub.exe
+            build/**/YawaFpsHub.ini
+            build/tools/probe/Release/yawa-probe.exe

@@ -1,0 +1,1066 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YawaFpsHub — мониторинг FPS и системы</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-grid" viewBox="0 0 24 24">
+    <path d="M4 4h7v7H4V4Zm9 0h7v4h-7V4ZM4 13h7v7H4v-7Zm9-3h7v10h-7V10Z"/>
+  </symbol>
+  <symbol id="i-pulse" viewBox="0 0 24 24">
+    <path d="M2.5 13h4l2.2-6.4 4 12.2 2.6-7.4 1.7 3.6h5" fill="none" stroke="currentColor" stroke-width="1.7"
+      stroke-linecap="round" stroke-linejoin="round"/>
+  </symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24">
+    <path d="M12 3.2 21 8l-9 4.8L3 8l9-4.8Zm6.6 8.3L21 13l-9 4.8L3 13l2.4-1.5L12 15.7l6.6-4.2Z"/>
+  </symbol>
+  <symbol id="i-sliders" viewBox="0 0 24 24">
+    <path d="M5 4h2v6H5V4Zm0 10h2v6H5v-6ZM11 4h2v3h-2V4Zm0 7h2v9h-2v-9ZM17 4h2v9h-2V4Zm0 13h2v3h-2v-3Z"/>
+    <path d="M3 11h6M9 8h6M15 14h6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24">
+    <path d="M8 5h3v14H8V5Zm5 0h3v14h-3V5Z"/>
+  </symbol>
+  <symbol id="i-play" viewBox="0 0 24 24">
+    <path d="M8 5.5 19 12 8 18.5v-13Z"/>
+  </symbol>
+  <symbol id="i-search" viewBox="0 0 24 24">
+    <path d="M10.5 4a6.5 6.5 0 1 0 4.1 11.5l4.7 4.7 1.4-1.4-4.7-4.7A6.5 6.5 0 0 0 10.5 4Zm0 2a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Z"/>
+  </symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24">
+    <path d="M12 5c5 0 9 4.5 9 7s-4 7-9 7-9-4.5-9-7 4-7 9-7Zm0 2c-3.6 0-6.7 3.1-7.7 5 1 1.9 4.1 5 7.7 5s6.7-3.1 7.7-5c-1-1.9-4.1-5-7.7-5Zm0 1.8a3.2 3.2 0 1 1 0 6.4 3.2 3.2 0 0 1 0-6.4Z"/>
+  </symbol>
+  <symbol id="i-chip" viewBox="0 0 24 24">
+    <path d="M8 3h2v2h4V3h2v2h3v3h2v2h-2v4h2v2h-2v3h-3v2h-2v-2h-4v2H8v-2H5v-3H3v-2h2v-4H3V9h2V5h3V3Zm1 5v8h6V8H9Z"/>
+  </symbol>
+  <symbol id="i-bolt" viewBox="0 0 24 24">
+    <path d="M13.5 2 4 13.4h5.6L9.4 22 19 10.2h-5.9L13.5 2Z"/>
+  </symbol>
+</svg>
+
+<div class="shell">
+  <aside class="rail">
+    <a class="rail__brand" href="#dashboard" aria-label="YawaFpsHub">
+      <span class="brand__glyph">Y</span>
+      <span class="brand__pulse"></span>
+    </a>
+
+    <nav class="rail__nav" aria-label="Разделы">
+      <button class="rail__item is-active" data-view="dashboard" aria-label="Обзор" title="Обзор">
+        <svg class="icon"><use href="#i-grid"/></svg>
+      </button>
+      <button class="rail__item" data-view="sensors" aria-label="Датчики" title="Датчики">
+        <svg class="icon"><use href="#i-pulse"/></svg>
+      </button>
+      <button class="rail__item" data-view="overlay" aria-label="Оверлей" title="Оверлей">
+        <svg class="icon"><use href="#i-layers"/></svg>
+      </button>
+      <button class="rail__item" data-view="settings" aria-label="Настройки" title="Настройки">
+        <svg class="icon"><use href="#i-sliders"/></svg>
+      </button>
+    </nav>
+
+    <div class="rail__foot">
+      <span class="rail__live" id="railLive" title="Сбор данных активен"></span>
+      <span class="rail__label">v0.1</span>
+    </div>
+  </aside>
+
+  <div class="workspace">
+    <header class="topbar">
+      <div class="titles">
+        <p class="titles__eyebrow" id="viewEyebrow">Мониторинг</p>
+        <h1 class="titles__h1" id="viewTitle">Обзор</h1>
+      </div>
+
+      <div class="topbar__tools">
+        <span class="chip chip--source" title="Источники данных">
+          <i class="chip__dot"></i>ETW · PDH · DXGI
+        </span>
+        <span class="chip chip--quiet" id="intervalChip">Опрос 1000 мс</span>
+        <button class="btn btn--ghost" id="pauseBtn" type="button">
+          <svg class="icon icon--sm"><use href="#i-pause"/></svg>
+          <span id="pauseLabel">Пауза</span>
+        </button>
+        <div class="swatches" role="group" aria-label="Акцентный цвет">
+          <button class="swatch is-active" data-accent="mint" style="--c:#5ef29b" aria-label="Мята"></button>
+          <button class="swatch" data-accent="ice" style="--c:#6aa8ff" aria-label="Лёд"></button>
+          <button class="swatch" data-accent="violet" style="--c:#b47bff" aria-label="Фиалка"></button>
+          <button class="swatch" data-accent="amber" style="--c:#ffb347" aria-label="Янтарь"></button>
+          <button class="swatch" data-accent="coral" style="--c:#ff6f6f" aria-label="Коралл"></button>
+        </div>
+      </div>
+    </header>
+
+    <main class="content">
+
+      <section class="view is-active" data-view="dashboard">
+        <div class="grid">
+
+          <article class="card card--fps span-8">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Кадры в секунду</h2>
+                <p class="card__sub"><span id="detectedGame">Cyberpunk 2077</span><span class="dot-sep"></span>DX12<span class="dot-sep"></span>2560 × 1440</p>
+              </div>
+              <span class="tag tag--live"><i></i><span id="liveLabel">LIVE</span></span>
+            </header>
+
+            <div class="fps-block">
+              <div class="fps-main">
+                <div class="fps-value">
+                  <span class="fps-value__num" data-metric="fps">142</span>
+                  <span class="fps-value__unit">fps</span>
+                </div>
+                <div class="fps-meta">
+                  <span class="delta" data-metric="fpsDelta">+4,2%</span>
+                  <span class="fps-meta__note">к среднему за сессию</span>
+                </div>
+              </div>
+
+              <dl class="fps-stats">
+                <div class="fps-stat">
+                  <dt>1% low</dt>
+                  <dd data-metric="fpsLow1">118</dd>
+                </div>
+                <div class="fps-stat">
+                  <dt>0.1% low</dt>
+                  <dd data-metric="fpsLow01">96</dd>
+                </div>
+                <div class="fps-stat">
+                  <dt>Frame time</dt>
+                  <dd data-metric="frameMs">7,04 <small>мс</small></dd>
+                </div>
+                <div class="fps-stat">
+                  <dt>Пропущено</dt>
+                  <dd data-metric="dropped">0,3 <small>%</small></dd>
+                </div>
+              </dl>
+            </div>
+
+            <div class="chart-wrap chart-wrap--frames">
+              <canvas id="frameChart"></canvas>
+            </div>
+          </article>
+
+          <article class="card span-4">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Сессия</h2>
+                <p class="card__sub">Профиль включается по запуску игры</p>
+              </div>
+              <span class="tag">01:24:37</span>
+            </header>
+
+            <ul class="metrics-list">
+              <li><span>Длительность</span><b data-metric="sessionTime">01:24:37</b></li>
+              <li><span>Отрисовано кадров</span><b data-metric="framesTotal">712 428</b></li>
+              <li><span>Пропущено кадров</span><b data-metric="framesLost">1 204</b></li>
+              <li><span>Средний FPS</span><b data-metric="fpsAvg">138,4</b></li>
+              <li><span>Медианный frame time</span><b data-metric="frameMedian">7,2 мс</b></li>
+            </ul>
+
+            <div class="budget">
+              <div class="budget__head">
+                <span>Бюджет кадра 120 Гц</span>
+                <b data-metric="budget">84%</b>
+              </div>
+              <div class="budget__bar"><span data-bar="budget" style="width:84%"></span></div>
+              <p class="budget__note" id="budgetNote">1,29 мс свободно до 8,33 мс</p>
+            </div>
+          </article>
+
+          <article class="card span-4">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Процессор</h2>
+                <p class="card__sub">Ryzen 7 7800X3D · 8 ядер / 16 потоков</p>
+              </div>
+            </header>
+
+            <div class="gauge-row">
+              <div class="gauge" style="--p:44; --size:108px" data-gauge="cpu">
+                <svg viewBox="0 0 120 120" class="gauge__svg" aria-hidden="true">
+                  <circle class="gauge__track" cx="60" cy="60" r="52"/>
+                  <circle class="gauge__value" cx="60" cy="60" r="52"/>
+                </svg>
+                <div class="gauge__text">
+                  <b data-metric="cpu">44</b><span>%</span>
+                  <em>загрузка</em>
+                </div>
+              </div>
+              <ul class="kv">
+                <li><span>Температура</span><b data-metric="cpuTemp">64 °C</b></li>
+                <li><span>Частота</span><b data-metric="cpuClock">4 925 МГц</b></li>
+                <li><span>Питание</span><b data-metric="cpuPower">78 Вт</b></li>
+                <li><span>Поток игры</span><b data-metric="cpuGameThread">62%</b></li>
+              </ul>
+            </div>
+
+            <div class="cores" id="coreBars" aria-label="Загрузка по ядрам"></div>
+            <div class="cores__scale"><span>0%</span><span>100%</span></div>
+          </article>
+
+          <article class="card span-4">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Видеокарта</h2>
+                <p class="card__sub">
+                  <span id="gpuName">GeForce RTX 4080</span>
+                  <span class="dot-sep"></span>
+                  <span id="gpuMemory">16 ГБ</span>
+                </p>
+              </div>
+              <label class="gpu-picker">
+                <svg class="icon icon--sm"><use href="#i-chip"/></svg>
+                <select id="gpuSelect" aria-label="Активный адаптер">
+                  <option value="0">GeForce RTX 4080</option>
+                  <option value="1">AMD Radeon 780M</option>
+                </select>
+              </label>
+            </header>
+
+            <div class="gauge-row">
+              <div class="gauge" style="--p:93; --size:108px" data-gauge="gpu">
+                <svg viewBox="0 0 120 120" class="gauge__svg" aria-hidden="true">
+                  <circle class="gauge__track" cx="60" cy="60" r="52"/>
+                  <circle class="gauge__value" cx="60" cy="60" r="52"/>
+                </svg>
+                <div class="gauge__text">
+                  <b data-metric="gpu">93</b><span>%</span>
+                  <em>загрузка</em>
+                </div>
+              </div>
+              <ul class="kv">
+                <li><span>Температура</span><b data-metric="gpuTemp">71 °C</b></li>
+                <li><span>Частота ядра</span><b data-metric="gpuClock">2 835 МГц</b></li>
+                <li><span>Питание</span><b data-metric="gpuPower">312 Вт</b></li>
+                <li><span>Вентилятор</span><b data-metric="gpuFan">1 940 об/мин</b></li>
+              </ul>
+            </div>
+
+            <div class="meter">
+              <div class="meter__head">
+                <span>Видеопамять</span>
+                <b><span data-metric="vramUsed">9,6</span> / <span id="vramTotal">16</span> ГБ</b>
+              </div>
+              <div class="meter__bar"><span data-bar="vram" style="width:60%"></span></div>
+            </div>
+          </article>
+
+          <article class="card span-4">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Память</h2>
+                <p class="card__sub">DDR5-6000 · 64 ГБ, два канала</p>
+              </div>
+            </header>
+
+            <div class="mem-total">
+              <b data-metric="ramUsed">21,4</b>
+              <span>/ 64 ГБ занято</span>
+            </div>
+
+            <div class="mem-bar" role="img" aria-label="Распределение памяти">
+              <span class="mem-bar__used" data-bar="ramUsed" style="width:33%"></span>
+              <span class="mem-bar__cache" data-bar="ramCache" style="width:18%"></span>
+            </div>
+
+            <ul class="legend">
+              <li><i style="background:var(--accent)"></i>Приложения <b data-metric="ramUsed">21,4</b></li>
+              <li><i style="background:var(--accent-soft)"></i>Кэш <b data-metric="ramCache">11,6</b></li>
+              <li><i style="background:var(--line-strong)"></i>Свободно <b data-metric="ramFree">31,0</b></li>
+            </ul>
+
+            <ul class="metrics-list metrics-list--tight">
+              <li><span>Частота</span><b data-metric="ramClock">6 000 МГц</b></li>
+              <li><span>Своп-файл</span><b data-metric="pageFile">0,9 ГБ</b></li>
+              <li><span>Занято процессом</span><b data-metric="procRam">24,6 МБ</b></li>
+            </ul>
+          </article>
+
+          <article class="card span-8">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Производительность</h2>
+                <p class="card__sub">Последние 60 секунд</p>
+              </div>
+              <div class="chart-legend" id="perfLegend">
+                <button class="legend-chip is-on" data-series="cpu" style="--c:#5ef29b">CPU</button>
+                <button class="legend-chip is-on" data-series="gpu" style="--c:#6aa8ff">GPU</button>
+                <button class="legend-chip is-on" data-series="ram" style="--c:#b47bff">ОЗУ</button>
+              </div>
+            </header>
+            <div class="chart-wrap chart-wrap--perf">
+              <canvas id="perfChart"></canvas>
+            </div>
+          </article>
+
+          <article class="card span-4">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Диски и сеть</h2>
+                <p class="card__sub">NVMe · Ethernet 1 Гбит</p>
+              </div>
+            </header>
+
+            <div class="io-row">
+              <div class="io-row__top"><span>Чтение</span><b data-metric="diskRead">184 МБ/с</b></div>
+              <canvas class="spark" data-series="diskRead"></canvas>
+            </div>
+            <div class="io-row">
+              <div class="io-row__top"><span>Запись</span><b data-metric="diskWrite">42 МБ/с</b></div>
+              <canvas class="spark" data-series="diskWrite"></canvas>
+            </div>
+            <div class="io-row">
+              <div class="io-row__top"><span>Сеть ↓</span><b data-metric="netDown">2,4 Мбит/с</b></div>
+              <canvas class="spark" data-series="netDown"></canvas>
+            </div>
+            <div class="io-row">
+              <div class="io-row__top"><span>Сеть ↑</span><b data-metric="netUp">0,6 Мбит/с</b></div>
+              <canvas class="spark" data-series="netUp"></canvas>
+            </div>
+          </article>
+
+          <article class="card span-6">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Процессы</h2>
+                <p class="card__sub">Ранжировано по загрузке процессора</p>
+              </div>
+              <span class="tag">5 из 214</span>
+            </header>
+            <ul class="proc-list" id="procList"></ul>
+          </article>
+
+          <article class="card span-3">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Температуры</h2>
+                <p class="card__sub">Текущие значения</p>
+              </div>
+            </header>
+            <ul class="temp-list">
+              <li>
+                <span>CPU</span>
+                <div class="temp-bar"><i data-bar="tempCpu" style="width:64%"></i></div>
+                <b data-metric="cpuTemp">64 °C</b>
+              </li>
+              <li>
+                <span>GPU</span>
+                <div class="temp-bar"><i data-bar="tempGpu" style="width:71%"></i></div>
+                <b data-metric="gpuTemp">71 °C</b>
+              </li>
+              <li>
+                <span>NVMe</span>
+                <div class="temp-bar"><i data-bar="tempSsd" style="width:48%"></i></div>
+                <b data-metric="ssdTemp">48 °C</b>
+              </li>
+              <li>
+                <span>Чипсет</span>
+                <div class="temp-bar"><i data-bar="tempChipset" style="width:52%"></i></div>
+                <b data-metric="chipsetTemp">52 °C</b>
+              </li>
+            </ul>
+          </article>
+
+          <article class="card span-3">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Уведомления</h2>
+                <p class="card__sub">Правила сработали</p>
+              </div>
+            </header>
+            <ul class="alerts">
+              <li class="alert">
+                <span class="alert__dot alert__dot--warn"></span>
+                <div>
+                  <b>Просадка 1% low</b>
+                  <p>118 fps при цели 144 — Shadow quality</p>
+                </div>
+                <time>12:04</time>
+              </li>
+              <li class="alert">
+                <span class="alert__dot alert__dot--ok"></span>
+                <div>
+                  <b>Профиль применён</b>
+                  <p>Cyberpunk 2077 · оверлей включён</p>
+                </div>
+                <time>10:40</time>
+              </li>
+              <li class="alert">
+                <span class="alert__dot"></span>
+                <div>
+                  <b>ETW-сессия запущена</b>
+                  <p>Права администратора получены</p>
+                </div>
+                <time>10:39</time>
+              </li>
+            </ul>
+          </article>
+
+        </div>
+      </section>
+
+      <section class="view" data-view="sensors">
+        <div class="toolbar">
+          <label class="search">
+            <svg class="icon icon--sm"><use href="#i-search"/></svg>
+            <input type="search" id="sensorSearch" placeholder="Найти датчик: температура, частота, VRAM…" autocomplete="off">
+          </label>
+          <div class="filters" id="sensorFilters">
+            <button class="filter is-active" data-group="all">Все</button>
+            <button class="filter" data-group="fps">Кадры</button>
+            <button class="filter" data-group="cpu">Процессор</button>
+            <button class="filter" data-group="gpu">Видеокарта</button>
+            <button class="filter" data-group="mem">Память</button>
+            <button class="filter" data-group="io">Диски и сеть</button>
+            <button class="filter" data-group="sys">Система</button>
+          </div>
+          <label class="switch switch--inline">
+            <input type="checkbox" id="onlyPinned">
+            <span class="switch__track"><span class="switch__knob"></span></span>
+            <span class="switch__text">Только в оверлее</span>
+          </label>
+        </div>
+
+        <div class="card card--table">
+          <div class="sensor-head">
+            <span>Датчик</span>
+            <span>Значение</span>
+            <span>Мин</span>
+            <span>Среднее</span>
+            <span>Макс</span>
+            <span>60 с</span>
+            <span></span>
+          </div>
+          <div class="sensor-viewport" id="sensorViewport">
+            <div id="sensorRows"></div>
+            <p class="empty" id="sensorEmpty" hidden>Ничего не найдено. Измените запрос или фильтр.</p>
+          </div>
+          <p class="footnote footnote--table">Источники: PDH для счётчиков GPU, NtQuerySystemInformation для CPU и памяти,
+            D3DKMT для температур, DXGI для видеопамяти. Значения обновляются с выбранным интервалом опроса.</p>
+        </div>
+      </section>
+
+      <section class="view" data-view="overlay">
+        <div class="grid">
+                    <article class="card span-7">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Оверлей поверх игры</h2>
+                <p class="card__sub">Предпросмотр. В приложении — отдельное topmost-окно</p>
+              </div>
+              <span class="tag tag--live"><i></i>F10</span>
+            </header>
+
+            <div class="game" id="gameScene">
+              <div class="game__sky"></div>
+              <div class="game__sun"></div>
+              <div class="game__city"></div>
+              <div class="game__ground"></div>
+
+              <div class="hud">
+                <div class="hud__ammo"><b>24</b><span>/ 96</span></div>
+                <div class="hud__health"><i></i></div>
+                <div class="hud__cross"></div>
+                <div class="hud__minimap"></div>
+                <div class="hud__quest">Задание · Погоня в Найт-Сити</div>
+              </div>
+
+              <div class="osd" id="osdPreview">
+                <div class="osd__row" data-osd-item="fps">
+                  <span class="osd__key">FPS</span>
+                  <b class="osd__val" data-metric="fps">142</b>
+                  <span class="osd__unit">1% low</span>
+                  <b class="osd__val osd__val--sm" data-metric="fpsLow1">118</b>
+                </div>
+                <div class="osd__row" data-osd-item="cpu">
+                  <span class="osd__key">CPU</span>
+                  <b class="osd__val osd__val--sm" data-metric="cpu">44</b>
+                  <span class="osd__unit">°C</span>
+                  <b class="osd__val osd__val--sm" data-metric="cpuTemp">64</b>
+                </div>
+                <div class="osd__row" data-osd-item="gpu">
+                  <span class="osd__key">GPU</span>
+                  <b class="osd__val osd__val--sm" data-metric="gpu">93</b>
+                  <span class="osd__unit">°C</span>
+                  <b class="osd__val osd__val--sm" data-metric="gpuTemp">71</b>
+                </div>
+                <div class="osd__row" data-osd-item="ram">
+                  <span class="osd__key">RAM</span>
+                  <b class="osd__val osd__val--sm" data-metric="ramUsed">21,4</b>
+                  <span class="osd__unit">ГБ</span>
+                </div>
+                <div class="osd__row is-hidden" data-osd-item="vram">
+                  <span class="osd__key">VRAM</span>
+                  <b class="osd__val osd__val--sm" data-metric="vramUsed">9,6</b>
+                  <span class="osd__unit">ГБ</span>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article class="card span-5">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Настройка оверлея</h2>
+                <p class="card__sub">Изменения видны сразу в предпросмотре</p>
+              </div>
+            </header>
+
+            <div class="field">
+              <span class="field__label">Положение</span>
+              <div class="segmented segmented--icons" id="osdPosition">
+                <button class="is-active" data-pos="tl" aria-label="Слева сверху">↖</button>
+                <button data-pos="tr" aria-label="Справа сверху">↗</button>
+                <button data-pos="bl" aria-label="Слева снизу">↙</button>
+                <button data-pos="br" aria-label="Справа снизу">↘</button>
+              </div>
+            </div>
+
+            <div class="field">
+              <span class="field__label">Вид</span>
+              <div class="segmented" id="osdLayout">
+                <button class="is-active" data-layout="plates">Плитки</button>
+                <button data-layout="line">Строка</button>
+              </div>
+            </div>
+
+            <div class="field">
+              <div class="field__label-row">
+                <span class="field__label">Масштаб</span>
+                <b id="osdScaleValue">100%</b>
+              </div>
+              <input class="range" type="range" id="osdScale" min="70" max="160" step="5" value="100">
+            </div>
+
+            <div class="field">
+              <div class="field__label-row">
+                <span class="field__label">Прозрачность фона</span>
+                <b id="osdOpacityValue">72%</b>
+              </div>
+              <input class="range" type="range" id="osdOpacity" min="0" max="100" step="1" value="72">
+            </div>
+
+            <div class="field">
+              <span class="field__label">Оформление</span>
+              <div class="segmented segmented--chips" id="osdChrome">
+                <button class="is-active" data-chrome="background" type="button">Фон</button>
+                <button class="is-active" data-chrome="border" type="button">Рамка</button>
+                <button class="is-active" data-chrome="shadow" type="button">Тень</button>
+              </div>
+            </div>
+
+            <div class="field">
+              <div class="field__label-row">
+                <span class="field__label">Углы</span>
+                <b id="osdRadiusValue">8 px</b>
+              </div>
+              <input class="range" type="range" id="osdRadius" min="0" max="24" step="1" value="8">
+            </div>
+
+            <div class="field">
+              <span class="field__label">Шрифт</span>
+              <div class="segmented segmented--chips" id="osdFont">
+                <button class="is-active" data-font="0" type="button">Сего</button>
+                <button data-font="1" type="button">Моно</button>
+                <button data-font="2" type="button">Узкий</button>
+                <button data-font="3" type="button">Плотный</button>
+              </div>
+            </div>
+
+            <div class="field field--row">
+              <div class="segmented segmented--chips segmented--tight">
+                <button data-style-toggle="bold" type="button">Ж</button>
+                <button data-style-toggle="italic" type="button">К</button>
+              </div>
+              <div class="segmented segmented--chips" id="osdOutline">
+                <button class="is-active" data-outline="0" type="button">Без обводки</button>
+                <button data-outline="1" type="button">1 px</button>
+                <button data-outline="2" type="button">2 px</button>
+                <button data-outline="3" type="button">3 px</button>
+              </div>
+            </div>
+
+            <div class="field">
+              <div class="field__label-row">
+                <span class="field__label">Смещение</span>
+                <b id="osdOffsetValue">0 / 0 px</b>
+              </div>
+              <div class="steppers">
+                <div class="stepper">
+                  <span>X</span>
+                  <button type="button" data-offset="x" data-delta="-10" aria-label="Сдвинуть влево">−</button>
+                  <button type="button" data-offset="x" data-delta="10" aria-label="Сдвинуть вправо">+</button>
+                </div>
+                <div class="stepper">
+                  <span>Y</span>
+                  <button type="button" data-offset="y" data-delta="-10" aria-label="Сдвинуть вверх">−</button>
+                  <button type="button" data-offset="y" data-delta="10" aria-label="Сдвинуть вниз">+</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="field">
+              <span class="field__label">Состав</span>
+              <ul class="toggles">
+                <li>
+                  <label class="switch">
+                    <input type="checkbox" data-osd-toggle="cpu" checked>
+                    <span class="switch__track"><span class="switch__knob"></span></span>
+                    <span class="switch__text">Процессор, температура</span>
+                  </label>
+                </li>
+                <li>
+                  <label class="switch">
+                    <input type="checkbox" data-osd-toggle="gpu" checked>
+                    <span class="switch__track"><span class="switch__knob"></span></span>
+                    <span class="switch__text">Видеокарта, температура</span>
+                  </label>
+                </li>
+                <li>
+                  <label class="switch">
+                    <input type="checkbox" data-osd-toggle="ram" checked>
+                    <span class="switch__track"><span class="switch__knob"></span></span>
+                    <span class="switch__text">Занятая память</span>
+                  </label>
+                </li>
+                <li>
+                  <label class="switch">
+                    <input type="checkbox" data-osd-toggle="vram">
+                    <span class="switch__track"><span class="switch__knob"></span></span>
+                    <span class="switch__text">Видеопамять</span>
+                  </label>
+                </li>
+              </ul>
+            </div>
+
+            <div class="field field--row">
+              <div>
+                <span class="field__label">Горячая клавиша</span>
+                <p class="field__hint">Показать или скрыть оверлей</p>
+              </div>
+              <button class="keycap" type="button">F10</button>
+            </div>
+          </article>
+
+
+                    <article class="card span-7">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Стиль оформления</h2>
+                <p class="card__sub">Стиль не мешает читать показатели в динамичной сцене</p>
+              </div>
+            </header>
+
+            <div class="style-grid" id="osdStyles">
+              <button class="style-tile" type="button" data-style="neon">
+                <span class="style-tile__preview" data-style="neon">
+                  <b>142</b><i>FPS</i><em>46%</em>
+                </span>
+                <span class="style-tile__name">Неон<em>неоновая сетка</em></span>
+              </button>
+              <button class="style-tile" type="button" data-style="rtss">
+                <span class="style-tile__preview" data-style="rtss">
+                  <b>142</b><i>FPS</i><em>46%</em>
+                </span>
+                <span class="style-tile__name">RTSS<em>как RivaTuner</em></span>
+              </button>
+              <button class="style-tile is-active" type="button" data-style="frosted">
+                <span class="style-tile__preview" data-style="frosted">
+                  <b>142</b><i>FPS</i><em>46%</em>
+                </span>
+                <span class="style-tile__name">Стекло<em>матовое стекло</em></span>
+              </button>
+              <button class="style-tile" type="button" data-style="terminal">
+                <span class="style-tile__preview" data-style="terminal">
+                  <b>142</b><i>FPS</i><em>46%</em>
+                </span>
+                <span class="style-tile__name">Терминал<em>янтарный терминал</em></span>
+              </button>
+              <button class="style-tile" type="button" data-style="cyber">
+                <span class="style-tile__preview" data-style="cyber">
+                  <b>142</b><i>FPS</i><em>46%</em>
+                </span>
+                <span class="style-tile__name">Кибер<em>пурпур и скобки</em></span>
+              </button>
+              <button class="style-tile" type="button" data-style="mono">
+                <span class="style-tile__preview" data-style="mono">
+                  <b>142</b><i>FPS</i><em>46%</em>
+                </span>
+                <span class="style-tile__name">Минимал<em>только текст</em></span>
+              </button>
+              <button class="style-tile" type="button" data-style="esport">
+                <span class="style-tile__preview" data-style="esport">
+                  <b>142</b><i>FPS</i><em>46%</em>
+                </span>
+                <span class="style-tile__name">Esport<em>турнирная полоса</em></span>
+              </button>
+              <button class="style-tile" type="button" data-style="retro">
+                <span class="style-tile__preview" data-style="retro">
+                  <b>142</b><i>FPS</i><em>46%</em>
+                </span>
+                <span class="style-tile__name">Retro<em>фосфорный CRT</em></span>
+              </button>
+            </div>
+          </article>
+
+          <article class="card span-5">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Подписи полей</h2>
+                <p class="card__sub">Свои названия вместо CPU, GPU, RAM</p>
+              </div>
+              <button class="btn btn--ghost" id="resetLabels" type="button">Сбросить</button>
+            </header>
+
+            <ul class="label-list">
+              <li>
+                <span class="label-list__name">Процессор</span>
+                <input class="label-input" data-label="cpu" maxlength="10" value="CPU" aria-label="Подпись процессора">
+              </li>
+              <li>
+                <span class="label-list__name">Видеокарта</span>
+                <input class="label-input" data-label="gpu" maxlength="10" value="GPU" aria-label="Подпись видеокарты">
+              </li>
+              <li>
+                <span class="label-list__name">Память</span>
+                <input class="label-input" data-label="ram" maxlength="10" value="RAM" aria-label="Подпись памяти">
+              </li>
+              <li>
+                <span class="label-list__name">Видеопамять</span>
+                <input class="label-input" data-label="vram" maxlength="10" value="VRAM" aria-label="Подпись видеопамяти">
+              </li>
+              <li>
+                <span class="label-list__name">Кадры</span>
+                <input class="label-input" data-label="fps" maxlength="10" value="FPS" aria-label="Подпись кадров">
+              </li>
+            </ul>
+
+            <p class="field__hint">Подписи сохраняются в YawaFpsHub.ini и применяются к оверлею и к записи сессии в CSV.</p>
+          </article>
+
+          <article class="card span-6">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Пресеты</h2>
+                <p class="card__sub">Готовые наборы вместо ручной настройки</p>
+              </div>
+            </header>
+
+            <ul class="presets">
+              <li class="preset">
+                <div>
+                  <b>Минимум</b>
+                  <p>Только FPS и 1% low, одна строка в углу</p>
+                </div>
+                <button class="btn btn--ghost" type="button" data-preset="minimal">Включить</button>
+                <span class="tag tag--live" hidden><i></i>активен</span>
+              </li>
+              <li class="preset is-active">
+                <div>
+                  <b>Стандарт</b>
+                  <p>FPS, процессор и видеокарта с температурами</p>
+                </div>
+                <button class="btn btn--ghost" type="button" data-preset="standard" hidden>Включить</button>
+                <span class="tag tag--live"><i></i>активен</span>
+              </li>
+              <li class="preset">
+                <div>
+                  <b>Диагностика</b>
+                  <p>Всё, включая видеопамять, frame time и пропуски</p>
+                </div>
+                <button class="btn btn--ghost" type="button" data-preset="diagnostics">Включить</button>
+                <span class="tag tag--live" hidden><i></i>активен</span>
+              </li>
+            </ul>
+          </article>
+
+          <article class="card span-6">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Горячие клавиши</h2>
+                <p class="card__sub">Работают поверх игры, конфликты проверяются</p>
+              </div>
+            </header>
+
+            <ul class="hotkeys">
+              <li><span>Показать или скрыть оверлей</span><button class="keycap" type="button">F10</button></li>
+              <li><span>Сменить положение</span><button class="keycap" type="button">F11</button></li>
+              <li><span>Открыть окно мониторинга</span><button class="keycap" type="button">F12</button></li>
+              <li><span>Снимок показателей в CSV</span><button class="keycap" type="button">Shift + F10</button></li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="view" data-view="settings">
+        <div class="settings-grid">
+
+          <article class="card span-6">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Сбор данных</h2>
+                <p class="card__sub">Как часто и что именно измеряем</p>
+              </div>
+            </header>
+
+            <div class="field">
+              <span class="field__label">Интервал опроса</span>
+              <div class="segmented" id="intervalSelect">
+                <button data-interval="500">500 мс</button>
+                <button class="is-active" data-interval="1000">1000 мс</button>
+                <button data-interval="2000">2000 мс</button>
+              </div>
+              <p class="field__hint">1000 мс — как в диспетчере задач. Более частый опрос точнее ловит просадки, но нагружает систему.</p>
+            </div>
+
+            <div class="field">
+              <div class="field__label-row">
+                <span class="field__label">Сглаживание графиков</span>
+                <b id="smoothValue">40%</b>
+              </div>
+              <input class="range" type="range" id="smoothRange" min="0" max="90" step="10" value="40">
+            </div>
+
+            <ul class="toggles">
+              <li>
+                <label class="switch">
+                  <input type="checkbox" id="etwToggle" checked>
+                  <span class="switch__track"><span class="switch__knob"></span></span>
+                  <span class="switch__text">
+                    Сбор кадров через ETW
+                    <em>Требует прав администратора. Без них оверлей покажет только статистику DXGI.</em>
+                  </span>
+                </label>
+              </li>
+              <li>
+                <label class="switch">
+                  <input type="checkbox" id="idleToggle" checked>
+                  <span class="switch__track"><span class="switch__knob"></span></span>
+                  <span class="switch__text">
+                    Останавливать опрос вне игры
+                    <em>Экономит ресурсы: в простое приложение потребляет менее 0,1% CPU.</em>
+                  </span>
+                </label>
+              </li>
+              <li>
+                <label class="switch">
+                  <input type="checkbox" id="diskToggle" checked>
+                  <span class="switch__track"><span class="switch__knob"></span></span>
+                  <span class="switch__text">Накопители и сеть</span>
+                </label>
+              </li>
+            </ul>
+          </article>
+
+          <article class="card span-6">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Внешний вид</h2>
+                <p class="card__sub">Тема, акцент, плотность</p>
+              </div>
+            </header>
+
+            <div class="field">
+              <span class="field__label">Акцент</span>
+              <div class="accent-list" id="accentList">
+                <button class="accent-item is-active" data-accent="mint" style="--c:#5ef29b"><i></i>Мята</button>
+                <button class="accent-item" data-accent="ice" style="--c:#6aa8ff"><i></i>Лёд</button>
+                <button class="accent-item" data-accent="violet" style="--c:#b47bff"><i></i>Фиалка</button>
+                <button class="accent-item" data-accent="amber" style="--c:#ffb347"><i></i>Янтарь</button>
+                <button class="accent-item" data-accent="coral" style="--c:#ff6f6f"><i></i>Коралл</button>
+              </div>
+            </div>
+
+            <div class="field field--row">
+              <div>
+                <span class="field__label">Плотность интерфейса</span>
+                <p class="field__hint">Компактная умещает больше карточек на экран</p>
+              </div>
+              <div class="segmented" id="densitySelect">
+                <button class="is-active" data-density="normal">Обычная</button>
+                <button data-density="compact">Компактная</button>
+              </div>
+            </div>
+
+            <ul class="toggles">
+              <li>
+                <label class="switch">
+                  <input type="checkbox" id="animToggle" checked>
+                  <span class="switch__track"><span class="switch__knob"></span></span>
+                  <span class="switch__text">Плавная анимация графиков</span>
+                </label>
+              </li>
+              <li>
+                <label class="switch">
+                  <input type="checkbox" id="trayToggle" checked>
+                  <span class="switch__track"><span class="switch__knob"></span></span>
+                  <span class="switch__text">Сворачивать в трей при закрытии</span>
+                </label>
+              </li>
+            </ul>
+
+            <div class="field">
+              <span class="field__label">Уведомления</span>
+              <ul class="toggles">
+                <li>
+                  <label class="switch">
+                    <input type="checkbox" id="alertTemp" checked>
+                    <span class="switch__track"><span class="switch__knob"></span></span>
+                    <span class="switch__text">Перегрев GPU выше 83 °C</span>
+                  </label>
+                </li>
+                <li>
+                  <label class="switch">
+                    <input type="checkbox" id="alertLow" checked>
+                    <span class="switch__track"><span class="switch__knob"></span></span>
+                    <span class="switch__text">Просадка 1% low ниже 60 fps</span>
+                  </label>
+                </li>
+              </ul>
+            </div>
+          </article>
+
+          <article class="card span-6">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Портативность и данные</h2>
+                <p class="card__sub">Ничего не пишем в реестр и в сеть</p>
+              </div>
+            </header>
+
+            <ul class="metrics-list">
+              <li><span>Файл настроек</span><b class="mono">YawaFpsHub.ini</b></li>
+              <li><span>Расположение</span><b class="mono">рядом с exe</b></li>
+              <li><span>Запись в реестр</span><b>нет</b></li>
+              <li><span>Сетевые запросы</span><b>нет</b></li>
+              <li><span>История сессий</span><b class="mono">sessions\*.csv</b></li>
+            </ul>
+
+            <div class="actions">
+              <button class="btn" type="button">Экспорт сессии в CSV</button>
+              <button class="btn btn--ghost" type="button">Открыть папку настроек</button>
+              <button class="btn btn--danger" type="button">Сбросить настройки</button>
+            </div>
+          </article>
+
+
+
+
+          <article class="card span-6">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Горячие клавиши</h2>
+                <p class="card__sub">нажмите строку и введите клавишу · Esc — отмена · Delete — выключить</p>
+              </div>
+            </header>
+
+            <ul class="hotkeys" id="hotkeyList">
+              <li class="hotkey" data-hotkey="overlay" tabindex="0">
+                <span class="hotkey__name">Оверлей</span>
+                <span class="hotkey__key">F10</span>
+              </li>
+              <li class="hotkey" data-hotkey="position" tabindex="0">
+                <span class="hotkey__name">Положение оверлея</span>
+                <span class="hotkey__key">F11</span>
+              </li>
+              <li class="hotkey" data-hotkey="window" tabindex="0">
+                <span class="hotkey__name">Показать или скрыть окно</span>
+                <span class="hotkey__key">F12</span>
+              </li>
+            </ul>
+          </article>
+
+          <article class="card span-7">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Источники данных</h2>
+                <p class="card__sub">Проверка выполняется при запуске, недоступное честно помечается</p>
+              </div>
+              <span class="tag tag--live"><i></i>проверено</span>
+            </header>
+
+            <ul class="sources">
+              <li class="source">
+                <span class="source__name">ETW · кадры</span>
+                <span class="source__detail">Microsoft-Windows-DXGI, Present_Start</span>
+                <span class="source__state source__state--ok">работает</span>
+              </li>
+              <li class="source">
+                <span class="source__name">PDH · процессор, диски, сеть</span>
+                <span class="source__detail">те же счётчики, что у диспетчера задач</span>
+                <span class="source__state source__state--ok">работает</span>
+              </li>
+              <li class="source">
+                <span class="source__name">PDH · загрузка GPU</span>
+                <span class="source__detail">GPU Engine, движок 3D активного адаптера</span>
+                <span class="source__state source__state--ok">работает</span>
+              </li>
+              <li class="source">
+                <span class="source__name">DXGI · адаптеры и видеопамять</span>
+                <span class="source__detail">LUID, объём, QueryVideoMemoryInfo</span>
+                <span class="source__state source__state--ok">работает</span>
+              </li>
+              <li class="source">
+                <span class="source__name">NVML · температура и питание GPU</span>
+                <span class="source__detail">nvml.dll из драйвера NVIDIA</span>
+                <span class="source__state source__state--ok">работает</span>
+              </li>
+              <li class="source">
+                <span class="source__name">Датчики CPU и чипсета</span>
+                <span class="source__detail">ACPI-термозона и PDH, без MSR-драйвера</span>
+                <span class="source__state source__state--off">нет данных</span>
+              </li>
+            </ul>
+          </article>
+
+          <article class="card span-5">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">О программе</h2>
+                <p class="card__sub">YawaFpsHub 0.4 · Windows 10/11 x64</p>
+              </div>
+              <span class="tag tag--live"><i></i>0,4% CPU</span>
+            </header>
+
+            <ul class="metrics-list">
+              <li><span>Собственное потребление</span><b><span data-metric="procCpu">0,4</span>% CPU · <span data-metric="procRamFull">0,5</span></b></li>
+              <li><span>Потоков</span><b data-metric="procThreads">10</b></li>
+              <li><span>Активный адаптер</span><b id="activeGpuName">GeForce RTX 4080</b></li>
+              <li><span>ETW-сессия</span><b>работает</b></li>
+            </ul>
+          </article>
+
+        </div>
+
+        </section>
+
+    </main>
+
+    <footer class="statusbar">
+      <span class="statusbar__group">
+        <i class="statusbar__dot"></i>
+        <span id="statusSource">ETW-сессия активна · кадры DX12</span>
+      </span>
+      <span class="statusbar__group statusbar__group--metrics">
+        <span>CPU процесса <b data-metric="procCpu">0,3%</b></span>
+        <span>ОЗУ <b data-metric="procRamFull">24,6 МБ</b></span>
+        <span>Опрос <b id="statusInterval">1000 мс</b></span>
+        <span>Пропущено кадров <b data-metric="framesLost">1 204</b></span>
+      </span>
+    </footer>
+  </div>
+</div>
+
+<script src="js/sim.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
