@@ -98,11 +98,24 @@ bool valueKnown(MetricId id, const AppModel& model)
     }
 }
 
+// towupper в локали «C» не переводит кириллицу в верхний регистр, поэтому заголовки
+// групп переводим сами: это единственный способ получить капс без setlocale.
+wchar_t upperSymbol(wchar_t symbol)
+{
+    if (symbol >= L'а' && symbol <= L'я') {
+        return static_cast<wchar_t>(symbol - 0x20);
+    }
+    if (symbol == L'ё') {
+        return L'Ё';
+    }
+    return static_cast<wchar_t>(std::towupper(symbol));
+}
+
 std::wstring upperCopy(std::wstring_view text)
 {
     std::wstring result(text);
     for (wchar_t& symbol : result) {
-        symbol = static_cast<wchar_t>(std::towupper(symbol));
+        symbol = upperSymbol(symbol);
     }
     return result;
 }

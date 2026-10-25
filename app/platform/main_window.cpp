@@ -334,10 +334,11 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         return 0;
 
     case WM_GETMINMAXINFO: {
-        // Ниже этого размера карточки начинают наезжать друг на друга.
+        // Карточки больше не сжимаются под окно, а прокручиваются, поэтому минимум
+        // держим по шапке и рельсу: ниже окно становится нечитаемым.
         auto* info = reinterpret_cast<MINMAXINFO*>(lParam);
-        info->ptMinTrackSize.x = static_cast<LONG>(980.0f * m_dpiScale);
-        info->ptMinTrackSize.y = static_cast<LONG>(680.0f * m_dpiScale);
+        info->ptMinTrackSize.x = static_cast<LONG>(760.0f * m_dpiScale);
+        info->ptMinTrackSize.y = static_cast<LONG>(600.0f * m_dpiScale);
         return 0;
     }
 

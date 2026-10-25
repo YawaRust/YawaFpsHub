@@ -84,7 +84,9 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
     // тем же размером, поэтому картинки можно сравнивать попиксельно.
     int initialWidth = 0;
     int initialHeight = 0;
-    const std::size_t sizeFlag = arguments.find(L"--size=");
+    // Ищем последнее вхождение: CI передаёт базовый размер и может переопределить его
+    // снимком маленького окна.
+    const std::size_t sizeFlag = arguments.rfind(L"--size=");
     if (sizeFlag != std::wstring_view::npos) {
         const std::wstring_view value = arguments.substr(sizeFlag + 7);
         const std::size_t cross = value.find(L'x');
@@ -97,7 +99,7 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
     // --scroll=640: стартовый сдвиг содержимого. Нужен CI, чтобы снять прокрученный экран
     // и проверить, что содержимое действительно едет, а не просто обрезается.
     float initialScroll = 0.0f;
-    const std::size_t scrollFlag = arguments.find(L"--scroll=");
+    const std::size_t scrollFlag = arguments.rfind(L"--scroll=");
     if (scrollFlag != std::wstring_view::npos) {
         initialScroll = static_cast<float>(std::wcstol(
             std::wstring(arguments.substr(scrollFlag + 9)).c_str(), nullptr, 10));

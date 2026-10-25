@@ -501,7 +501,7 @@ void Renderer::drawSeries(const ChartSeries& series, const Rect& rect, float min
     if (series.filled) {
         // Мягкая подложка как в прототипе: насыщенность только у линии.
         if (ID2D1PathGeometry* area = buildPath(true)) {
-            if (ID2D1SolidColorBrush* brush = brushFor(series.color.withAlpha(0.16f))) {
+            if (ID2D1SolidColorBrush* brush = brushFor(series.color.withAlpha(0.09f))) {
                 m_target->FillGeometry(area, brush);
             }
             area->Release();
