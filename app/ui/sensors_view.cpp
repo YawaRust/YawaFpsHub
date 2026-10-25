@@ -21,9 +21,12 @@ constexpr std::array<std::wstring_view, 7> kFilterNames{ L"Все", L"Кадры
     L"Диски и сеть", L"Система" };
 
 constexpr float kToolbarHeight = 36.0f;
-// Компактные строки как в демо: на экран помещается в полтора раза больше датчиков,
-// и таблицу не приходится листать так часто.
-constexpr float kRowHeight = 34.0f;
+// Две строки панели, как в демо: поиск с фильтрами, под ним «только в оверлее».
+constexpr float kToolbarSecondRow = 26.0f;
+constexpr float kToolbarGap = 8.0f;
+// Компактные строки: на экран помещается больше датчиков, и таблицу не приходится
+// листать так часто. Выше плотности демо, но читается без напряжения.
+constexpr float kRowHeight = 38.0f;
 constexpr float kGroupHeight = 30.0f;
 
 std::vector<Group> makeGroups(std::uint32_t cores)
@@ -194,13 +197,16 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
     const Rect search{ area.left, area.top, area.left + searchWidth, area.top + kToolbarHeight };
     drawSearchBox(renderer, model, theme, search, hits);
 
-    const Rect overlaySwitch{ area.right - 170.0f, area.top, area.right, area.top + kToolbarHeight };
+    // «Только в оверлее» — вторая строка панели под поиском, как в демо.
+    const float secondRowTop = area.top + kToolbarHeight + kToolbarGap;
+    const Rect overlaySwitch{ area.left, secondRowTop, area.left + 210.0f, secondRowTop + kToolbarSecondRow };
     const bool overlayOn = model.overlayOnly;
     const bool switchHover = isHovered(model, overlaySwitch);
-    renderer.text(L"Только в оверлее", Rect{ overlaySwitch.left, overlaySwitch.top, overlaySwitch.right - 44.0f,
-                                         overlaySwitch.bottom },
-        TextRole::Tiny, overlayOn || switchHover ? theme.text : theme.textDim, TextAlign::Right);
-    const Rect track{ overlaySwitch.right - 38.0f, overlaySwitch.centerY() - 9.0f, overlaySwitch.right,
+    // Подпись слева, переключатель сразу за ней: так строка читается как одна пара.
+    renderer.text(L"Только в оверлее",
+        Rect{ overlaySwitch.left, overlaySwitch.top, overlaySwitch.left + 152.0f, overlaySwitch.bottom },
+        TextRole::Small, overlayOn || switchHover ? theme.text : theme.textDim);
+    const Rect track{ overlaySwitch.left + 160.0f, overlaySwitch.centerY() - 9.0f, overlaySwitch.left + 196.0f,
         overlaySwitch.centerY() + 9.0f };
     renderer.fillRoundRect(track, 9.0f, overlayOn ? theme.accentSoft : theme.panelSoft);
     if (overlayOn) {
@@ -212,7 +218,7 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
 
     // Фильтры подстраиваются под ширину окна: на 1040 px последний чип раньше обрезался.
     float filterLeft = search.right + 10.0f;
-    const float filterRight = overlaySwitch.left - 8.0f;
+    const float filterRight = area.right;
     float gap = 6.0f;
     float padding = 12.0f;
     float textWidth = 0.0f;
@@ -242,7 +248,7 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
     }
 
     // --- Таблица: одна колонка на весь экран, как в демо.
-    const Rect card{ area.left, area.top + kToolbarHeight + 10.0f, area.right, area.bottom };
+    const Rect card{ area.left, secondRowTop + kToolbarSecondRow + 12.0f, area.right, area.bottom };
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
 
@@ -306,7 +312,7 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
 
     // Высота содержимого: заголовок группы на каждую непустую группу.
     // Между группами нужен воздух: иначе подсветка строки липнет к следующему заголовку.
-    const float groupGap = 10.0f;
+    const float groupGap = 12.0f;
     const float contentHeight = static_cast<float>(entries.size()) * kRowHeight
         + static_cast<float>(groupStarts.size()) * (kGroupHeight + groupGap);
 
