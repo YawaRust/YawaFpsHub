@@ -125,11 +125,11 @@ void drawSceneBackdrop(Renderer& renderer, const Rect& scene, const Theme& theme
     }
 
     // Солнце: мягкое свечение и сам диск у линии хребта.
-    const float sunX = scene.left + scene.width() * 0.68f;
-    const float sunY = skyBottom - 8.0f;
-    renderer.fillRadialGlow(sunX, sunY, scene.height() * 0.42f, fromRgba(0xFFFF9A4D).withAlpha(0.30f));
-    renderer.fillCircle(sunX, sunY, 26.0f, fromRgba(0xFFFFC46B).withAlpha(0.55f));
-    renderer.fillCircle(sunX, sunY, 16.0f, fromRgba(0xFFFFE0A8).withAlpha(0.35f));
+    const float sunX = scene.left + scene.width() * 0.66f;
+    const float sunY = skyBottom - 22.0f;
+    renderer.fillRadialGlow(sunX, sunY, scene.height() * 0.36f, fromRgba(0xFFFF9A4D).withAlpha(0.26f));
+    renderer.fillCircle(sunX, sunY, 21.0f, fromRgba(0xFFFFC46B).withAlpha(0.62f));
+    renderer.fillCircle(sunX, sunY, 13.0f, fromRgba(0xFFFFE7BC).withAlpha(0.45f));
 
     // Земля и перспективная сетка: горизонтали сгущаются к горизонту.
     renderer.fillRect(Rect{ scene.left, skyBottom, scene.right, scene.bottom }, ground.withAlpha(0.92f));
@@ -149,17 +149,27 @@ void drawSceneBackdrop(Renderer& renderer, const Rect& scene, const Theme& theme
             fromRgba(0xFFFFB27A).withAlpha(0.08f), 1.0f);
     }
 
-    // Хребет: плосковерхие скалы, как в сцене прототипа.
-    constexpr int kPeaks = 9;
+    // Хребет: плосковерхие скалы со скосами, как в сцене прототипа. Скосы — два
+    // более низких столбца по краям: силуэт получается ступенчатым, а не «кирпичным».
+    constexpr int kPeaks = 13;
+    const Color rock = fromRgba(0xFF0A0C12).withAlpha(0.95f);
     for (int peak = 0; peak < kPeaks; ++peak) {
-        const float width = scene.width() / static_cast<float>(kPeaks);
-        const float left = scene.left + width * static_cast<float>(peak) - 4.0f;
-        const float height = 26.0f + static_cast<float>((peak * 37) % 46);
-        renderer.fillRoundRect(Rect{ left, skyBottom - height, left + width * 0.86f, skyBottom + 2.0f }, 3.0f,
-            fromRgba(0xFF0A0C12).withAlpha(0.94f));
+        const float step = scene.width() / static_cast<float>(kPeaks);
+        const float left = scene.left + step * static_cast<float>(peak);
+        const float slim = step * 0.52f;
+        const float height = 14.0f + static_cast<float>((peak * 53) % 34);
+        const float center = left + step * 0.44f;
+        renderer.fillRoundRect(Rect{ center, skyBottom - height - 4.0f, center + slim, skyBottom + 2.0f }, 2.0f,
+            rock);
+        renderer.fillRoundRect(Rect{ center - step * 0.10f, skyBottom - height * 0.62f,
+                                   center + step * 0.05f, skyBottom + 2.0f },
+            2.0f, rock);
+        renderer.fillRoundRect(Rect{ center + slim - step * 0.05f, skyBottom - height * 0.66f,
+                                   center + slim + step * 0.10f, skyBottom + 2.0f },
+            2.0f, rock);
     }
     renderer.fillRect(Rect{ scene.left, skyBottom - 1.0f, scene.right, skyBottom + 2.0f },
-        fromRgba(0xFFFFA45C).withAlpha(0.22f));
+        fromRgba(0xFFFFA45C).withAlpha(0.16f));
 
     // Прицел в центре и карточка задания снизу.
     const float crossY = scene.top + scene.height() * 0.46f;
