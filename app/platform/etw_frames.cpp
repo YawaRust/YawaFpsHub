@@ -19,6 +19,9 @@ constexpr GUID kD3d9Provider{ 0x783ACA0A, 0x790E, 0x4D7F, { 0x84, 0x51, 0xAA, 0x
 constexpr unsigned short kDxgiPresentStart = 0x2A;
 constexpr unsigned short kD3d9PresentStart = 0x0001;
 
+// DXGI_PRESENT_TEST: окно проверяет, можно ли показать кадр. Кадром такой вызов не является.
+constexpr std::uint32_t kDxgiPresentTest = 0x00000001;
+
 // Ключ провайдеров: события Present помечены 0x8000000000000002 (Analytic | Events).
 constexpr unsigned long long kPresentKeyword = 0x8000000000000002ull;
 constexpr unsigned char kInformationLevel = 4;
@@ -187,10 +190,15 @@ void EtwFrameSession::handleRecord(const _EVENT_RECORD* event)
     bool isPresent = false;
     std::uint64_t swapChain = 0;
 
+    std::uint32_t flags = 0;
+
     if (header.ProviderId == kDxgiProvider) {
         if (id == kDxgiPresentStart && payload != nullptr && length >= sizeof(DxgiPresentStartPayload)) {
-            swapChain = reinterpret_cast<const DxgiPresentStartPayload*>(payload)->swapChain;
-            isPresent = true;
+            const auto* present = reinterpret_cast<const DxgiPresentStartPayload*>(payload);
+            swapChain = present->swapChain;
+            flags = present->flags;
+            // DXGI_PRESENT_TEST — проверка окна без кадра; такие вызовы FPS не раздувают.
+            isPresent = (flags & kDxgiPresentTest) == 0;
         }
     } else if (header.ProviderId == kD3d9Provider) {
         if (id == kD3d9PresentStart && payload != nullptr && length >= sizeof(D3d9PresentStartPayload)) {
@@ -219,6 +227,7 @@ void EtwFrameSession::handleRecord(const _EVENT_RECORD* event)
     sample.processId = header.ProcessId;
     sample.threadId = header.ThreadId;
     sample.swapChain = swapChain;
+    sample.flags = flags;
     m_queue.push_back(sample);
 }
 

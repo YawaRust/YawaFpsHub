@@ -14,6 +14,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cwctype>
+#include <iterator>
 #include <array>
 #include <chrono>
 
@@ -159,8 +161,10 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
         log.warning("оверлей: " + overlayError);
     } else {
         m_overlay.setAccent(m_model.settings.ui.accent);
+        // Правый клик по оверлею возвращает окно приложения.
+        m_overlay.setOwnerWindow(m_window);
         m_overlay.setSettings(m_model.settings.overlay);
-        // Ctrl + перетаскивание прямо по оверлею: сохраняем позицию только по отпускании,
+        // Перетаскивание прямо по оверлею: позицию сохраняем только по отпускании,
         // иначе ini переписывался бы сотни раз за одно движение.
         m_overlay.setMoveHandler([this](int offsetX, int offsetY, bool finished) {
             {
@@ -440,6 +444,16 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     case WM_ERASEBKGND:
         return 1;
 
+    case kTickMessage:
+        // Тик сборщика: он приходит по таймеру, а не по движению мыши, поэтому
+        // и окно, и оверлей обновляются сами по себе.
+        onTick();
+        return 0;
+
+    case kExportMessage:
+        exportOverlayStyles();
+        return 0;
+
     case WM_APP + 10:
         m_dpiScale = static_cast<float>(GetDpiForWindow(m_window)) / 96.0f;
         if (m_renderer.isReady()) {
@@ -708,7 +722,7 @@ float MainWindow::contentDesignHeight() const
     case View::Sensors:
         return contentArea().height();
     case View::Overlay:
-        return contentArea().height();
+        return kOverlayHeight;
     case View::Settings:
         return kSettingsHeight;
     }
@@ -1271,6 +1285,54 @@ void MainWindow::restartSampling()
     startSampling();
 }
 
+bool MainWindow::isSystemProcessCached(std::uint32_t processId)
+{
+    for (const auto& [cachedId, isSystem] : m_systemProcessCache) {
+        if (cachedId == processId) {
+            return isSystem;
+        }
+    }
+
+    // Имя процесса: dwm.exe, explorer.exe и хосты оболочки подают кадры постоянно,
+    // но игрой они не являются.
+    static constexpr std::array<std::wstring_view, 14> kSystemNames{ L"dwm.exe", L"explorer.exe",
+        L"csrss.exe", L"winlogon.exe", L"wininit.exe", L"services.exe", L"lsass.exe", L"smss.exe",
+        L"searchhost.exe", L"startmenuexperiencehost.exe", L"textinputhost.exe",
+        L"shellexperiencehost.exe", L"applicationframehost.exe", L"lockapp.exe" };
+
+    bool system = true;
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId);
+    if (process != nullptr) {
+        wchar_t path[512]{};
+        DWORD size = static_cast<DWORD>(std::size(path));
+        if (QueryFullProcessImageNameW(process, 0, path, &size) != FALSE && size > 0) {
+            std::wstring name(path, size);
+            const std::size_t slash = name.find_last_of(L"\\/");
+            if (slash != std::wstring::npos) {
+                name.erase(0, slash + 1);
+            }
+            for (wchar_t& symbol : name) {
+                symbol = static_cast<wchar_t>(std::towlower(symbol));
+            }
+            system = false;
+            for (std::wstring_view known : kSystemNames) {
+                if (name == known) {
+                    system = true;
+                    break;
+                }
+            }
+        }
+        CloseHandle(process);
+    }
+
+    // Кэш короткий: pid переиспользуются, но за пару секунд состав игры не меняется.
+    if (m_systemProcessCache.size() > 32) {
+        m_systemProcessCache.clear();
+    }
+    m_systemProcessCache.emplace_back(processId, system);
+    return system;
+}
+
 void MainWindow::samplingLoop()
 {
     yawa::FrameTracker tracker(EtwFrameSession::qpcFrequency());
@@ -1303,6 +1365,28 @@ void MainWindow::samplingLoop()
             previous = now;
 
             m_etw.drain(tracker);
+
+            // Игра — это процесс активного окна, как в RTSS. Без этого на мониторе 144 Гц
+            // композитор рабочего стола обгонял игру на 120 кадрах.
+            DWORD foregroundPid = 0;
+            if (GetForegroundWindow() != nullptr) {
+                GetWindowThreadProcessId(GetForegroundWindow(), &foregroundPid);
+            }
+            if (foregroundPid == GetCurrentProcessId()) {
+                foregroundPid = 0;
+            }
+            tracker.setForegroundProcess(static_cast<std::uint32_t>(foregroundPid));
+
+            std::array<std::uint32_t, yawa::FrameTracker::kMaxStreams> streamPids{};
+            const std::size_t streamCount = tracker.streamProcesses(streamPids.data(), streamPids.size());
+            std::array<std::uint32_t, yawa::FrameTracker::kMaxStreams> systemPids{};
+            std::size_t systemCount = 0;
+            for (std::size_t index = 0; index < streamCount; ++index) {
+                if (isSystemProcessCached(streamPids[index])) {
+                    systemPids[systemCount++] = streamPids[index];
+                }
+            }
+            tracker.setSystemProcesses(systemPids.data(), systemCount);
 
             yawa::SystemSnapshot snapshot;
             m_sensors.sample(snapshot);

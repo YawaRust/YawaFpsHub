@@ -334,6 +334,35 @@ std::uint32_t SystemSensors::cpuThreads() const
 
 bool SystemSensors::queryWmiTemperature(double& celsius)
 {
+    // Драйвер не нужен и не ставится: температура берётся из ACPI-термозон, которые
+    // прошивка отдаёт через WMI. Классов несколько — от нового к старому, потому что
+    // на разных машинах отвечает только один из них.
+    struct WmiSource {
+        const wchar_t* query;
+        const wchar_t* property;
+        // В одних классах значение в десятых долях Кельвина, в других — в Кельвинах.
+        bool tenthsOfKelvin;
+    };
+
+    static constexpr WmiSource kSources[] = {
+        { L"SELECT CurrentTemperature FROM MSAcpi_ThermalZoneTemperature", L"CurrentTemperature", true },
+        { L"SELECT HighPrecisionTemperature FROM Win32_PerfFormattedData_Counters_ThermalZoneInformation",
+            L"HighPrecisionTemperature", true },
+        { L"SELECT Temperature FROM Win32_PerfFormattedData_Counters_ThermalZoneInformation", L"Temperature",
+            false },
+    };
+
+    for (const WmiSource& source : kSources) {
+        if (queryWmiValue(source.query, source.property, source.tenthsOfKelvin, celsius)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool SystemSensors::queryWmiValue(const wchar_t* query, const wchar_t* property, bool tenthsOfKelvin,
+    double& celsius)
+{
     // COM инициализируется на потоке один раз за жизнь приложения.
     thread_local const bool comReady = [] {
         const HRESULT result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -365,16 +394,16 @@ bool SystemSensors::queryWmiTemperature(double& celsius)
 
     IEnumWbemClassObject* enumerator = nullptr;
     BSTR language = SysAllocString(L"WQL");
-    BSTR wql = SysAllocString(L"SELECT CurrentTemperature FROM MSAcpi_ThermalZoneTemperature");
-    HRESULT query = E_OUTOFMEMORY;
+    BSTR wql = SysAllocString(query);
+    HRESULT execResult = E_OUTOFMEMORY;
     if (language != nullptr && wql != nullptr) {
-        query = services->ExecQuery(language, wql, WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, nullptr,
-            &enumerator);
+        execResult = services->ExecQuery(language, wql, WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
+            nullptr, &enumerator);
     }
     SysFreeString(language);
     SysFreeString(wql);
     services->Release();
-    if (FAILED(query) || enumerator == nullptr) {
+    if (FAILED(execResult) || enumerator == nullptr) {
         return false;
     }
 
@@ -388,12 +417,12 @@ bool SystemSensors::queryWmiTemperature(double& celsius)
 
         VARIANT value;
         VariantInit(&value);
-        if (SUCCEEDED(object->Get(L"CurrentTemperature", 0, &value, nullptr, nullptr))
-            && (value.vt == VT_I4 || value.vt == VT_UI4)) {
-            // Значение приходит в десятых долях Кельвина.
-            const double kelvinTenths = value.vt == VT_I4 ? static_cast<double>(value.lVal)
-                                                          : static_cast<double>(value.ulVal);
-            const double parsed = kelvinTenths / 10.0 - 273.15;
+        if (SUCCEEDED(object->Get(property, 0, &value, nullptr, nullptr))
+            && (value.vt == VT_I4 || value.vt == VT_UI4 || value.vt == VT_R8)) {
+            const double raw = value.vt == VT_I4
+                ? static_cast<double>(value.lVal)
+                : (value.vt == VT_UI4 ? static_cast<double>(value.ulVal) : value.dblVal);
+            const double parsed = (tenthsOfKelvin ? raw / 10.0 : raw) - 273.15;
             if (parsed > -20.0 && parsed < 130.0) {
                 hottest = std::max(hottest, parsed);
             }

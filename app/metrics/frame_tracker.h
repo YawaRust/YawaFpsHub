@@ -14,13 +14,18 @@ struct PresentSample {
     std::uint32_t processId = 0;
     std::uint32_t threadId = 0;
     std::uint64_t swapChain = 0;
+    // Флаги вызова Present: DXGI_PRESENT_TEST — это проверка, а не кадр.
+    std::uint32_t flags = 0;
 };
 
 // Кадры приходят из разных процессов и цепочек подмены сразу: рабочий стол, оверлеи
-// и сама игра. Игрой считается поток кадров с наибольшей частотой за последнюю секунду —
-// остальные (медиаплеер, браузер с видео) отсекаются. Поток, который перестал отдавать
-// кадры, через пару секунд перестаёт считаться активным, иначе оверлей залипал бы
-// на закрытой игре.
+// и сама игра. Как и RTSS, игрой считаем поток кадров процесса в активном окне, а не
+// самый быстрый: композитор рабочего стола (dwm.exe) на мониторе 144 Гц подаёт кадры
+// чаще игры со 120 кадрами, и «самый быстрый поток» давал завышенный FPS. Если активное
+// окно к кадрам не относится, берём самый быстрый поток, но служебные процессы
+// (dwm, explorer, хосты оболочки) пропускаем всегда. Поток, который перестал отдавать
+// кадры, через секунду перестаёт считаться активным, иначе оверлей залипал бы на
+// закрытой игре.
 class FrameTracker {
 public:
     static constexpr std::size_t kMaxStreams = 8;
@@ -36,6 +41,14 @@ public:
 
     FpsSummary summary(double targetFps) const;
     const FrameTimeWindow* activeWindow() const;
+
+    // Процесс активного окна: его поток кадров считается игрой.
+    void setForegroundProcess(std::uint32_t processId);
+    // Служебные процессы: их кадры никогда не становятся «игрой».
+    void setSystemProcesses(const std::uint32_t* processes, std::size_t count);
+    // Процессы уже известных потоков: приложение по ним обновляет список служебных.
+    std::size_t streamProcesses(std::uint32_t* out, std::size_t capacity) const;
+    bool isSystemProcess(std::uint32_t processId) const;
 
     std::size_t streamCount() const { return m_streamCount; }
     std::uint64_t droppedStreams() const { return m_droppedStreams; }
@@ -65,6 +78,9 @@ private:
     static constexpr double kMaxPlausibleFrameMs = 2000.0;
 
     std::uint64_t m_qpcFrequency = 0;
+    std::uint32_t m_foregroundPid = 0;
+    std::array<std::uint32_t, kMaxStreams> m_systemPids{};
+    std::size_t m_systemCount = 0;
     std::uint64_t m_newestQpc = 0;
     std::array<Stream, kMaxStreams> m_streams{};
     std::size_t m_streamCount = 0;

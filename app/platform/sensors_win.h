@@ -65,6 +65,8 @@ private:
     void sampleGameThread(SystemSnapshot& snapshot);
     // ACPI-термозона через WMI: работает там, где PDH-счётчик тепловых зон молчит.
     bool queryWmiTemperature(double& celsius);
+    // Один WMI-запрос: значение свойства из первого объекта, переведённое в градусы.
+    bool queryWmiValue(const wchar_t* query, const wchar_t* property, bool tenthsOfKelvin, double& celsius);
     void sampleMemory(SystemSnapshot& snapshot);
     void sampleDiskAndNetwork(SystemSnapshot& snapshot);
     void sampleGpu(SystemSnapshot& snapshot);

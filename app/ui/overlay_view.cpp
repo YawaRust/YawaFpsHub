@@ -80,7 +80,7 @@ void drawPreviewCard(Renderer& renderer, const AppModel& model, const Theme& the
 
     renderer.text(L"Оверлей поверх игры", Rect{ inner.left, inner.top, inner.right, inner.top + 22.0f },
         TextRole::Heading, theme.text);
-    renderer.text(L"Ctrl + мышь по оверлею — перетащить; здесь — предпросмотр на макете сцены",
+    renderer.text(L"перетаскивание — прямо по оверлею; правый клик по нему возвращает это окно",
         Rect{ inner.left, inner.top + 20.0f, inner.right - 60.0f, inner.top + 38.0f }, TextRole::Tiny, theme.textFaint);
 
     const Rect tag{ inner.right - 72.0f, inner.top, inner.right, inner.top + 20.0f };
@@ -88,8 +88,7 @@ void drawPreviewCard(Renderer& renderer, const AppModel& model, const Theme& the
     renderer.text(hotkeyName(model.settings.hotkeys.overlay), tag, TextRole::Tiny, theme.textFaint,
         TextAlign::Center);
 
-    const float galleryTop = inner.bottom - 104.0f;
-    const Rect scene{ inner.left, inner.top + 46.0f, inner.right, std::max(inner.top + 76.0f, galleryTop - 10.0f) };
+    const Rect scene{ inner.left, inner.top + 46.0f, inner.right, inner.bottom };
 
     // Макет игровой сцены: небо, земля и пара силуэтов — на нём видно, как читается оверлей.
     renderer.fillRoundRect(scene, kCardRadius, theme.panelSoft);
@@ -113,8 +112,6 @@ void drawPreviewCard(Renderer& renderer, const AppModel& model, const Theme& the
 
     renderer.strokeRoundRect(scene, kCardRadius, theme.line, 1.0f);
     hits.push_back(UiHit{ scene, ActionKind::DragOverlay, 0 });
-
-    drawStyleGallery(renderer, model, theme, Rect{ inner.left, galleryTop, inner.right, inner.bottom }, hits);
 }
 
 void drawStyleGallery(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area,
@@ -359,16 +356,32 @@ void drawLabelsCard(Renderer& renderer, const AppModel& model, const Theme& them
 void drawOverlayView(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area,
     std::vector<UiHit>& hits)
 {
-    const float previewWidth = area.width() * 0.58f;
-    const float previewHeight = std::max(220.0f, (area.height() - kGap) * 0.58f);
+    // Как в демо: одна колонка карточек фиксированной высоты. Экран получает
+    // демо-высоту целиком, поэтому при сжатии окна карточки не наезжают друг на друга,
+    // а прокручиваются.
+    const auto drawClipped = [&](const Rect& card, const auto& draw) {
+        renderer.pushClip(card);
+        draw(card);
+        renderer.popClip();
+    };
 
-    const Rect preview{ area.left, area.top, area.left + previewWidth, area.top + previewHeight };
-    const Rect labels{ area.left, preview.bottom + kGap, preview.right, area.bottom };
-    const Rect controls{ preview.right + kGap, area.top, area.right, area.bottom };
+    float top = area.top;
+    const auto place = [&](float height) {
+        const Rect card{ area.left, top, area.right, top + height };
+        top += height + kGap;
+        return card;
+    };
 
-    drawPreviewCard(renderer, model, theme, preview, hits);
-    drawLabelsCard(renderer, model, theme, labels, hits);
-    drawControlsCard(renderer, model, theme, controls, hits);
+    drawClipped(place(430.0f),
+        [&](const Rect& card) { drawPreviewCard(renderer, model, theme, card, hits); });
+    drawClipped(place(624.0f),
+        [&](const Rect& card) { drawControlsCard(renderer, model, theme, card, hits); });
+    drawClipped(place(232.0f),
+        [&](const Rect& card) { drawLabelsCard(renderer, model, theme, card, hits); });
+    drawClipped(place(268.0f), [&](const Rect& card) {
+        drawCard(renderer, card, theme);
+        drawStyleGallery(renderer, model, theme, card.inset(kCardPadding), hits);
+    });
 }
 
 } // namespace yawa

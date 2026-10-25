@@ -98,6 +98,27 @@ double FrameTimeWindow::currentFps() const
     return fpsFromMs(m_samples[(m_head + kCapacity - 1) % kCapacity]);
 }
 
+double FrameTimeWindow::recentFps(double windowMs) const
+{
+    if (m_count == 0 || windowMs <= 0.0) {
+        return 0.0;
+    }
+
+    // Идём от последнего кадра назад, пока сумма интервалов не наберёт окно.
+    double total = 0.0;
+    std::size_t frames = 0;
+    for (std::size_t step = 0; step < m_count; ++step) {
+        const std::size_t index = (m_head + kCapacity - 1 - step) % kCapacity;
+        total += m_samples[index];
+        ++frames;
+        if (total >= windowMs) {
+            break;
+        }
+    }
+
+    return total > 0.0 ? static_cast<double>(frames) * 1000.0 / total : 0.0;
+}
+
 double FrameTimeWindow::droppedShare(double targetMs) const
 {
     if (m_count == 0 || targetMs <= 0.0) {
@@ -120,7 +141,9 @@ FpsSummary FpsSummary::fromWindow(const FrameTimeWindow& window, double targetFp
         return summary;
     }
 
-    summary.currentFps = window.currentFps();
+    // Как в RTSS: показываем среднее за последнюю секунду, иначе цифра скачет
+    // на каждом кадре и расходится с тем, что видит игрок.
+    summary.currentFps = window.recentFps(1000.0);
     summary.frameTimeMs = summary.currentFps > 0.0 ? 1000.0 / summary.currentFps : 0.0;
     summary.low1Fps = window.lowFraction(0.01);
     summary.low01Fps = window.lowFraction(0.001);

@@ -105,6 +105,23 @@ void testSummary()
     CHECK_NEAR(FpsSummary::fromWindow(slow, 60.0).droppedShare, 1.0, 1e-9);
 }
 
+// FPS считается по последней секунде: одиночный «быстрый» кадр не должен
+// поднимать цифру, как и в RTSS.
+void testRecentFpsUsesLastSecond()
+{
+    FrameTimeWindow window;
+    for (int index = 0; index < 120; ++index) {
+        window.push(1000.0 / 120.0);
+    }
+    for (int index = 0; index < 60; ++index) {
+        window.push(1000.0 / 30.0);
+    }
+
+    CHECK_NEAR(window.recentFps(1000.0), 30.0, 0.5);
+    // Вся история — это 2 секунды на 30 fps, значит среднее за всё время вдвое выше.
+    CHECK_NEAR(window.averageFps(), 60.0, 0.5);
+}
+
 } // namespace
 
 void runStatisticsTests()
@@ -116,6 +133,7 @@ void runStatisticsTests()
     testDroppedShare();
     testWindowWrapsAround();
     testSummary();
+    testRecentFpsUsesLastSecond();
 }
 
 } // namespace yawa::test

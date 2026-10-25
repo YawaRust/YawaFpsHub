@@ -21,8 +21,10 @@ constexpr std::array<std::wstring_view, 7> kFilterNames{ L"Все", L"Кадры
     L"Диски и сеть", L"Система" };
 
 constexpr float kToolbarHeight = 36.0f;
-constexpr float kRowHeight = 42.0f;
-constexpr float kGroupHeight = 34.0f;
+// Компактные строки как в демо: на экран помещается в полтора раза больше датчиков,
+// и таблицу не приходится листать так часто.
+constexpr float kRowHeight = 34.0f;
+constexpr float kGroupHeight = 30.0f;
 
 std::vector<Group> makeGroups(std::uint32_t cores)
 {
@@ -282,7 +284,7 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
 
     // Высота содержимого: заголовок группы на каждую непустую группу.
     // Между группами нужен воздух: иначе подсветка строки липнет к следующему заголовку.
-    const float groupGap = 6.0f;
+    const float groupGap = 10.0f;
     const float contentHeight = static_cast<float>(entries.size()) * kRowHeight
         + static_cast<float>(groupStarts.size()) * (kGroupHeight + groupGap);
 
@@ -347,12 +349,11 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
                                              : L"нет данных";
             const std::wstring unit = known ? wideText(unitSuffix(info.unit)) : std::wstring();
             const float unitWidth = unit.empty() ? 0.0f : renderer.measureText(unit, TextRole::Tiny) + 3.0f;
-            renderer.text(value, Rect{ valueRight - 104.0f - unitWidth, rowTop, valueRight - unitWidth,
+            renderer.text(value, Rect{ valueRight - 120.0f - unitWidth, rowTop, valueRight - unitWidth,
                                    rowTop + kRowHeight },
                 known ? TextRole::Small : TextRole::Tiny, known ? theme.text : theme.textFaint, TextAlign::Right);
             if (!unit.empty()) {
-                renderer.text(unit, Rect{ valueRight - unitWidth, rowTop + kRowHeight * 0.5f, valueRight,
-                                       rowTop + kRowHeight },
+                renderer.text(unit, Rect{ valueRight - unitWidth, rowTop, valueRight, rowTop + kRowHeight },
                     TextRole::Tiny, theme.textFaint, TextAlign::Right);
             }
 
@@ -416,8 +417,8 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
             theme.textFaint.withAlpha(0.7f));
     }
 
-    renderer.text(L"ETW для кадров, PDH для счётчиков диспетчера задач, DXGI для видеопамяти, NVML для температур"
-                  L" NVIDIA, ACPI-термозона для процессора. «нет данных» — источник не отвечает на этом железе.",
+    renderer.text(L"ETW — кадры, PDH — счётчики диспетчера задач, NVML — NVIDIA, ACPI-термозона — процессор."
+                  L" Драйверов не требуется; «нет данных» — прошивка не отдаёт этот датчик.",
         Rect{ inner.left, inner.bottom - 18.0f, inner.right - 14.0f, inner.bottom }, TextRole::Tiny,
         theme.textFaint);
 }

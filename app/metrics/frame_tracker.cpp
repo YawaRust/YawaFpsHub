@@ -113,14 +113,69 @@ void FrameTracker::reset()
     m_lastTouched = 0;
     m_droppedStreams = 0;
     m_newestQpc = 0;
+    m_foregroundPid = 0;
+    m_systemCount = 0;
+}
+
+void FrameTracker::setForegroundProcess(std::uint32_t processId)
+{
+    m_foregroundPid = processId;
+}
+
+void FrameTracker::setSystemProcesses(const std::uint32_t* processes, std::size_t count)
+{
+    m_systemCount = std::min(count, m_systemPids.size());
+    for (std::size_t index = 0; index < m_systemCount; ++index) {
+        m_systemPids[index] = processes[index];
+    }
+}
+
+std::size_t FrameTracker::streamProcesses(std::uint32_t* out, std::size_t capacity) const
+{
+    const std::size_t limit = std::min(capacity, m_streamCount);
+    for (std::size_t index = 0; index < limit; ++index) {
+        out[index] = m_streams[index].processId;
+    }
+    return limit;
+}
+
+bool FrameTracker::isSystemProcess(std::uint32_t processId) const
+{
+    for (std::size_t index = 0; index < m_systemCount; ++index) {
+        if (m_systemPids[index] == processId) {
+            return true;
+        }
+    }
+    return false;
 }
 
 std::size_t FrameTracker::activeIndex() const
 {
+    // 1. Игра в активном окне: её кадры и есть то, что видит человек. Служебный процесс
+    //    в активном окне (рабочий стол, оболочка) игрой не считается.
+    if (m_foregroundPid != 0 && !isSystemProcess(m_foregroundPid)) {
+        std::size_t foreground = kMaxStreams;
+        for (std::size_t index = 0; index < m_streamCount; ++index) {
+            const Stream& stream = m_streams[index];
+            if (stream.processId != m_foregroundPid || !isFresh(stream, m_newestQpc)
+                || stream.frames.size() == 0) {
+                continue;
+            }
+            if (foreground == kMaxStreams || stream.ratePerSecond > m_streams[foreground].ratePerSecond) {
+                foreground = index;
+            }
+        }
+        if (foreground != kMaxStreams) {
+            return foreground;
+        }
+    }
+
+    // 2. Активное окно к кадрам не относится: берём самый быстрый поток среди обычных
+    //    приложений. Служебные процессы пропускаем — иначе dwm на 144 Гц перебивал игру.
     std::size_t best = kMaxStreams;
     for (std::size_t index = 0; index < m_streamCount; ++index) {
         const Stream& stream = m_streams[index];
-        if (!isFresh(stream, m_newestQpc)) {
+        if (!isFresh(stream, m_newestQpc) || isSystemProcess(stream.processId)) {
             continue;
         }
         if (best == kMaxStreams || stream.ratePerSecond > m_streams[best].ratePerSecond) {

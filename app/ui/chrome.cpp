@@ -298,6 +298,26 @@ void drawTopBar(Renderer& renderer, const AppModel& model, const Theme& theme, s
     const float bottom = kTitleBarHeight + 62.0f;
     float right = renderer.width() - 20.0f;
 
+    // Сколько места остаётся правее заголовка экрана. При сжатии окна второстепенные
+    // элементы (палитра, интервал опроса) скрываются, иначе они наезжали на заголовок.
+    const float titleRight = kRailWidth + 24.0f
+        + renderer.measureText(wideText(viewTitle(model.view)), TextRole::Value) + 28.0f;
+    const float available = right - titleRight;
+    float used = 88.0f; // «Пауза» есть всегда.
+    const bool showOverlayButton = available >= used + 8.0f + 104.0f;
+    if (showOverlayButton) {
+        used += 8.0f + 104.0f;
+    }
+    const bool showSwatches = available >= used + 12.0f + 5.0f * 30.0f;
+    if (showSwatches) {
+        used += 12.0f + 5.0f * 30.0f;
+    }
+    const bool showIntervalChip = available >= used + 4.0f + 112.0f;
+    if (showIntervalChip) {
+        used += 4.0f + 112.0f;
+    }
+    const bool showLiveChip = available >= used + 8.0f + 168.0f;
+
     const Rect pause{ right - 88.0f, top, right, bottom };
     if (!model.paused && hovered(model, pause)) {
         renderer.fillRoundRect(pause, 9.0f, theme.panelSoft);
@@ -306,21 +326,23 @@ void drawTopBar(Renderer& renderer, const AppModel& model, const Theme& theme, s
     hits.push_back(UiHit{ pause, ActionKind::TogglePause, 0 });
     right = pause.left - 8.0f;
 
-    const Rect overlayButton{ right - 104.0f, top, right, bottom };
-    if (!model.overlayVisible && hovered(model, overlayButton)) {
-        renderer.strokeRoundRect(overlayButton, 10.0f, theme.lineStrong, 1.0f);
+    if (showOverlayButton) {
+        const Rect overlayButton{ right - 104.0f, top, right, bottom };
+        if (!model.overlayVisible && hovered(model, overlayButton)) {
+            renderer.strokeRoundRect(overlayButton, 10.0f, theme.lineStrong, 1.0f);
+        }
+        renderer.fillRoundRect(overlayButton, 10.0f, model.overlayVisible ? theme.accentSoft : theme.panelSoft);
+        renderer.fillCircle(overlayButton.left + 12.0f, overlayButton.centerY(), 3.0f,
+            model.overlayVisible ? theme.accent : theme.textFaint);
+        renderer.text(L"Оверлей", Rect{ overlayButton.left + 22.0f, overlayButton.top, overlayButton.right - 6.0f,
+                                         overlayButton.bottom },
+            TextRole::Tiny, model.overlayVisible ? theme.accent : theme.textDim);
+        hits.push_back(UiHit{ overlayButton, ActionKind::ToggleOverlay, 0 });
+        right = overlayButton.left - 12.0f;
     }
-    renderer.fillRoundRect(overlayButton, 10.0f, model.overlayVisible ? theme.accentSoft : theme.panelSoft);
-    renderer.fillCircle(overlayButton.left + 12.0f, overlayButton.centerY(), 3.0f,
-        model.overlayVisible ? theme.accent : theme.textFaint);
-    renderer.text(L"Оверлей", Rect{ overlayButton.left + 22.0f, overlayButton.top, overlayButton.right - 6.0f,
-                                     overlayButton.bottom },
-        TextRole::Tiny, model.overlayVisible ? theme.accent : theme.textDim);
-    hits.push_back(UiHit{ overlayButton, ActionKind::ToggleOverlay, 0 });
-    right = overlayButton.left - 12.0f;
 
     constexpr std::array<std::uint32_t, 5> kAccentRgba{ 0xFF5EF29B, 0xFF6AA8FF, 0xFFB47BFF, 0xFFFFB347, 0xFFFF6F6F };
-    for (std::size_t index = kAccentRgba.size(); index-- > 0;) {
+    for (std::size_t index = showSwatches ? kAccentRgba.size() : 0; index-- > 0;) {
         const float centerX = right - 8.0f;
         const Color color = fromRgba(kAccentRgba[index]);
         const bool isActive = static_cast<std::size_t>(model.settings.ui.accent) == index;
@@ -334,17 +356,21 @@ void drawTopBar(Renderer& renderer, const AppModel& model, const Theme& theme, s
     }
     right -= 4.0f;
 
-    const Rect interval{ right - 112.0f, top, right, bottom };
-    drawChip(renderer, interval, wideText("опрос " + std::to_string(model.settings.capture.intervalMs) + " мс"),
-        false, theme);
-    right = interval.left - 8.0f;
+    if (showIntervalChip) {
+        const Rect interval{ right - 112.0f, top, right, bottom };
+        drawChip(renderer, interval, wideText("опрос " + std::to_string(model.settings.capture.intervalMs) + " мс"),
+            false, theme);
+        right = interval.left - 8.0f;
+    }
 
-    const Rect live{ right - 168.0f, top, right, bottom };
-    renderer.fillRoundRect(live, 10.0f, model.etwRunning ? theme.accentSoft : theme.panelSoft);
-    renderer.fillCircle(live.left + 12.0f, live.centerY(), 3.0f, model.etwRunning ? theme.accent : theme.textFaint);
-    renderer.text(model.etwRunning ? L"ETW · кадры" : L"ETW выключен",
-        Rect{ live.left + 22.0f, live.top, live.right - 6.0f, live.bottom }, TextRole::Tiny,
-        model.etwRunning ? theme.accent : theme.textFaint);
+    if (showLiveChip) {
+        const Rect live{ right - 168.0f, top, right, bottom };
+        renderer.fillRoundRect(live, 10.0f, model.etwRunning ? theme.accentSoft : theme.panelSoft);
+        renderer.fillCircle(live.left + 12.0f, live.centerY(), 3.0f, model.etwRunning ? theme.accent : theme.textFaint);
+        renderer.text(model.etwRunning ? L"ETW · кадры" : L"ETW выключен",
+            Rect{ live.left + 22.0f, live.top, live.right - 6.0f, live.bottom }, TextRole::Tiny,
+            model.etwRunning ? theme.accent : theme.textFaint);
+    }
 }
 
 void drawStatusBar(Renderer& renderer, const AppModel& model, const Theme& theme)
@@ -369,7 +395,7 @@ void drawStatusBar(Renderer& renderer, const AppModel& model, const Theme& theme
         TextRole::Tiny, theme.textFaint, TextAlign::Right);
 
     const std::wstring center = model.overlayError.empty()
-        ? std::wstring(L"F10 — оверлей · F11 — положение · F12 — окно")
+        ? std::wstring(L"F10 — оверлей · F11 — положение · F12 — окно · оверлей тянется мышью")
         : model.overlayError;
     const float hintsWidth = renderer.measureText(center.c_str(), TextRole::Tiny);
     renderer.text(center, Rect{ renderer.width() * 0.5f - hintsWidth * 0.5f, top,

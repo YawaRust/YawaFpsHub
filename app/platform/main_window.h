@@ -81,6 +81,9 @@ private:
     // Единая точка включения/выключения оверлея: логирует причину, если показать не удалось.
     void toggleOverlay();
     void selectGpu(std::size_t index);
+    // Служебный ли процесс (dwm.exe, explorer.exe и т.п.). Результат кэшируется:
+    // опрос идёт из потока сборщика, а открывать процесс на каждый кадр дорого.
+    bool isSystemProcessCached(std::uint32_t processId);
 
     Rect contentArea() const;
     // Экран рисуется целиком в «демо-высоте», а окно показывает его часть со сдвигом.
@@ -102,6 +105,7 @@ private:
     AppModel m_model;
     Theme m_theme = makeTheme(Accent::Mint);
     std::vector<UiHit> m_hits;
+    std::vector<std::pair<std::uint32_t, bool>> m_systemProcessCache;
     ActionKind m_dragAction = ActionKind::None;
     Rect m_dragRect;
     float m_dragStartX = 0.0f;
