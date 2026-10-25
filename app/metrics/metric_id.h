@@ -95,7 +95,7 @@ inline constexpr std::array<MetricInfo, kMetricCount> kMetricTable{{
     { MetricId::Low1Fps, "low_1", "1% low", MetricUnit::Count, 0 },
     { MetricId::Low01Fps, "low_0_1", "0.1% low", MetricUnit::Count, 0 },
     { MetricId::AvgFps, "fps_avg", "Средний FPS", MetricUnit::Count, 1 },
-    { MetricId::DroppedFrames, "dropped", "Пропущено, доля", MetricUnit::Percent, 1 },
+    { MetricId::DroppedFrames, "dropped", "Пропущено за секунду", MetricUnit::Percent, 1 },
 
     { MetricId::CpuLoad, "cpu_load", "Загрузка процессора", MetricUnit::Percent, 0 },
     { MetricId::CpuTemp, "cpu_temp", "Температура CPU", MetricUnit::Celsius, 0 },

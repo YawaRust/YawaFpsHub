@@ -98,6 +98,15 @@ bool valueKnown(MetricId id, const AppModel& model)
     }
 }
 
+std::wstring upperCopy(std::wstring_view text)
+{
+    std::wstring result(text);
+    for (wchar_t& symbol : result) {
+        symbol = static_cast<wchar_t>(std::towupper(symbol));
+    }
+    return result;
+}
+
 std::wstring lowerCopy(std::wstring_view text)
 {
     std::wstring result(text);
@@ -309,8 +318,8 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
                 top += groupGap;
             }
             if (top + kGroupHeight > viewport.top) {
-                renderer.text(groups[groupIndexes[nextGroupStart]].title,
-                    Rect{ inner.left + 14.0f, top, inner.right, top + kGroupHeight - 4.0f }, TextRole::Small,
+                renderer.text(upperCopy(groups[groupIndexes[nextGroupStart]].title),
+                    Rect{ inner.left + 14.0f, top, inner.right, top + kGroupHeight - 4.0f }, TextRole::Tiny,
                     theme.accent);
             }
             top += kGroupHeight;
@@ -325,6 +334,11 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
         if (rowTop + kRowHeight > viewport.top && rowTop + kRowHeight <= viewport.bottom + 0.5f) {
             const Rect row{ inner.left, rowTop, inner.right, rowTop + kRowHeight };
             const bool hover = isHovered(model, row);
+            // Тонкая линия под строкой: таблица читается построчно, как в демо.
+            if (!hover) {
+                renderer.drawLine(inner.left + 10.0f, rowTop + kRowHeight - 0.5f, inner.right - 12.0f,
+                    rowTop + kRowHeight - 0.5f, theme.line.withAlpha(0.45f), 1.0f);
+            }
             if (hover) {
                 // Подсветка строки была почти не виднее фона карточки — теперь это заметная плашка.
                 renderer.fillRoundRect(row, 6.0f, theme.accentSoft);
@@ -348,10 +362,11 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
             const std::wstring value = known ? wideText(formatValue(slot.stats.current, info.decimals))
                                              : L"нет данных";
             const std::wstring unit = known ? wideText(unitSuffix(info.unit)) : std::wstring();
-            const float unitWidth = unit.empty() ? 0.0f : renderer.measureText(unit, TextRole::Tiny) + 3.0f;
-            renderer.text(value, Rect{ valueRight - 120.0f - unitWidth, rowTop, valueRight - unitWidth,
+            const float unitWidth = unit.empty() ? 0.0f : renderer.measureText(unit, TextRole::Tiny) + 4.0f;
+            // Значение — главное в строке: крупнее подписи, как в демо.
+            renderer.text(value, Rect{ valueRight - 130.0f - unitWidth, rowTop, valueRight - unitWidth,
                                    rowTop + kRowHeight },
-                known ? TextRole::Small : TextRole::Tiny, known ? theme.text : theme.textFaint, TextAlign::Right);
+                known ? TextRole::Number : TextRole::Tiny, known ? theme.text : theme.textFaint, TextAlign::Right);
             if (!unit.empty()) {
                 renderer.text(unit, Rect{ valueRight - unitWidth, rowTop, valueRight, rowTop + kRowHeight },
                     TextRole::Tiny, theme.textFaint, TextAlign::Right);
@@ -375,8 +390,8 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
                     maximum = std::max(maximum, history[sample]);
                 }
                 renderer.drawSeries(ChartSeries{ history.data() + (count - visible), visible,
-                                        pipColor(entries[index].group, theme), false },
-                    spark, 0.0f, maximum, 1.3f);
+                                        pipColor(entries[index].group, theme), true },
+                    spark, 0.0f, maximum, 1.4f);
             }
 
             // «Глаз»: датчик показан в оверлее. Только у строк, которые туда попадают.
