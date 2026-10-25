@@ -315,6 +315,20 @@ jobs:
           }
           Stop-Process -Id $server.Id -Force
 
+      - name: Лог приложения (диагностика)
+        # Лог лежит рядом с exe. Кладём его в ci-logs рядом со скриншотами: из песочницы
+        # иначе не видно, поднялась ли ETW-сессия и что с оверлеем на этой машине.
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $log = Get-ChildItem -Path .\build -Recurse -Filter YawaFpsHub.log | Select-Object -First 1
+          if ($log) {
+            Copy-Item $log.FullName "$PWD\app-log.txt" -Force
+            Write-Output "::notice title=YawaFpsHub::лог приложения: $($log.FullName)"
+          } else {
+            Write-Output "::warning title=YawaFpsHub::лог приложения не найден"
+          }
+
       - name: Опубликовать скриншоты
         # Два прогона на один коммит (push и pull_request) соревнуются за ветку ci-logs,
         # поэтому публикует только push-прогон: второй попытке push не хватает fast-forward.
@@ -332,7 +346,9 @@ jobs:
           git config user.name "ci"
           git checkout -B ci-logs
           cp /tmp/shots/*.png .
+          if [ -f app-log.txt ]; then cp app-log.txt /tmp/shots/ ; fi
           git add -f ./*.png
+          if [ -f app-log.txt ]; then git add -f app-log.txt ; fi
           git commit -m "screenshots" || true
           git push -f origin ci-logs
 
