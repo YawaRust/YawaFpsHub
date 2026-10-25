@@ -180,6 +180,7 @@ jobs:
             @{ view = "dashboard"; extra = "--size=800x620"; name = "dashboard-compact" },
             @{ view = "sensors"; extra = "--size=800x620"; name = "sensors-compact" },
             @{ view = "overlay"; extra = "--size=800x620"; name = "overlay-compact" },
+            @{ view = "settings"; extra = "--size=800x620"; name = "settings-compact" },
             @{ view = "sensors"; extra = ""; name = "sensors" },
             @{ view = "overlay"; extra = ""; name = "overlay" },
             @{ view = "settings"; extra = ""; name = "settings" }
