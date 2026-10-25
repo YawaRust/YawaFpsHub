@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <string>
 
 namespace yawa {
@@ -72,6 +73,119 @@ void drawToggleRow(Renderer& renderer, const Rect& row, std::wstring_view label,
 void drawStyleGallery(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area,
     std::vector<UiHit>& hits);
 
+// Скруглённые углы для сцены: Renderer рисует клипом по прямоугольнику, поэтому
+// «съедаем» уголки фоном карточки — по строкам дуги, как маска.
+void maskCorners(Renderer& renderer, const Rect& rect, float radius, const Color& color)
+{
+    const int steps = static_cast<int>(radius);
+    for (int row = 0; row < steps; ++row) {
+        const float y = static_cast<float>(row);
+        const float dy = radius - y;
+        const float bite = radius - std::sqrt(std::max(radius * radius - dy * dy, 0.0f));
+        if (bite <= 0.05f) {
+            continue;
+        }
+        const float top = rect.top + y;
+        renderer.fillRect(Rect{ rect.left, top, rect.left + bite, top + 1.0f }, color);
+        renderer.fillRect(Rect{ rect.right - bite, top, rect.right, top + 1.0f }, color);
+        const float bottom = rect.bottom - y - 1.0f;
+        renderer.fillRect(Rect{ rect.left, bottom, rect.left + bite, bottom + 1.0f }, color);
+        renderer.fillRect(Rect{ rect.right - bite, bottom, rect.right, bottom + 1.0f }, color);
+    }
+}
+
+Color mixColor(const Color& from, const Color& to, float t)
+{
+    const float k = std::clamp(t, 0.0f, 1.0f);
+    return Color{ from.r + (to.r - from.r) * k, from.g + (to.g - from.g) * k, from.b + (to.b - from.b) * k,
+        from.a + (to.a - from.a) * k };
+}
+
+// Макет игровой сцены как в прототипе: вечернее небо, солнце за хребтом, сетка пола
+// и полоса задания. На нём сразу видно, читается ли оверлей на живом фоне.
+void drawSceneBackdrop(Renderer& renderer, const Rect& scene, const Theme& theme)
+{
+    const Color skyTop = fromRgba(0xFF0B1020);
+    const Color skyMid = fromRgba(0xFF3A2B4A);
+    const Color skyLow = fromRgba(0xFF8A4A32);
+    const Color horizon = fromRgba(0xFFFF8A3D);
+    const Color ground = fromRgba(0xFF05070B);
+
+    renderer.fillRoundRect(scene, 14.0f, skyTop);
+    const float skyBottom = scene.top + scene.height() * 0.62f;
+    const int bands = 48;
+    const float bandHeight = (skyBottom - scene.top) / static_cast<float>(bands);
+    for (int band = 0; band < bands; ++band) {
+        const float t = static_cast<float>(band) / static_cast<float>(bands - 1);
+        const Color color = t < 0.55f ? mixColor(skyTop, skyMid, t / 0.55f)
+                                      : mixColor(skyMid, t < 0.88f ? skyLow : horizon,
+                                            (t - 0.55f) / 0.45f);
+        const float top = scene.top + static_cast<float>(band) * bandHeight;
+        renderer.fillRect(Rect{ scene.left, top, scene.right, top + bandHeight + 0.6f }, color);
+    }
+
+    // Солнце: мягкое свечение и сам диск у линии хребта.
+    const float sunX = scene.left + scene.width() * 0.68f;
+    const float sunY = skyBottom - 8.0f;
+    renderer.fillRadialGlow(sunX, sunY, scene.height() * 0.42f, fromRgba(0xFFFF9A4D).withAlpha(0.30f));
+    renderer.fillCircle(sunX, sunY, 26.0f, fromRgba(0xFFFFC46B).withAlpha(0.55f));
+    renderer.fillCircle(sunX, sunY, 16.0f, fromRgba(0xFFFFE0A8).withAlpha(0.35f));
+
+    // Земля и перспективная сетка: горизонтали сгущаются к горизонту.
+    renderer.fillRect(Rect{ scene.left, skyBottom, scene.right, scene.bottom }, ground.withAlpha(0.92f));
+    const int rows = 9;
+    for (int row = 1; row <= rows; ++row) {
+        const float t = static_cast<float>(row) / static_cast<float>(rows);
+        const float y = skyBottom + (scene.bottom - skyBottom) * t * t;
+        renderer.drawLine(scene.left, y, scene.right, y, fromRgba(0xFFFFB27A).withAlpha(0.10f), 1.0f);
+    }
+    const float centerX = scene.centerX();
+    for (int column = -5; column <= 5; ++column) {
+        if (column == 0) {
+            continue;
+        }
+        const float bottomX = centerX + static_cast<float>(column) * (scene.width() / 6.0f);
+        renderer.drawLine(centerX + static_cast<float>(column) * 12.0f, skyBottom, bottomX, scene.bottom,
+            fromRgba(0xFFFFB27A).withAlpha(0.08f), 1.0f);
+    }
+
+    // Хребет: плосковерхие скалы, как в сцене прототипа.
+    constexpr int kPeaks = 9;
+    for (int peak = 0; peak < kPeaks; ++peak) {
+        const float width = scene.width() / static_cast<float>(kPeaks);
+        const float left = scene.left + width * static_cast<float>(peak) - 4.0f;
+        const float height = 26.0f + static_cast<float>((peak * 37) % 46);
+        renderer.fillRoundRect(Rect{ left, skyBottom - height, left + width * 0.86f, skyBottom + 2.0f }, 3.0f,
+            fromRgba(0xFF0A0C12).withAlpha(0.94f));
+    }
+    renderer.fillRect(Rect{ scene.left, skyBottom - 1.0f, scene.right, skyBottom + 2.0f },
+        fromRgba(0xFFFFA45C).withAlpha(0.22f));
+
+    // Прицел в центре и карточка задания снизу.
+    const float crossY = scene.top + scene.height() * 0.46f;
+    renderer.drawLine(scene.centerX() - 7.0f, crossY, scene.centerX() + 7.0f, crossY,
+        fromRgba(0xFFFFFFFF).withAlpha(0.55f), 1.2f);
+    renderer.drawLine(scene.centerX(), crossY - 7.0f, scene.centerX(), crossY + 7.0f,
+        fromRgba(0xFFFFFFFF).withAlpha(0.55f), 1.2f);
+
+    const float taskTop = scene.bottom - 44.0f;
+    renderer.text(L"Задание · Погоня в Найт-Сити",
+        Rect{ scene.left + 20.0f, taskTop, scene.left + 260.0f, taskTop + 16.0f }, TextRole::Tiny,
+        fromRgba(0xFFFFFFFF).withAlpha(0.72f));
+    const Rect progress{ scene.left + 20.0f, taskTop + 22.0f, scene.left + scene.width() * 0.36f,
+        taskTop + 26.0f };
+    renderer.fillRoundRect(progress, 2.0f, fromRgba(0xFFFFFFFF).withAlpha(0.14f));
+    renderer.fillRoundRect(Rect{ progress.left, progress.top, progress.left + progress.width() * 0.25f,
+                               progress.bottom },
+        2.0f, fromRgba(0xFFFFFFFF).withAlpha(0.8f));
+    renderer.text(L"24", Rect{ scene.right - 92.0f, taskTop + 6.0f, scene.right - 46.0f, taskTop + 34.0f },
+        TextRole::Value, fromRgba(0xFFFFFFFF).withAlpha(0.92f), TextAlign::Right);
+    renderer.text(L"/ 96", Rect{ scene.right - 46.0f, taskTop + 12.0f, scene.right - 18.0f, taskTop + 32.0f },
+        TextRole::Small, fromRgba(0xFFFFFFFF).withAlpha(0.55f));
+
+    maskCorners(renderer, scene, 14.0f, theme.panel);
+}
+
 void drawPreviewCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card,
     std::vector<UiHit>& hits)
 {
@@ -90,18 +204,10 @@ void drawPreviewCard(Renderer& renderer, const AppModel& model, const Theme& the
 
     const Rect scene{ inner.left, inner.top + 46.0f, inner.right, inner.bottom };
 
-    // Макет игровой сцены: небо, земля и пара силуэтов — на нём видно, как читается оверлей.
-    renderer.fillRoundRect(scene, kCardRadius, theme.panelSoft);
-    renderer.fillRect(Rect{ scene.left + 1.0f, scene.centerY() + 14.0f, scene.right - 1.0f, scene.bottom - 1.0f },
-        theme.background.withAlpha(0.55f));
-    renderer.fillCircle(scene.right - 74.0f, scene.top + 56.0f, 22.0f, theme.warn.withAlpha(0.16f));
-    for (int index = 0; index < 5; ++index) {
-        const float width = 26.0f + static_cast<float>(index % 3) * 12.0f;
-        const float left = scene.left + 26.0f + static_cast<float>(index) * 58.0f;
-        const float height = 40.0f + static_cast<float>(index % 4) * 22.0f;
-        renderer.fillRoundRect(
-            Rect{ left, scene.bottom - height, left + width, scene.bottom }, 3.0f, theme.line.withAlpha(0.8f));
-    }
+    // Сцена: на ней сразу видно, читается ли оверлей поверх живого фона.
+    renderer.pushClip(scene);
+    drawSceneBackdrop(renderer, scene, theme);
+    renderer.popClip();
 
     const OverlayFormats formats{ renderer.dwrite(), renderer.textFormat(TextRole::Heading),
         renderer.textFormat(TextRole::Value), renderer.textFormat(TextRole::Small),
@@ -110,7 +216,7 @@ void drawPreviewCard(Renderer& renderer, const AppModel& model, const Theme& the
     const float scale = static_cast<float>(model.settings.overlay.scalePercent) / 100.0f * 0.9f;
     paintOverlay(renderer.target(), model.settings.overlay, theme, text, scene, scale, formats);
 
-    renderer.strokeRoundRect(scene, kCardRadius, theme.line, 1.0f);
+    renderer.strokeRoundRect(scene, 14.0f, theme.line, 1.0f);
     hits.push_back(UiHit{ scene, ActionKind::DragOverlay, 0 });
 }
 
