@@ -385,22 +385,40 @@ void drawStatusBar(Renderer& renderer, const AppModel& model, const Theme& theme
     if (model.paused) {
         left += L" · сбор на паузе";
     }
-    renderer.text(left, Rect{ kRailWidth + 26.0f, top, kRailWidth + 460.0f, renderer.height() }, TextRole::Tiny,
-        theme.textFaint);
 
     const std::wstring right = L"приложение " + wideMetric(MetricId::SelfCpu, model.store.value(MetricId::SelfCpu))
         + L" · " + wideMetric(MetricId::SelfRam, model.store.value(MetricId::SelfRam))
         + L" · сессия " + formatClock(model.elapsedMs);
-    renderer.text(right, Rect{ renderer.width() - 520.0f, top, renderer.width() - 18.0f, renderer.height() },
-        TextRole::Tiny, theme.textFaint, TextAlign::Right);
 
     const std::wstring center = model.overlayError.empty()
         ? std::wstring(L"F10 — оверлей · F11 — положение · F12 — окно · оверлей тянется мышью")
         : model.overlayError;
-    const float hintsWidth = renderer.measureText(center.c_str(), TextRole::Tiny);
-    renderer.text(center, Rect{ renderer.width() * 0.5f - hintsWidth * 0.5f, top,
-                             renderer.width() * 0.5f + hintsWidth * 0.5f, renderer.height() },
-        TextRole::Tiny, model.overlayError.empty() ? theme.textFaint : theme.danger, TextAlign::Center);
+
+    // Три части статус-бара показываем только тогда, когда они не наезжают друг на друга:
+    // в узком окне раньше «F10 — оверлей» ложилось на «ETW-сессия активна».
+    const float leftWidth = renderer.measureText(left, TextRole::Tiny);
+    const float rightWidth = renderer.measureText(right, TextRole::Tiny);
+    const float centerWidth = renderer.measureText(center, TextRole::Tiny);
+    const float gap = 16.0f;
+    float leftEdge = kRailWidth + 26.0f;
+    float rightEdge = renderer.width() - 18.0f;
+
+    renderer.text(left, Rect{ leftEdge, top, leftEdge + leftWidth + 2.0f, renderer.height() }, TextRole::Tiny,
+        theme.textFaint);
+    leftEdge += leftWidth + gap;
+
+    const bool showRight = rightEdge - rightWidth - gap > leftEdge;
+    if (showRight) {
+        renderer.text(right, Rect{ rightEdge - rightWidth, top, rightEdge, renderer.height() }, TextRole::Tiny,
+            theme.textFaint, TextAlign::Right);
+        rightEdge -= rightWidth + gap;
+    }
+
+    const float centerLeft = renderer.width() * 0.5f - centerWidth * 0.5f;
+    if (rightEdge - centerWidth > leftEdge && centerLeft >= leftEdge && centerLeft + centerWidth <= rightEdge) {
+        renderer.text(center, Rect{ centerLeft, top, centerLeft + centerWidth, renderer.height() }, TextRole::Tiny,
+            model.overlayError.empty() ? theme.textFaint : theme.danger, TextAlign::Center);
+    }
 }
 
 } // namespace yawa
