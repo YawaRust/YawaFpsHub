@@ -89,7 +89,7 @@ private:
     std::array<std::uint64_t, 16> m_coreIdleTicks{};
     std::array<std::uint64_t, 16> m_coreTotalTicks{};
     std::array<std::uint64_t, 16> m_previousCoreIdle{};
-    std::array<std::uint64_t, 64> m_previousCoreTotal{};
+    std::array<std::uint64_t, 16> m_previousCoreTotal{};
     bool m_hasCoreTimes = false;
     // Диагностика: код возврата и размер ответа системного вызова по ядрам.
     long m_coreQueryStatus = 0;
