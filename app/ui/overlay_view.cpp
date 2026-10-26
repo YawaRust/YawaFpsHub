@@ -105,6 +105,59 @@ void drawColorRow(Renderer& renderer, const AppModel& model, const Theme& theme,
     }
 }
 
+// Цвет одной строки оверлея: «авто» и шесть цветов палитры. Значение хита кодирует
+// и номер строки, и цвет, чтобы обойтись одним действием.
+void drawRowColorRow(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& row,
+    std::wstring_view caption, int selected, int field, std::vector<UiHit>& hits)
+{
+    renderer.text(caption, Rect{ row.left, row.top, row.left + 60.0f, row.bottom }, TextRole::Small,
+        theme.textDim);
+
+    constexpr int kCount = kOverlayColorCount + 1;
+    const float chipWidth = 22.0f;
+    const float gap = 4.0f;
+    const float total = static_cast<float>(kCount) * chipWidth + static_cast<float>(kCount - 1) * gap;
+    float left = row.right - total;
+    const auto palette = overlayColorPalette();
+    for (int index = -1; index < kOverlayColorCount; ++index) {
+        const Rect chip{ left, row.top, left + chipWidth, row.top + 20.0f };
+        const bool active = index == selected;
+        const bool hover = isHovered(model, chip);
+        renderer.fillRoundRect(chip, 6.0f, active ? theme.accentSoft : theme.panelSoft.withAlpha(hover ? 0.95f : 0.6f));
+        if (active) {
+            renderer.strokeRoundRect(chip, 6.0f, theme.accentGlow, 1.0f);
+        }
+        if (index < 0) {
+            renderer.text(L"а", chip, TextRole::Tiny, active ? theme.accent : theme.textFaint, TextAlign::Center);
+        } else {
+            renderer.fillCircle(chip.centerX(), chip.centerY(), 5.5f,
+                palette[static_cast<std::size_t>(index)].withAlpha(active ? 1.0f : 0.85f));
+        }
+        hits.push_back(UiHit{ chip, ActionKind::SetRowColor, field * 8 + index + 1 });
+        left += chipWidth + gap;
+    }
+}
+
+// Тройной выбор «как в стиле / включено / выключено» для необязательных переключателей.
+void drawTriState(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& row,
+    std::wstring_view caption, int mode, ActionKind action, std::vector<UiHit>& hits)
+{
+    renderer.text(caption, Rect{ row.left, row.top, row.right - 150.0f, row.bottom }, TextRole::Small,
+        theme.textDim);
+    const std::array<std::wstring_view, 3> names{ L"Стиль", L"Вкл", L"Выкл" };
+    const std::array<int, 3> values{ -1, 1, 0 };
+    const float chipWidth = 46.0f;
+    const float gap = 5.0f;
+    float left = row.right - (chipWidth * 3.0f + gap * 2.0f);
+    for (std::size_t index = 0; index < names.size(); ++index) {
+        const Rect chip{ left, row.top, left + chipWidth, row.top + 22.0f };
+        const bool active = mode == values[index];
+        drawChip(renderer, chip, names[index], active, theme, TextRole::Tiny, isHovered(model, chip));
+        hits.push_back(UiHit{ chip, action, values[index] });
+        left += chipWidth + gap;
+    }
+}
+
 void drawToggleRow(Renderer& renderer, const Rect& row, std::wstring_view label, bool on, const Theme& theme,
     std::vector<UiHit>& hits, ActionKind action, int value)
 {
@@ -468,7 +521,64 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
     top += 26.0f;
     drawColorRow(renderer, model, theme, Rect{ inner.left, top, inner.right, top + 22.0f }, L"Цвет подписей",
         overlay.labelColor, ActionKind::SetLabelColor, hits);
+    top += 26.0f;
+    drawColorRow(renderer, model, theme, Rect{ inner.left, top, inner.right, top + 22.0f }, L"Цвет акцента",
+        overlay.accentColor, ActionKind::SetAccentColor, hits);
+    top += 26.0f;
+
+    // Каждая строка оверлея красится отдельно: так собираются свои наборы в духе Fpsmon.
+    renderer.text(L"Цвет строк", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small,
+        theme.textDim);
+    top += 18.0f;
+    const std::array<std::wstring_view, kLabelCount> rowNames{ L"Кадры", L"Процессор", L"Видеокарта", L"Память",
+        L"Видеопамять" };
+    for (std::size_t index = 0; index < kLabelCount; ++index) {
+        if (top + 20.0f > inner.bottom) {
+            break;
+        }
+        drawRowColorRow(renderer, model, theme, Rect{ inner.left, top, inner.right, top + 20.0f },
+            rowNames[index], overlay.rowColors[index], static_cast<int>(index), hits);
+        top += 22.0f;
+    }
+    top += 6.0f;
+
+    // Рамка: толщина от 0 до 3 px, «из стиля» — у каждого пресета своя.
+    const int borderValue = overlay.borderWidth;
+    drawSliderAt(renderer, Rect{ inner.left, top, inner.right, top + 34.0f },
+        borderValue < 0 ? 1.0f / 3.0f : static_cast<float>(borderValue) / 3.0f, L"Толщина рамки",
+        borderValue < 0 ? L"из стиля" : std::to_wstring(borderValue) + L" px", theme, hits,
+        ActionKind::SetBorderWidth);
+    top += 44.0f;
+
+    drawSlider(renderer, Rect{ inner.left, top, inner.right, top + 34.0f }, overlay.shadowStrength, 0, 100,
+        L"Сила тени", theme, hits, ActionKind::SetShadowStrength, L" %");
+    top += 44.0f;
+
+    // Межбуквенный интервал: 100 % — как в пресете, 200 % — разрядка для неоновых стилей.
+    drawSlider(renderer, Rect{ inner.left, top, inner.right, top + 34.0f }, overlay.letterSpacing, 0, 200,
+        L"Интервал букв", theme, hits, ActionKind::SetLetterSpacing, L" %");
+    top += 44.0f;
+
+    drawTriState(renderer, model, theme, Rect{ inner.left, top, inner.right, top + 22.0f }, L"Заглавные подписи",
+        overlay.uppercaseMode, ActionKind::SetUppercase, hits);
     top += 28.0f;
+    drawTriState(renderer, model, theme, Rect{ inner.left, top, inner.right, top + 22.0f }, L"Разделители строк",
+        overlay.separatorsMode, ActionKind::SetSeparators, hits);
+    top += 28.0f;
+
+    // Знаки после запятой у кадров: «Стиль» — как в пресете, 0…2 — жёстко.
+    renderer.text(L"Знаки у FPS", Rect{ inner.left, top, inner.right - 200.0f, top + 22.0f }, TextRole::Small,
+        theme.textDim);
+    const std::array<std::wstring_view, 4> decimalNames{ L"Стиль", L"0", L"1", L"2" };
+    const std::array<int, 4> decimalValues{ -1, 0, 1, 2 };
+    for (std::size_t index = 0; index < decimalNames.size(); ++index) {
+        const Rect chip{ inner.right - 194.0f + static_cast<float>(index) * 50.0f, top,
+            inner.right - 194.0f + static_cast<float>(index) * 50.0f + 44.0f, top + 22.0f };
+        drawChip(renderer, chip, decimalNames[index], overlay.fpsDecimals == decimalValues[index], theme,
+            TextRole::Tiny, isHovered(model, chip));
+        hits.push_back(UiHit{ chip, ActionKind::SetFpsDecimals, decimalValues[index] });
+    }
+    top += 30.0f;
 
     renderer.text(L"Смещение", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
     top += 20.0f;
@@ -575,7 +685,7 @@ void drawOverlayView(Renderer& renderer, const AppModel& model, const Theme& the
 
     drawClipped(place(430.0f),
         [&](const Rect& card) { drawPreviewCard(renderer, model, theme, card, hits); });
-    drawClipped(place(880.0f),
+    drawClipped(place(1440.0f),
         [&](const Rect& card) { drawControlsCard(renderer, model, theme, card, hits); });
     drawClipped(place(232.0f),
         [&](const Rect& card) { drawLabelsCard(renderer, model, theme, card, hits); });

@@ -71,6 +71,17 @@ DerivedValues deriveValues(const SystemSnapshot& snapshot, const SystemSampler::
     values.ramCacheGb = toGigabytes(snapshot.memoryCacheBytes);
     values.ramFreeGb = toGigabytes(snapshot.memoryFreeBytes);
     values.pageFileGb = toGigabytes(snapshot.pageFileUsedBytes);
+    // Загрузка ОЗУ и файла подкачки — проценты от их полного объёма.
+    values.ramLoad = snapshot.memoryTotalBytes > 0
+        ? 100.0 * static_cast<double>(usedBytes) / static_cast<double>(snapshot.memoryTotalBytes)
+        : 0.0;
+    values.pageFileLoad = snapshot.pageFileTotalBytes > 0
+        ? 100.0 * static_cast<double>(snapshot.pageFileUsedBytes) / static_cast<double>(snapshot.pageFileTotalBytes)
+        : 0.0;
+    values.pageFileTotalGb = toGigabytes(snapshot.pageFileTotalBytes);
+
+    values.ramLoad = std::clamp(values.ramLoad, 0.0, 100.0);
+    values.pageFileLoad = std::clamp(values.pageFileLoad, 0.0, 100.0);
 
     values.vramUsedGb = toGigabytes(snapshot.vramUsedBytes);
     values.vramTotalGb = toGigabytes(snapshot.vramBudgetBytes);
@@ -112,6 +123,9 @@ void applySnapshot(MetricStore& store, const SystemSnapshot& snapshot, const Der
     store.set(MetricId::GpuMemClock, snapshot.gpuMemClockMhz);
     store.set(MetricId::GpuPower, snapshot.gpuPowerWatts);
     store.set(MetricId::GpuFan, static_cast<double>(snapshot.gpuFanRpm));
+    store.set(MetricId::GpuEncode, snapshot.gpuEncodePercent, smoothingPercent);
+    store.set(MetricId::GpuDecode, snapshot.gpuDecodePercent, smoothingPercent);
+    store.set(MetricId::PcieLoad, snapshot.pcieLoadPercent, smoothingPercent);
     store.set(MetricId::VramUsed, values.vramUsedGb);
     store.set(MetricId::VramTotal, values.vramTotalGb);
 
@@ -119,6 +133,8 @@ void applySnapshot(MetricStore& store, const SystemSnapshot& snapshot, const Der
     store.set(MetricId::RamCache, values.ramCacheGb);
     store.set(MetricId::RamFree, values.ramFreeGb);
     store.set(MetricId::PageFile, values.pageFileGb);
+    store.set(MetricId::RamLoad, values.ramLoad, smoothingPercent);
+    store.set(MetricId::PageFileLoad, values.pageFileLoad, smoothingPercent);
 
     store.set(MetricId::DiskRead, values.diskRead);
     store.set(MetricId::DiskWrite, values.diskWrite);

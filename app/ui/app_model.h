@@ -71,6 +71,15 @@ enum class ActionKind : std::uint8_t {
     SetOverlayRowGap,
     SetValueColor,
     SetLabelColor,
+    SetAccentColor,
+    // Цвет конкретной строки: value = поле * 8 + (цвет + 1), 0 — «как в стиле».
+    SetRowColor,
+    SetBorderWidth,
+    SetShadowStrength,
+    SetLetterSpacing,
+    SetUppercase,
+    SetSeparators,
+    SetFpsDecimals,
     ToggleOverlayClickThrough,
     // Полосы прокрутки: бегунок тянется мышью, дорожка листает на страницу.
     ScrollContentTrack,

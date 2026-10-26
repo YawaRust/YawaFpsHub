@@ -63,6 +63,21 @@ struct OverlaySettings {
     // -1 — цвет из пресета, 0…5 — цвет палитры для значений и для подписей.
     int valueColor = -1;
     int labelColor = -1;
+    // Цвет каждой строки отдельно: в пресетах Fpsmon строки различаются цветом.
+    std::array<int, kLabelCount> rowColors{ -1, -1, -1, -1, -1 };
+    // -1 — акцент из пресета, иначе цвет палитры для линий, рамки и заголовков.
+    int accentColor = -1;
+    // -1 — толщина из пресета, 0 — без рамки, 1…3 — толщина в пикселях.
+    int borderWidth = -1;
+    // Сила тени и межбуквенный интервал — в процентах от пресета.
+    int shadowStrength = 100;
+    int letterSpacing = 100;
+    // -1 — как в пресете, 0 — обычные подписи, 1 — заглавными.
+    int uppercaseMode = -1;
+    // -1 — как в пресете, 0 — без разделителей строк, 1 — с разделителями.
+    int separatorsMode = -1;
+    // -1 — как в пресете, иначе 0…2 знака после запятой у кадров в секунду.
+    int fpsDecimals = -1;
     // Сквозной клик: окно оверлея полностью пропускает мышь в игру. Выключается хоткеем,
     // когда оверлей нужно перетащить.
     bool clickThrough = false;
@@ -75,7 +90,9 @@ struct UiSettings {
     Accent accent = Accent::Mint;
     bool compactDensity = false;
     bool animate = true;
-    bool closeToTray = true;
+    // По умолчанию приложение просто закрывается: неожиданный уход в трей пугает,
+    // и человек ищет окно, которого больше нет.
+    bool closeToTray = false;
 };
 
 struct GpuSelection {

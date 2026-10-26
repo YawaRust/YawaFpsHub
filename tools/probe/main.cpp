@@ -79,6 +79,8 @@ void printHeader(const yawa::SystemSensors& sensors)
     std::printf("  Память %s, диск %s, сеть %s\n", mark(state.memory), mark(state.disk), mark(state.network));
     std::printf("  GPU: нагрузка %s, видеопамять %s, температура %s, питание %s\n", mark(state.gpuLoad),
         mark(state.gpuMemory), mark(state.gpuTemperature), mark(state.gpuPower));
+    std::printf("  Медиа-движки %s, PCI-e %s, файл подкачки %s\n", mark(state.gpuMedia), mark(state.pcie),
+        mark(state.pageFile));
 
     const yawa::GpuRegistry& gpus = sensors.gpus();
     for (std::size_t index = 0; index < gpus.count(); ++index) {
@@ -117,6 +119,14 @@ std::string formatLine(const yawa::MetricStore& store)
     line += " | FPS " + value(yawa::MetricId::Fps) + " (1% " + value(yawa::MetricId::Low1Fps) + ")";
     line += " | Диск " + value(yawa::MetricId::DiskRead) + " / " + value(yawa::MetricId::DiskWrite);
     line += " | Сеть " + value(yawa::MetricId::NetDown) + " / " + value(yawa::MetricId::NetUp);
+    if (store.hasValue(yawa::MetricId::GpuEncode) || store.hasValue(yawa::MetricId::GpuDecode)) {
+        line += " | Кодек " + value(yawa::MetricId::GpuEncode) + " / " + value(yawa::MetricId::GpuDecode);
+    }
+    if (store.hasValue(yawa::MetricId::PcieLoad)) {
+        line += " | PCI-e " + value(yawa::MetricId::PcieLoad);
+    }
+    line += " | ОЗУ " + value(yawa::MetricId::RamLoad) + ", подкачка " + value(yawa::MetricId::PageFile) + " ("
+        + value(yawa::MetricId::PageFileLoad) + ")";
     return line;
 }
 

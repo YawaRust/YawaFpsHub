@@ -1001,6 +1001,10 @@ void MainWindow::applySlider(ActionKind action, const Rect& rect, float x)
         hit.value = static_cast<int>(std::lround(fraction * 14.0f));
     } else if (action == ActionKind::SetOverlayRadius) {
         hit.value = static_cast<int>(std::lround(fraction * 24.0f));
+    } else if (action == ActionKind::SetBorderWidth) {
+        hit.value = static_cast<int>(std::lround(fraction * 3.0f));
+    } else if (action == ActionKind::SetLetterSpacing) {
+        hit.value = static_cast<int>(std::lround(fraction * 200.0f));
     } else {
         hit.value = static_cast<int>(std::lround(fraction * 100.0f));
     }
@@ -1338,6 +1342,62 @@ void MainWindow::applyAction(const UiHit& hit)
 
     case ActionKind::SetLabelColor:
         m_model.settings.overlay.labelColor = std::clamp(hit.value, -1, kOverlayColorCount - 1);
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
+    case ActionKind::SetAccentColor:
+        m_model.settings.overlay.accentColor = std::clamp(hit.value, -1, kOverlayColorCount - 1);
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
+    case ActionKind::SetRowColor: {
+        const int field = hit.value / 8;
+        const int color = hit.value % 8 - 1;
+        if (field >= 0 && field < static_cast<int>(kLabelCount)) {
+            m_model.settings.overlay.rowColors[static_cast<std::size_t>(field)]
+                = std::clamp(color, -1, kOverlayColorCount - 1);
+            m_overlay.setSettings(m_model.settings.overlay);
+            saveSettings();
+        }
+        break;
+    }
+
+    case ActionKind::SetBorderWidth:
+        // Цвета, рамка, тень и типографика применяются без анимации:
+        // пользователь двигает ползунок и ждёт мгновенного отклика.
+        m_model.settings.overlay.borderWidth = std::clamp(hit.value, -1, 3);
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
+    case ActionKind::SetShadowStrength:
+        m_model.settings.overlay.shadowStrength = std::clamp(hit.value, 0, 100);
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
+    case ActionKind::SetLetterSpacing:
+        m_model.settings.overlay.letterSpacing = std::clamp(hit.value, 0, 200);
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
+    case ActionKind::SetUppercase:
+        m_model.settings.overlay.uppercaseMode = std::clamp(hit.value, -1, 1);
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
+    case ActionKind::SetSeparators:
+        m_model.settings.overlay.separatorsMode = std::clamp(hit.value, -1, 1);
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
+    case ActionKind::SetFpsDecimals:
+        m_model.settings.overlay.fpsDecimals = std::clamp(hit.value, -1, 2);
         m_overlay.setSettings(m_model.settings.overlay);
         saveSettings();
         break;

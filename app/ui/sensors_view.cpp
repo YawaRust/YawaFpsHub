@@ -43,9 +43,10 @@ std::vector<Group> makeGroups(std::uint32_t cores)
                         MetricId::DroppedFrames } },
         { L"Процессор", std::move(cpu) },
         { L"Видеокарта", { MetricId::GpuLoad, MetricId::GpuTemp, MetricId::GpuHotspot, MetricId::GpuClock,
-                             MetricId::GpuMemClock, MetricId::GpuPower, MetricId::GpuFan, MetricId::VramUsed,
-                             MetricId::VramTotal } },
-        { L"Память", { MetricId::RamUsed, MetricId::RamCache, MetricId::RamFree, MetricId::PageFile } },
+                             MetricId::GpuMemClock, MetricId::GpuPower, MetricId::GpuFan, MetricId::GpuEncode,
+                             MetricId::GpuDecode, MetricId::PcieLoad, MetricId::VramUsed, MetricId::VramTotal } },
+        { L"Память", { MetricId::RamUsed, MetricId::RamLoad, MetricId::RamCache, MetricId::RamFree,
+                         MetricId::PageFile, MetricId::PageFileLoad } },
         { L"Диски и сеть", { MetricId::DiskRead, MetricId::DiskWrite, MetricId::DiskTemp, MetricId::NetDown,
                                MetricId::NetUp } },
         { L"Система", { MetricId::ChipsetTemp, MetricId::SelfCpu, MetricId::SelfRam, MetricId::SelfThreads } },
@@ -56,15 +57,42 @@ std::vector<Group> makeGroups(std::uint32_t cores)
 int overlayField(MetricId id)
 {
     switch (id) {
+    // В оверлее пять строк; все датчики одной темы управляют своей строкой,
+    // поэтому «глаз» работает у каждой строки, а не только у пяти.
     case MetricId::Fps:
+    case MetricId::FrameTime:
+    case MetricId::Low1Fps:
+    case MetricId::Low01Fps:
+    case MetricId::AvgFps:
+    case MetricId::DroppedFrames:
         return static_cast<int>(LabelField::Fps);
     case MetricId::CpuLoad:
+    case MetricId::CpuTemp:
+    case MetricId::CpuClock:
+    case MetricId::CpuPeakLoad:
+    case MetricId::GameThreadLoad:
+    case MetricId::CpuPower:
         return static_cast<int>(LabelField::Cpu);
     case MetricId::GpuLoad:
+    case MetricId::GpuTemp:
+    case MetricId::GpuHotspot:
+    case MetricId::GpuClock:
+    case MetricId::GpuMemClock:
+    case MetricId::GpuPower:
+    case MetricId::GpuFan:
+    case MetricId::GpuEncode:
+    case MetricId::GpuDecode:
+    case MetricId::PcieLoad:
         return static_cast<int>(LabelField::Gpu);
     case MetricId::RamUsed:
+    case MetricId::RamLoad:
+    case MetricId::RamCache:
+    case MetricId::RamFree:
+    case MetricId::PageFile:
+    case MetricId::PageFileLoad:
         return static_cast<int>(LabelField::Ram);
     case MetricId::VramUsed:
+    case MetricId::VramTotal:
         return static_cast<int>(LabelField::Vram);
     default:
         return -1;
@@ -75,6 +103,18 @@ bool valueKnown(MetricId id, const AppModel& model)
 {
     if (!model.store.hasValue(id)) {
         return false;
+    }
+
+    // Медиа-движки и PCI-e есть только там, где их реально отдают счётчики/драйвер.
+    if (id == MetricId::GpuEncode || id == MetricId::GpuDecode) {
+        return model.availability.gpuMedia;
+    }
+    if (id == MetricId::PcieLoad) {
+        return model.availability.pcie;
+    }
+    if (id == MetricId::PageFileLoad) {
+        // Ноль процентов — валидное значение: подкачка может быть пустой.
+        return model.availability.pageFile;
     }
 
     // Ноль у этих датчиков означает «источника нет», а не реальный ноль.
@@ -420,27 +460,36 @@ void drawSensors(Renderer& renderer, AppModel& model, const Theme& theme, const 
             // «Глаз» есть у каждой строки, как в демо: серый — датчик не в оверлее,
             // зелёный — показывается. Строки, которых нет в оверлее, рисуют неактивный глаз.
             const int field = overlayField(id);
+            // Кликабельная область глаза — вся правая колонка строки: попасть в иконку
+            // 26×30 мышью было почти невозможно.
+            const Rect eyeHit{ rowRight - 40.0f, rowTop, rowRight - 2.0f, rowTop + kRowHeight };
             const Rect eye{ rowRight - 34.0f, rowTop + 4.0f, rowRight - 6.0f, rowTop + kRowHeight - 4.0f };
             const bool pinned = field >= 0
                 && model.settings.overlay.visible[static_cast<std::size_t>(field)];
-            const bool eyeHover = field >= 0 && isHovered(model, eye);
-            // Как в демо: выключенный «глаз» — просто серый контур, включённый — зелёный чип.
-            const Color eyeColor = pinned ? theme.accent : theme.textFaint;
+            const bool eyeHover = field >= 0 && isHovered(model, eyeHit);
+            // Как в демо: выключенный «глаз» — серый перечёркнутый контур, включённый — зелёный чип.
+            const Color eyeColor = pinned ? theme.accent : (eyeHover ? theme.textDim : theme.textFaint);
             if (pinned || eyeHover) {
                 renderer.fillRoundRect(eye, 8.0f, pinned ? theme.accentSoft : theme.panelSoft);
             }
             if (pinned) {
                 renderer.strokeRoundRect(eye, 8.0f, theme.accentGlow, 1.0f);
             }
+            // Настоящий «глаз»: веко-эллипс и зрачок; выключенный перечёркнут косой чертой.
             const float centerX = eye.centerX();
             const float centerY = eye.centerY();
-            renderer.strokeCircle(centerX, centerY, 4.5f, eyeColor, 1.2f);
-            renderer.fillCircle(centerX, centerY, 1.8f, eyeColor);
-            if (field >= 0) {
-                hits.push_back(UiHit{ eye, ActionKind::ToggleMetric, field });
+            renderer.strokeEllipse(centerX, centerY, 7.0f, 4.4f, eyeColor, 1.3f);
+            renderer.fillCircle(centerX, centerY, pinned ? 2.2f : 1.7f, eyeColor);
+            if (!pinned) {
+                renderer.drawLine(centerX - 6.6f, centerY + 4.4f, centerX + 6.6f, centerY - 4.4f, eyeColor, 1.3f);
             }
 
+            // Строка попадает в список хитов раньше глаза: обработчик берёт последний
+            // подходящий хит, поэтому раньше клик по глазу гасился пустым действием строки.
             hits.push_back(UiHit{ row, ActionKind::None, static_cast<int>(index) });
+            if (field >= 0) {
+                hits.push_back(UiHit{ eyeHit, ActionKind::ToggleMetric, field });
+            }
         }
 
         top += kRowHeight;

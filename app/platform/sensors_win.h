@@ -26,12 +26,15 @@ struct SensorAvailability {
     bool cpuTemperature = false;
     bool gameThread = false;
     bool memory = false;
+    bool pageFile = false;
     bool disk = false;
     bool network = false;
     bool gpuLoad = false;
     bool gpuMemory = false;
     bool gpuTemperature = false;
     bool gpuPower = false;
+    bool gpuMedia = false;
+    bool pcie = false;
 };
 
 class SystemSensors {

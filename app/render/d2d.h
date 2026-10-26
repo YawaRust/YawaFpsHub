@@ -67,6 +67,9 @@ public:
     // Мягкое радиальное свечение — фон прототипа: акцент в левом верхнем углу.
     void fillRadialGlow(float centerX, float centerY, float radius, const Color& color);
     void strokeCircle(float centerX, float centerY, float radius, const Color& color, float thickness = 1.0f);
+    // Эллипс: из него собирается настоящий «глаз» в таблице датчиков.
+    void strokeEllipse(float centerX, float centerY, float radiusX, float radiusY, const Color& color,
+        float thickness = 1.0f);
     void drawLine(float x1, float y1, float x2, float y2, const Color& color, float thickness = 1.0f);
     void drawDashedLine(float x1, float y1, float x2, float y2, const Color& color, float thickness);
 

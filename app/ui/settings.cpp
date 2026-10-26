@@ -165,6 +165,14 @@ void applyStyleDefaults(OverlaySettings& overlay, OverlayStyle style)
     overlay.rowGapPx = -1;
     overlay.valueColor = -1;
     overlay.labelColor = -1;
+    overlay.accentColor = -1;
+    overlay.rowColors = { -1, -1, -1, -1, -1 };
+    overlay.borderWidth = -1;
+    overlay.shadowStrength = 100;
+    overlay.letterSpacing = 100;
+    overlay.uppercaseMode = -1;
+    overlay.separatorsMode = -1;
+    overlay.fpsDecimals = -1;
     overlay.textScalePercent = 100;
 }
 
@@ -387,6 +395,28 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                 target.overlay.valueColor = std::clamp(parseInt(value, target.overlay.valueColor), -1, 5);
             } else if (key == "label_color") {
                 target.overlay.labelColor = std::clamp(parseInt(value, target.overlay.labelColor), -1, 5);
+            } else if (key == "accent_color") {
+                target.overlay.accentColor = std::clamp(parseInt(value, target.overlay.accentColor), -1, 5);
+            } else if (key == "border_width") {
+                target.overlay.borderWidth = std::clamp(parseInt(value, target.overlay.borderWidth), -1, 3);
+            } else if (key == "shadow_strength") {
+                target.overlay.shadowStrength = std::clamp(parseInt(value, target.overlay.shadowStrength), 0, 100);
+            } else if (key == "letter_spacing") {
+                target.overlay.letterSpacing = std::clamp(parseInt(value, target.overlay.letterSpacing), 0, 200);
+            } else if (key == "uppercase") {
+                target.overlay.uppercaseMode = std::clamp(parseInt(value, target.overlay.uppercaseMode), -1, 1);
+            } else if (key == "separators") {
+                target.overlay.separatorsMode = std::clamp(parseInt(value, target.overlay.separatorsMode), -1, 1);
+            } else if (key == "fps_decimals") {
+                target.overlay.fpsDecimals = std::clamp(parseInt(value, target.overlay.fpsDecimals), -1, 2);
+            } else if (key.size() > 10 && key.substr(0, 10) == "row_color_") {
+                for (std::size_t index = 0; index < kLabelCount; ++index) {
+                    const auto field = static_cast<LabelField>(index);
+                    if (key.substr(10) == labelKey(field)) {
+                        target.overlay.rowColors[index] = std::clamp(
+                            parseInt(value, target.overlay.rowColors[index]), -1, 5);
+                    }
+                }
             } else if (key == "click_through") {
                 target.overlay.clickThrough = parseBool(value, target.overlay.clickThrough);
             } else if (key.size() > 5 && key.substr(0, 5) == "show_") {
@@ -478,6 +508,18 @@ std::string serializeSettings(const Settings& settings)
     text += "row_gap = " + std::to_string(settings.overlay.rowGapPx) + "\n";
     text += "value_color = " + std::to_string(settings.overlay.valueColor) + "\n";
     text += "label_color = " + std::to_string(settings.overlay.labelColor) + "\n";
+    text += "accent_color = " + std::to_string(settings.overlay.accentColor) + "\n";
+    text += "border_width = " + std::to_string(settings.overlay.borderWidth) + "\n";
+    text += "shadow_strength = " + std::to_string(settings.overlay.shadowStrength) + "\n";
+    text += "letter_spacing = " + std::to_string(settings.overlay.letterSpacing) + "\n";
+    text += "uppercase = " + std::to_string(settings.overlay.uppercaseMode) + "\n";
+    text += "separators = " + std::to_string(settings.overlay.separatorsMode) + "\n";
+    text += "fps_decimals = " + std::to_string(settings.overlay.fpsDecimals) + "\n";
+    for (std::size_t index = 0; index < kLabelCount; ++index) {
+        const auto field = static_cast<LabelField>(index);
+        text += std::string("row_color_") + std::string(labelKey(field)) + " = "
+            + std::to_string(settings.overlay.rowColors[index]) + "\n";
+    }
     text += std::string("click_through = ") + (settings.overlay.clickThrough ? "1" : "0") + "\n";
     for (std::size_t index = 0; index < kLabelCount; ++index) {
         const auto field = static_cast<LabelField>(index);

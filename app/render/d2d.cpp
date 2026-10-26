@@ -341,6 +341,16 @@ void Renderer::strokeCircle(float centerX, float centerY, float radius, const Co
     m_target->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(centerX, centerY), radius, radius), brush, thickness);
 }
 
+void Renderer::strokeEllipse(float centerX, float centerY, float radiusX, float radiusY, const Color& color,
+    float thickness)
+{
+    ID2D1SolidColorBrush* brush = brushFor(color);
+    if (brush == nullptr) {
+        return;
+    }
+    m_target->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(centerX, centerY), radiusX, radiusY), brush, thickness);
+}
+
 void Renderer::drawArc(float centerX, float centerY, float radius, float thickness, float sweepFraction,
     const Color& color)
 {

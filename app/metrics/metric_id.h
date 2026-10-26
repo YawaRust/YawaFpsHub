@@ -44,6 +44,11 @@ enum class MetricId : std::uint8_t {
     GpuMemClock,
     GpuPower,
     GpuFan,
+    // Медиа-движки GPU и шина: кодирование/декодирование видео считаются по тем же
+    // счётчикам GPU Engine, что и 3D, поэтому работают у NVIDIA, AMD и Intel.
+    GpuEncode,
+    GpuDecode,
+    PcieLoad,
     VramUsed,
     VramTotal,
 
@@ -51,6 +56,8 @@ enum class MetricId : std::uint8_t {
     RamCache,
     RamFree,
     PageFile,
+    RamLoad,
+    PageFileLoad,
 
     DiskRead,
     DiskWrite,
@@ -90,7 +97,7 @@ struct MetricInfo {
     std::uint8_t decimals;
 };
 
-constexpr std::size_t kMetricCount = 50;
+constexpr std::size_t kMetricCount = 55;
 
 inline constexpr std::array<MetricInfo, kMetricCount> kMetricTable{{
     { MetricId::Fps, "fps", "FPS", MetricUnit::Count, 0 },
@@ -114,6 +121,9 @@ inline constexpr std::array<MetricInfo, kMetricCount> kMetricTable{{
     { MetricId::GpuMemClock, "gpu_mem_clock", "Частота памяти", MetricUnit::Megahertz, 0 },
     { MetricId::GpuPower, "gpu_power", "Питание GPU", MetricUnit::Watts, 0 },
     { MetricId::GpuFan, "gpu_fan", "Вентилятор GPU", MetricUnit::Rpm, 0 },
+    { MetricId::GpuEncode, "gpu_encode", "Кодирование видео", MetricUnit::Percent, 0 },
+    { MetricId::GpuDecode, "gpu_decode", "Декодирование видео", MetricUnit::Percent, 0 },
+    { MetricId::PcieLoad, "pcie_load", "Нагрузка PCI-e", MetricUnit::Percent, 0 },
     { MetricId::VramUsed, "vram_used", "Видеопамять занято", MetricUnit::Gigabytes, 1 },
     { MetricId::VramTotal, "vram_total", "Видеопамять всего", MetricUnit::Gigabytes, 1 },
 
@@ -121,6 +131,8 @@ inline constexpr std::array<MetricInfo, kMetricCount> kMetricTable{{
     { MetricId::RamCache, "ram_cache", "Память в кэше", MetricUnit::Gigabytes, 1 },
     { MetricId::RamFree, "ram_free", "Память свободно", MetricUnit::Gigabytes, 1 },
     { MetricId::PageFile, "page_file", "Своп-файл", MetricUnit::Gigabytes, 1 },
+    { MetricId::RamLoad, "ram_load", "Загрузка ОЗУ", MetricUnit::Percent, 0 },
+    { MetricId::PageFileLoad, "page_file_load", "Загрузка файла подкачки", MetricUnit::Percent, 0 },
 
     { MetricId::DiskRead, "disk_read", "Диск: чтение", MetricUnit::MegabytesPerSecond, 0 },
     { MetricId::DiskWrite, "disk_write", "Диск: запись", MetricUnit::MegabytesPerSecond, 0 },

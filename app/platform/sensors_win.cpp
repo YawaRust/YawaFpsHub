@@ -665,6 +665,9 @@ void SystemSensors::sampleMemory(SystemSnapshot& snapshot)
         if (snapshot.pageFileUsedBytes > limit) {
             snapshot.pageFileUsedBytes = limit;
         }
+        // Полный файл подкачки — разница между лимитом фиксации и физической памятью.
+        snapshot.pageFileTotalBytes = limit > status.ullTotalPhys ? limit - status.ullTotalPhys : 0;
+        m_availability.pageFile = snapshot.pageFileTotalBytes > 0;
     }
 }
 
@@ -725,7 +728,12 @@ void SystemSensors::sampleGpu(SystemSnapshot& snapshot)
         const std::wstring tag = luidTag(adapter->luidLow, adapter->luidHigh);
         double allEngines = 0.0;
         double threeD = 0.0;
+        double encode = 0.0;
+        double decode = 0.0;
         bool hasThreeD = false;
+        bool hasEncode = false;
+        bool hasDecode = false;
+        bool anyEngine = false;
 
         for (const auto& [name, value] : m_gpuEngine.values()) {
             if (name.find(tag) == std::wstring::npos) {
@@ -733,14 +741,27 @@ void SystemSensors::sampleGpu(SystemSnapshot& snapshot)
             }
             const double utilization = std::clamp(value, 0.0, 100.0);
             allEngines += utilization;
+            anyEngine = true;
             if (name.find(L"engtype_3D") != std::wstring::npos) {
                 threeD += utilization;
                 hasThreeD = true;
+            } else if (name.find(L"engtype_VideoEncode") != std::wstring::npos) {
+                encode += utilization;
+                hasEncode = true;
+            } else if (name.find(L"engtype_VideoDecode") != std::wstring::npos) {
+                decode += utilization;
+                hasDecode = true;
             }
         }
 
         m_gpuLoad = std::clamp(hasThreeD ? threeD : allEngines, 0.0, 100.0);
         snapshot.gpuLoadPercent = m_gpuLoad;
+        // Медиа-движки считаются теми же счётчиками GPU Engine: работает у NVIDIA, AMD и Intel.
+        snapshot.gpuEncodePercent = std::clamp(encode, 0.0, 100.0);
+        snapshot.gpuDecodePercent = std::clamp(decode, 0.0, 100.0);
+        // Счётчик GPU Engine перечисляет движки, которые уже работали: если движки
+        // адаптера видны, кодер и декодер существуют, даже когда оба простаивают.
+        m_availability.gpuMedia = anyEngine || hasEncode || hasDecode;
     }
 
     if (m_nvml.isAvailable()) {
@@ -755,6 +776,49 @@ void SystemSensors::sampleGpu(SystemSnapshot& snapshot)
         snapshot.gpuPowerWatts = reading.powerWatts;
         snapshot.gpuFanRpm = reading.fanRpm;
         snapshot.gpuHotspot = 0.0;
+
+        // PCI-e: только NVML отдаёт скорость обмена и ширину линии. На AMD/Intel
+        // честно оставляем «нет данных», а не выдумываем число.
+        if (reading.hasPcie && reading.pcieLinkWidth > 0) {
+            double laneMegabytes = 0.0;
+            switch (std::min(reading.pcieLinkGeneration, 5u)) {
+            case 1:
+                laneMegabytes = 250.0;
+                break;
+            case 2:
+                laneMegabytes = 500.0;
+                break;
+            case 3:
+                laneMegabytes = 985.0;
+                break;
+            case 4:
+                laneMegabytes = 1969.0;
+                break;
+            case 5:
+                laneMegabytes = 3938.0;
+                break;
+            default:
+                laneMegabytes = 0.0;
+                break;
+            }
+            const double capacity = laneMegabytes * static_cast<double>(reading.pcieLinkWidth);
+            const double used = (reading.pcieTxKilobytesPerSecond + reading.pcieRxKilobytesPerSecond) / 1024.0;
+            if (capacity > 0.0) {
+                snapshot.pcieLoadPercent = std::clamp(used / capacity * 100.0, 0.0, 100.0);
+                m_availability.pcie = true;
+            }
+        }
+        // Если PCI-e не читается, но кодеки NVML отвечают — берём их как более точные.
+        if (m_availability.gpuMedia) {
+            snapshot.gpuEncodePercent = std::max(snapshot.gpuEncodePercent,
+                std::clamp(reading.encoderPercent, 0.0, 100.0));
+            snapshot.gpuDecodePercent = std::max(snapshot.gpuDecodePercent,
+                std::clamp(reading.decoderPercent, 0.0, 100.0));
+        } else if (reading.encoderPercent > 0.0 || reading.decoderPercent > 0.0) {
+            snapshot.gpuEncodePercent = std::clamp(reading.encoderPercent, 0.0, 100.0);
+            snapshot.gpuDecodePercent = std::clamp(reading.decoderPercent, 0.0, 100.0);
+            m_availability.gpuMedia = true;
+        }
     }
 }
 

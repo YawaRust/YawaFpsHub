@@ -19,6 +19,8 @@ struct SystemSnapshot {
     std::uint64_t memoryFreeBytes = 0;
     std::uint64_t memoryCacheBytes = 0;
     std::uint64_t pageFileUsedBytes = 0;
+    // Полный размер файла подкачки (commit limit минус физическая память).
+    std::uint64_t pageFileTotalBytes = 0;
 
     // PDH отдаёт уже готовые скорости за интервал, поэтому это не накопительные счётчики:
     // дельту по ним брать нельзя, иначе значения уезжают в миллиарды.
@@ -50,6 +52,10 @@ struct SystemSnapshot {
     double gpuMemClockMhz = 0.0;
     double gpuPowerWatts = 0.0;
     std::uint32_t gpuFanRpm = 0;
+    // Медиа-движки и шина: кодирование/декодирование видео и загрузка PCI-e.
+    double gpuEncodePercent = 0.0;
+    double gpuDecodePercent = 0.0;
+    double pcieLoadPercent = 0.0;
     std::uint64_t vramUsedBytes = 0;
     std::uint64_t vramBudgetBytes = 0;
 
@@ -85,6 +91,9 @@ struct DerivedValues {
     double ramCacheGb = 0.0;
     double ramFreeGb = 0.0;
     double pageFileGb = 0.0;
+    double pageFileTotalGb = 0.0;
+    double ramLoad = 0.0;
+    double pageFileLoad = 0.0;
     double vramUsedGb = 0.0;
     double vramTotalGb = 0.0;
 };

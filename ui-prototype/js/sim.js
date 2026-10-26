@@ -4,6 +4,8 @@
 
   const HISTORY = 90;
   const FRAME_TARGET_HZ = 165;
+  // Столько же ОЗУ, сколько считает интерфейс: загрузка в процентах должна совпадать.
+  const RAM_TOTAL = 64;
 
   const GPU_PROFILES = [
     {
@@ -22,7 +24,8 @@
     }
   ];
 
-  const GPU_SENSOR_IDS = ["gpu", "gpuTemp", "gpuHotspot", "gpuClock", "gpuMemClock", "gpuPower", "gpuFan", "vramUsed"];
+  const GPU_SENSOR_IDS = ["gpu", "gpuTemp", "gpuHotspot", "gpuClock", "gpuMemClock", "gpuPower", "gpuFan",
+    "gpuEncode", "gpuDecode", "pcieLoad", "vramUsed"];
 
   const SENSOR_DEFS = [
     { id: "fps", label: "FPS", group: "fps", unit: "fps", decimals: 0, pinned: true },
@@ -48,13 +51,18 @@
     { id: "gpuMemClock", label: "Частота памяти", group: "gpu", unit: "МГц", decimals: 0 },
     { id: "gpuPower", label: "Питание GPU", group: "gpu", unit: "Вт", decimals: 0 },
     { id: "gpuFan", label: "Вентилятор GPU", group: "gpu", unit: "об/мин", decimals: 0 },
+    { id: "gpuEncode", label: "Кодирование видео", group: "gpu", unit: "%", decimals: 0 },
+    { id: "gpuDecode", label: "Декодирование видео", group: "gpu", unit: "%", decimals: 0 },
+    { id: "pcieLoad", label: "Нагрузка PCI-e", group: "gpu", unit: "%", decimals: 0 },
     { id: "vramUsed", label: "Видеопамять занято", group: "gpu", unit: "ГБ", decimals: 1 },
 
     { id: "ramUsed", label: "Память занято", group: "mem", unit: "ГБ", decimals: 1, pinned: true },
+    { id: "ramLoad", label: "Загрузка ОЗУ", group: "mem", unit: "%", decimals: 0 },
     { id: "ramCache", label: "Память в кэше", group: "mem", unit: "ГБ", decimals: 1 },
     { id: "ramFree", label: "Память свободно", group: "mem", unit: "ГБ", decimals: 1 },
     { id: "ramClock", label: "Частота памяти", group: "mem", unit: "МГц", decimals: 0 },
     { id: "pageFile", label: "Своп-файл", group: "mem", unit: "ГБ", decimals: 1 },
+    { id: "pageFileLoad", label: "Загрузка файла подкачки", group: "mem", unit: "%", decimals: 0 },
 
     { id: "diskRead", label: "Диск: чтение", group: "io", unit: "МБ/с", decimals: 0 },
     { id: "diskWrite", label: "Диск: запись", group: "io", unit: "МБ/с", decimals: 0 },
@@ -112,12 +120,17 @@
       case "gpuMemClock": return 11201;
       case "gpuPower": return 312;
       case "gpuFan": return 1940;
+      case "gpuEncode": return 0;
+      case "gpuDecode": return 21;
+      case "pcieLoad": return 6;
       case "vramUsed": return 9.6;
       case "ramUsed": return 21.4;
+      case "ramLoad": return 33;
       case "ramCache": return 11.6;
       case "ramFree": return 31.0;
       case "ramClock": return 6000;
       case "pageFile": return 0.9;
+      case "pageFileLoad": return 11;
       case "diskRead": return 184;
       case "diskWrite": return 42;
       case "diskTemp": return 48;
@@ -238,11 +251,18 @@
       gpuMemClock: profile.memClock,
       gpuPower: clamp(profile.powerBase + state.gpu * profile.powerK + between(-4, 4), 2, profile.powerMax),
       gpuFan: profile.fanK === 0 ? 0 : clamp(profile.fanBase + state.gpu * profile.fanK + between(-30, 30), 0, 2400),
+      // Медиа-движки: кодер включается редко (запись/OBS), декодер — почти постоянно.
+      gpuEncode: clamp(Math.max(0, Math.sin(second / 23) * 18 - 12) + (isHitch ? between(4, 12) : 0), 0, 100),
+      gpuDecode: clamp(21 + Math.sin(second / 5.3) * 9 + between(-2.5, 2.5), 0, 100),
+      pcieLoad: clamp(6 + state.gpu * 0.03 + Math.sin(second / 3.4) * 2.4 + between(-0.8, 0.8), 0, 60),
       vramUsed: clamp(profile.vramBase + state.gpu * profile.vramK + between(-0.1, 0.1), 0.4, profile.memoryGb - 0.3),
       ramUsed: state.ram,
+      ramLoad: clamp((state.ram / RAM_TOTAL) * 100, 1, 100),
       ramCache: clamp(64 - state.ram - 31 + between(-0.2, 0.2), 4, 30),
       ramFree: clamp(64 - state.ram - 11.6, 1, 58),
       pageFile: clamp(0.9 + between(-0.05, 0.05), 0.4, 2.4),
+      // Файл подкачки 8 ГБ: занято около 0,9 ГБ.
+      pageFileLoad: clamp((0.9 / 8) * 100 + between(-0.2, 0.2), 1, 100),
       diskRead: clamp(isHitch ? between(320, 680) : 184 + Math.sin(second / 4) * 60 + between(-25, 25), 4, 720),
       diskWrite: clamp(42 + Math.sin(second / 5.6) * 18 + between(-8, 8), 0, 180),
       diskTemp: clamp(48 + between(-1.2, 1.2), 38, 62),

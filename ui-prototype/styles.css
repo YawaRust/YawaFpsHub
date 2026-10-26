@@ -1016,7 +1016,24 @@ body.is-compact .chart-wrap--frames canvas { height: 96px; }
 }
 .swatch.is-active { outline: 2px solid rgba(94, 242, 155, 0.6); outline-offset: 1px; color: #e9eef4; }
 
-.osd { --osd-text: 1; }
+.osd { --osd-text: 1; --osd-tracking: 1; --osd-shadow: 1; --osd-border: 1px; }
+/* Толщина рамки, сила тени, регистр подписей, разделители и разрядка — общие
+   настройки оверлея, как в приложении. */
+.osd { border-width: var(--osd-border, 1px); }
+.osd .osd__key,
+.osd .osd__unit { letter-spacing: calc(0.1em * var(--osd-tracking, 1)); }
+.osd.osd--upper .osd__key { text-transform: uppercase; }
+.osd.osd--separators .osd__row + .osd__row {
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
+  padding-top: 3px;
+}
+.osd.osd--shadow { box-shadow: 0 12px 30px -18px rgba(0, 0, 0, calc(0.9 * var(--osd-shadow, 1))); }
+.osd.no-shadow { box-shadow: none; }
+.swatch-rows { display: flex; flex-direction: column; gap: 5px; }
+.swatch-rows .swatch-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.swatch-rows .swatch-row > span { font-size: 11px; color: var(--text-dim); }
+.swatch-rows .swatches { flex-wrap: nowrap; gap: 4px; }
+.swatch-rows .swatch { width: 22px; height: 20px; border-radius: 6px; }
 .osd .osd__val { font-size: calc(18px * var(--osd-text, 1)); transition: font-size 180ms ease; }
 .osd .osd__val--sm { font-size: calc(12.5px * var(--osd-text, 1)); }
 .osd .osd__key { font-size: calc(9.5px * var(--osd-text, 1)); }

@@ -648,6 +648,76 @@
             </div>
 
             <div class="field">
+              <span class="field__label">Цвет акцента</span>
+              <div class="swatches" id="osdAccentColor">
+                <button class="swatch is-active" data-color="-1" type="button">авто</button>
+                <button class="swatch" data-color="0" data-hex="#ffffff" type="button" aria-label="Белый"></button>
+                <button class="swatch" data-color="1" data-hex="#5ef29b" type="button" aria-label="Мятный"></button>
+                <button class="swatch" data-color="2" data-hex="#6aa8ff" type="button" aria-label="Ледяной"></button>
+                <button class="swatch" data-color="3" data-hex="#b47bff" type="button" aria-label="Фиалковый"></button>
+                <button class="swatch" data-color="4" data-hex="#ffb347" type="button" aria-label="Янтарный"></button>
+                <button class="swatch" data-color="5" data-hex="#ff6f6f" type="button" aria-label="Коралл"></button>
+              </div>
+            </div>
+
+            <div class="field">
+              <span class="field__label">Цвет строк</span>
+              <div class="swatch-rows" id="osdRowColors"></div>
+            </div>
+
+            <div class="field">
+              <div class="field__label-row">
+                <span class="field__label">Толщина рамки</span>
+                <b id="osdBorderValue">из стиля</b>
+              </div>
+              <input class="range" type="range" id="osdBorder" min="0" max="3" step="1" value="1">
+            </div>
+
+            <div class="field">
+              <div class="field__label-row">
+                <span class="field__label">Сила тени</span>
+                <b id="osdShadowValue">100%</b>
+              </div>
+              <input class="range" type="range" id="osdShadow" min="0" max="100" step="1" value="100">
+            </div>
+
+            <div class="field">
+              <div class="field__label-row">
+                <span class="field__label">Интервал букв</span>
+                <b id="osdTrackingValue">100%</b>
+              </div>
+              <input class="range" type="range" id="osdTracking" min="0" max="200" step="5" value="100">
+            </div>
+
+            <div class="field">
+              <span class="field__label">Заглавные подписи</span>
+              <div class="segmented segmented--chips" id="osdUppercase">
+                <button class="is-active" data-mode="-1" type="button">Стиль</button>
+                <button data-mode="1" type="button">Вкл</button>
+                <button data-mode="0" type="button">Выкл</button>
+              </div>
+            </div>
+
+            <div class="field">
+              <span class="field__label">Разделители строк</span>
+              <div class="segmented segmented--chips" id="osdSeparators">
+                <button class="is-active" data-mode="-1" type="button">Стиль</button>
+                <button data-mode="1" type="button">Вкл</button>
+                <button data-mode="0" type="button">Выкл</button>
+              </div>
+            </div>
+
+            <div class="field">
+              <span class="field__label">Знаки после запятой у FPS</span>
+              <div class="segmented segmented--chips" id="osdDecimals">
+                <button class="is-active" data-decimals="-1" type="button">Стиль</button>
+                <button data-decimals="0" type="button">0</button>
+                <button data-decimals="1" type="button">1</button>
+                <button data-decimals="2" type="button">2</button>
+              </div>
+            </div>
+
+            <div class="field">
               <div class="field__label-row">
                 <span class="field__label">Смещение</span>
                 <b id="osdOffsetValue">0 / 0 px</b>
@@ -959,7 +1029,7 @@
               </li>
               <li>
                 <label class="switch">
-                  <input type="checkbox" id="trayToggle" checked>
+                  <input type="checkbox" id="trayToggle">
                   <span class="switch__track"><span class="switch__knob"></span></span>
                   <span class="switch__text">Сворачивать в трей при закрытии</span>
                 </label>
