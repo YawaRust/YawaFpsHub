@@ -155,7 +155,8 @@ void drawPairCard(Renderer& renderer, const AppModel& model, const Theme& theme,
     if (const DisplayIdentity* display = model.hardware.primaryDisplay(); display != nullptr) {
         Row row;
         row.label = L"Экран";
-        row.value = wideText(describeDisplay(*display));
+        row.value = wideText(std::to_string(display->width) + "×" + std::to_string(display->height));
+        row.note = display->refreshHz > 0 ? wideText(std::to_string(display->refreshHz) + " Гц") : L"нет герцовки";
         row.fraction = 1.0f;
         row.color = theme.disk;
         rows.push_back(row);
@@ -214,7 +215,7 @@ void drawLoadCard(Renderer& renderer, const AppModel& model, const Theme& theme,
             = known ? wideMetric(row.id, row.value) : std::wstring(L"нет данных");
         renderer.text(value, Rect{ inner.left + 100.0f, top - 2.0f, inner.right, top + 16.0f }, TextRole::Body,
             known ? theme.text : theme.textFaint, TextAlign::Right);
-        drawBar(renderer, Rect{ inner.left, top + 18.0f, inner.right, top + 22.0f }, known ? fraction : 0.0f,
+        drawBar(renderer, Rect{ inner.left, top + 20.0f, inner.right, top + 24.0f }, known ? fraction : 0.0f,
             row.color, theme);
         top += 32.0f;
     }

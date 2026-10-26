@@ -1,0 +1,120 @@
+name: release
+
+# Выпуск: в GitHub Releases уходит ровно один файл — YawaFpsHub.exe.
+# Номер версии живёт в VERSION; правило — патч до 9 (1.0.0 … 1.0.9), дальше минор.
+permissions:
+  contents: write
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Поднять версию перед выпуском"
+        required: false
+        default: "none"
+        type: choice
+        options: [none, patch, minor]
+
+jobs:
+  release:
+    name: Сборка и выпуск (Windows)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Версия релиза
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python tools/version.py show)"
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.bump }}" != "none" ]; then
+            # Правка VERSION попадает в main вместе с тегом: следующий релиз стартует
+            # уже с поднятым номером и не может случайно повторить предыдущий.
+            version="$(python tools/version.py bump --kind '${{ inputs.bump }}' --write)"
+            git config user.name "release"
+            git config user.email "release@yawafpshub.local"
+            git commit -am "Выпуск $version"
+            git push origin "HEAD:${{ github.ref_name }}"
+          fi
+
+          if [ "${{ github.event_name }}" = "push" ]; then
+            python tools/version.py check "${GITHUB_REF_NAME}"
+            version="${GITHUB_REF_NAME#v}"
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "выпускаем YawaFpsHub $version"
+
+      - name: Настроить CMake
+        run: cmake -S . -B build -A x64 -DYAWA_WARNINGS_AS_ERRORS=ON
+
+      - name: Собрать
+        run: cmake --build build --config Release --parallel
+
+      - name: Тесты
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Проверить самодостаточность exe
+        shell: pwsh
+        run: |
+          # Выпуск обязан работать на чистой Windows: ни VC++ Redistributable, ни файлов
+          # рядом с exe не нужно. Смотрим импорты и проверяем, что каждая DLL лежит в System32.
+          $exe = (Get-ChildItem -Path .\build -Recurse -Filter YawaFpsHub.exe | Select-Object -First 1).FullName
+          Copy-Item $exe "$PWD\YawaFpsHub.exe" -Force
+
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -property installationPath
+          $dumpbin = (Get-Item (Join-Path $vs "VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe") | Select-Object -First 1).FullName
+          $deps = & $dumpbin /dependents "$PWD\YawaFpsHub.exe" | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '\.dll$' }
+
+          $system32 = Join-Path $env:SystemRoot "System32"
+          $foreign = @()
+          foreach ($dll in $deps) {
+            if ($dll -match "^vcruntime|^msvcp|^ucrt") {
+              Write-Output "::error title=Выпуск::$dll импортируется динамически — нужен статический CRT"
+              exit 1
+            }
+            if (-not (Test-Path (Join-Path $system32 $dll))) { $foreign += $dll }
+          }
+          if ($foreign.Count -gt 0) {
+            Write-Output "::error title=Выпуск::нет системной DLL: $($foreign -join ', ')"
+            exit 1
+          }
+
+          $size = [math]::Round((Get-Item "$PWD\YawaFpsHub.exe").Length / 1KB)
+          Write-Output "::notice title=Выпуск::YawaFpsHub.exe — $($size) КБ, импортов: $($deps.Count) (все из System32)"
+
+      - name: Только exe в GitHub Releases
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.version.outputs.version }}"
+          tag="v$version"
+          python tools/version.py notes "$version" > RELEASE_NOTES.md
+
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release delete-asset "$tag" YawaFpsHub.exe --repo "$GITHUB_REPOSITORY" --yes 2>/dev/null || true
+            gh release upload "$tag" "YawaFpsHub.exe#YawaFpsHub.exe" --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --title "YawaFpsHub $version" --notes-file RELEASE_NOTES.md
+          else
+            gh release create "$tag" "YawaFpsHub.exe#YawaFpsHub.exe" --repo "$GITHUB_REPOSITORY" \
+              --title "YawaFpsHub $version" --notes-file RELEASE_NOTES.md --target "$GITHUB_SHA" --latest
+          fi
+
+          # Ровно один файл в релизе — это часть договорённости о выпуске.
+          count=$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets | length')
+          if [ "$count" != "1" ]; then
+            echo "в релизе $count файлов, ожидался только YawaFpsHub.exe" >&2
+            exit 1
+          fi
+          echo "релиз $tag опубликован: YawaFpsHub.exe"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

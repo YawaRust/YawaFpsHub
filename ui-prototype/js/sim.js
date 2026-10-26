@@ -402,6 +402,10 @@
     return text;
   }
 
+  function pct(value) {
+    return `${Math.round(value)} %`;
+  }
+
   function value(id, fallback) {
     const sensor = state.sensors.get(id);
     return sensor && sensor.samples ? sensor.value : fallback;
@@ -476,28 +480,28 @@
       if (high - low < 12) {
         result.kind = "balanced";
         result.headline = "Связка работает ровно";
-        result.detail = "Процессор загружен на " + Math.round(pressureCpu) + " %, видеокарта — на "
-          + Math.round(gpuLoad) + " %: оба узла близко к пределу, простой отсутствует.";
+        result.detail = "Процессор загружен на " + pct(pressureCpu) + ", видеокарта — на "
+          + pct(gpuLoad) + ": оба узла близко к пределу, простой отсутствует.";
         result.advice.push({ title: "Апгрейд одного узла кадров не добавит",
           text: "Пока оба компонента загружены ровно, замена видеокарты упрётся в процессор, и наоборот." });
         if (ramLoad > 90) {
           result.advice.push({ title: "Проверить запас ОЗУ",
-            text: "Память занята на " + Math.round(ramLoad) + " %, файл подкачки — на " + Math.round(pageFileLoad) + " %." });
+            text: "Память занята на " + pct(ramLoad) + ", файл подкачки — на " + pct(pageFileLoad)
+              + ". Закройте браузер и фоновые приложения: своп во время игры даёт ровно те провалы, "
+              + "которые сложно объяснить железом." });
         }
         return result;
       }
       if (pressureCpu > gpuLoad) {
         result.kind = "cpu";
         result.headline = "Упор в процессор";
-        result.detail = "Процессор держит " + Math.round(pressureCpu) + " % (самое занятое ядро — "
-          + Math.round(peakCore) + " %), видеокарта — только " + Math.round(gpuLoad) + "%. "
-          + result.percent + "% мощности GPU простаивает.";
+        result.detail = "Процессор держит " + pct(pressureCpu) + " (самое занятое ядро — " + pct(peakCore)
+          + "), видеокарта — только " + pct(gpuLoad) + ". " + pct(result.percent) + " мощности GPU простаивает.";
       } else {
         result.kind = "gpu";
         result.headline = "Упор в видеокарту";
-        result.detail = "Видеокарта загружена на " + Math.round(gpuLoad) + " %, процессор — на "
-          + Math.round(pressureCpu) + "%. " + result.percent + "% мощности CPU не используется: "
-          + "это нормальный режим для тяжёлой графики.";
+        result.detail = "Видеокарта загружена на " + pct(gpuLoad) + ", процессор — на " + pct(pressureCpu)
+          + ". " + pct(result.percent) + " мощности CPU не используется: это нормальный режим для тяжёлой графики.";
       }
       pushAdvice(result, gpu, gpuPower, vramUsed, vramTotal);
       return result;
@@ -566,12 +570,14 @@
       text: "Трассировка лучей, глобальное освещение, качество теней — их снижение даёт больше всего кадров." });
     if (vramTotal > 0 && vramUsed > vramTotal * 0.85) {
       result.advice.push({ title: "Освободить видеопамять",
-        text: "Занято " + vramUsed.toFixed(1) + " из " + vramTotal + " ГБ: текстуры уже уходят в файл подкачки." });
+        text: "Занято " + vramUsed.toFixed(1) + " из " + vramTotal
+        + " ГБ: текстуры уже уходят в файл подкачки. Снизьте качество текстур и кэш шейдеров." });
     }
     if (gpuPower > 0) {
       result.advice.push({ title: "Проверить лимит питания и температуры",
-        text: "Видеокарта держит " + Math.round(gpuPower) + " Вт. Если частота ядра ниже паспортной, а температура "
-          + "выше 83 °C — карта троттлит." });
+        text: "Видеокарта держит " + Math.round(gpuPower)
+        + " Вт. Если частота ядра ниже паспортной, а температура выше 83 °C — карта троттлит, и поднятие "
+        + "power limit вернёт кадры дешевле, чем апгрейд." });
     }
   }
 

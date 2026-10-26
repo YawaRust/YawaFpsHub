@@ -134,7 +134,9 @@ std::string logPath()
         return executableDirectory() + "\\YawaFpsHub.log";
     }
     ensureDirectory(toUtf8(directory));
-    return toUtf8(directory + L"\\YawaFpsHub.log");
+    const std::wstring target = directory + L"\\YawaFpsHub.log";
+    migrateLegacyFile(toWide(toUtf8(executableDirectory()) + "\\YawaFpsHub.log"), target);
+    return toUtf8(target);
 }
 
 std::string sessionsDirectory()

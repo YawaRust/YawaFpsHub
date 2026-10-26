@@ -137,7 +137,12 @@ jobs:
             }
           }
 
-          $logPath = Join-Path $outDir "YawaFpsHub.log"
+          # Каталог данных — %LOCALAPPDATA%\\YawaFpsHub: туда приложение пишет лог и ini.
+          $dataDir = Join-Path $env:LOCALAPPDATA "YawaFpsHub"
+          $diagnostics.Add("каталог данных: " + $dataDir + " (есть: " + (Test-Path $dataDir) + ")")
+
+          $logPath = Join-Path $dataDir "YawaFpsHub.log"
+          if (-not (Test-Path $logPath)) { $logPath = Join-Path $outDir "YawaFpsHub.log" }
           if (Test-Path $logPath) {
             foreach ($line in (Get-Content $logPath)) {
               if ($line.Trim().Length -eq 0) { continue }
@@ -147,7 +152,8 @@ jobs:
             $diagnostics.Add("log: нет файла")
           }
 
-          $ini = Join-Path $outDir "YawaFpsHub.ini"
+          $ini = Join-Path $dataDir "YawaFpsHub.ini"
+          if (-not (Test-Path $ini)) { $ini = Join-Path $outDir "YawaFpsHub.ini" }
           if (-not (Test-Path $ini) -and -not $fail) { $fail = "не создан YawaFpsHub.ini" }
           $diagnostics.Add("ini: " + (Test-Path $ini))
 
@@ -183,6 +189,8 @@ jobs:
             @{ view = "overlay"; extra = "--scroll=760"; name = "overlay-controls" },
             @{ view = "settings"; extra = "--size=800x620"; name = "settings-compact" },
             @{ view = "sensors"; extra = ""; name = "sensors" },
+            @{ view = "bottleneck"; extra = ""; name = "bottleneck" },
+            @{ view = "system"; extra = ""; name = "system" },
             @{ view = "overlay"; extra = ""; name = "overlay" },
             @{ view = "settings"; extra = ""; name = "settings" }
           )
@@ -297,7 +305,7 @@ jobs:
           Start-Sleep -Seconds 2
           $edge = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
           if (-not (Test-Path $edge)) { $edge = "C:\Program Files\Microsoft\Edge\Application\msedge.exe" }
-          foreach ($view in @("dashboard", "sensors", "overlay", "settings")) {
+          foreach ($view in @("dashboard", "sensors", "bottleneck", "system", "overlay", "settings")) {
             $url = "http://127.0.0.1:8765/index.html?view=$view&nofx=1&shot=1"
             $shot = "demo-$view.png"
             # Свой профиль Edge на каждый экран: с общим профилем запуск уходил
@@ -338,7 +346,7 @@ jobs:
       - name: Опубликовать скриншоты
         # Два прогона на один коммит (push и pull_request) соревнуются за ветку ci-logs,
         # поэтому публикует только push-прогон: второй попытке push не хватает fast-forward.
-        if: github.event_name == 'push' && hashFiles('screenshot-*.png') != ''
+        if: github.event_name == 'push' && hashFiles('screenshot-*.png', 'demo-*.png') != ''
         shell: bash
         run: |
           # Сначала убираем свежие PNG из рабочего дерева: в ветке ci-logs они уже есть,
@@ -374,5 +382,4 @@ jobs:
           name: YawaFpsHub-win64
           path: |
             build/**/YawaFpsHub.exe
-            build/**/YawaFpsHub.ini
             build/tools/probe/Release/yawa-probe.exe

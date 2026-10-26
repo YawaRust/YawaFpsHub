@@ -464,7 +464,7 @@
     const tag = $("#balanceMode");
     if (tag) {
       tag.classList.toggle("tag--live", balance.measured);
-      tag.querySelector("span").textContent = balance.measured ? "живые замеры" : "оценка ±15 %";
+      tag.querySelector("span").textContent = balance.measured ? "ЖИВЫЕ ЗАМЕРЫ" : "ОЦЕНКА ±15 %";
     }
 
     const quiet = balance.kind === "idle" || balance.kind === "no-data";
@@ -527,10 +527,14 @@
         const sensor = row.id ? sensorValue(row.id) : null;
         const known = row.value !== undefined || sensor;
         const value = row.value !== undefined ? row.value : (sensor ? sensor.value : 0);
+        const share = row.total > 0 ? Math.max(0, Math.min(100, (value / row.total) * 100)) : 0;
         return `
           <li>
-            <span>${row.label}</span>
-            <b class="${known ? "" : "is-muted"}">${known ? `${fmt(value, row.decimals)} ${row.unit}` : "нет данных"}</b>
+            <div class="row">
+              <span>${row.label}</span>
+              <b class="${known ? "" : "is-muted"}">${known ? `${fmt(value, row.decimals)} ${row.unit}` : "нет данных"}</b>
+            </div>
+            <div class="bar" style="--c:${row.color}"><i style="width:${known ? share.toFixed(1) : 0}%"></i></div>
           </li>`;
       }).join("");
     }
@@ -875,7 +879,7 @@
     markColors("osdLabelColor", overlayState.labelColor);
     markColors("osdAccentColor", overlayState.accentColor);
 
-    const rowHost = $("osdRowColors");
+    const rowHost = $("#osdRowColors");
     if (rowHost) {
       OSD_ROWS.forEach((row, index) => {
         const line = rowHost.children[index];
@@ -1242,7 +1246,7 @@
     bindColors("osdAccentColor", "accentColor");
 
     // Цвета строк: пять компактных палитр, как в приложении.
-    const rowHost = $("osdRowColors");
+    const rowHost = $("#osdRowColors");
     if (rowHost) {
       for (const row of OSD_ROWS) {
         const line = document.createElement("div");
@@ -1274,8 +1278,8 @@
     }
 
     // Толщина рамки: «из стиля» — как в пресете, иначе 0…3 px.
-    const borderRange = $("osdBorder");
-    const borderLabel = $("osdBorderValue");
+    const borderRange = $("#osdBorder");
+    const borderLabel = $("#osdBorderValue");
     const renderBorder = () => {
       const value = overlayState.borderWidth;
       borderRange.value = String(value === null ? 1 : value);

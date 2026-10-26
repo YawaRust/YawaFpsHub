@@ -16,7 +16,7 @@ from pathlib import Path
 
 from PIL import Image, ImageChops, ImageStat
 
-VIEWS = ("dashboard", "sensors", "overlay", "settings")
+VIEWS = ("dashboard", "sensors", "bottleneck", "system", "overlay", "settings")
 
 
 def load(path: Path, size: tuple[int, int]) -> Image.Image:

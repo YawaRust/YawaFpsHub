@@ -71,7 +71,7 @@
 - **C++20** — всё приложение: Win32-окно, Direct2D/DirectWrite, PDH, `NtQuerySystemInformation`, DXGI, ETW. Только встроенные библиотеки Windows SDK, сторонних зависимостей нет.
 - **HTML/CSS/JS без сборки** — только прототип интерфейса в `ui-prototype/`. В exe не входит, внешних CDN нет, открывается статически. Правки прототипа не требуют правок C++ кода.
 - Ядро — `app/metrics/` (сбор и агрегация показателей). Обвязка — `app/ui/` (экраны), `app/render/` (Direct2D), `app/platform/` (Win32, трей, хоткеи).
-- Сборка — CMake + MSVC (x64), выпуск exe — GitHub Actions на `windows-latest`. Портативность: один exe, настройки в `YawaFpsHub.ini` рядом с exe, без реестра и установщика.
+- Сборка — CMake + MSVC (x64), статический CRT, выпуск exe — GitHub Actions на `windows-latest`. Портативность: один exe без sidecar-библиотек; настройки, лог и сессии — в `%LOCALAPPDATA%\YawaFpsHub` (старый ini рядом с exe переносится один раз), без реестра и установщика. Номер релиза — в файле `VERSION`, правило: патч до 9, дальше минор.
 <!-- PROFILE:END:ЯЗЫКИ -->
 
 <!-- PROFILE:BEGIN:КОМАНДЫ -->
@@ -83,6 +83,8 @@
 | Форматтер | `clang-format -i --style=file` (конфиг `.clang-format` в корне; в песочнице clang-format не установлен) |
 | Прототип | `python3 -m http.server 8000 --directory ui-prototype` |
 | Иконка | `python3 tools/make_icon.py` — пересобирает `app/resources/yawa.ico` из кода без зависимостей |
+| Версия | `python3 tools/version.py show` / `check v1.0.1` / `bump --kind patch --write` / `notes 1.0.1` |
+| Релиз | тег `vX.Y.Z` → workflow `release`: в GitHub Releases только `YawaFpsHub.exe` |
 | Демо-прототип | `python3 -m http.server 8000 --bind 0.0.0.0 --directory ui-prototype` — HTML-эталон интерфейса |
 | Скриншоты exe | CI: `--smoke --view=<экран> --size=1280x800`, остальные снимки — `--scroll=<px>`, `--size=800x620` для узкого окна |
 | Сравнение с демо | `python3 tools/compare_ui.py --demo <каталог demo-*.png> --app <каталог screenshot-*.png> --out <каталог пар>` |
