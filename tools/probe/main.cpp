@@ -1,10 +1,12 @@
 // yawa-probe: диагностика датчиков на конкретной машине.
 // Показывает, какие источники поднялись, и печатает те же значения, что пойдут в интерфейс.
 
+#include "metrics/bottleneck.h"
 #include "metrics/frame_tracker.h"
 #include "metrics/system_sampler.h"
 #include "metrics/units.h"
 #include "platform/etw_frames.h"
+#include "platform/hardware_info_win.h"
 #include "platform/log.h"
 #include "platform/sensors_win.h"
 #include "platform/win_util.h"
@@ -66,6 +68,48 @@ std::string executableDirectory()
     std::wstring full(path);
     const std::size_t slash = full.find_last_of(L"\\/");
     return yawa::narrow(slash == std::wstring::npos ? full : full.substr(0, slash));
+}
+
+// Паспорт машины и вердикт по узкому месту: на разных GPU и CPU нужно видеть, что
+// определилось и что приложение собралось показывать.
+void printMachine(const yawa::SystemSensors& sensors, const yawa::MetricStore& store, double targetFps)
+{
+    yawa::HardwareIdentity info;
+    std::string error;
+    if (!yawa::collectHardwareInfo(info, sensors.gpus(), error)) {
+        std::printf("паспорт железа: %s\n\n", error.c_str());
+        return;
+    }
+
+    std::printf("железо\n");
+    std::printf("  ОС: %s, сборка %s (%s), %s\n", info.os.product.c_str(), info.os.build.c_str(),
+        info.os.featureVersion.empty() ? "версия не указана" : info.os.featureVersion.c_str(),
+        info.os.architecture.c_str());
+    std::printf("  CPU: %s — ядер %u, потоков %u, %.0f МГц, L3 %u МБ\n", info.cpu.name.c_str(),
+        info.cpu.physicalCores, info.cpu.logicalProcessors, info.cpu.baseMhz, info.cpu.l3CacheMb);
+    for (const yawa::GpuIdentity& gpu : info.gpus) {
+        std::printf("  GPU: %s%s — %.0f МБ, драйвер %s, индекс %.0f\n", gpu.name.c_str(),
+            gpu.discrete ? "" : " (встроенная)", gpu.dedicatedMb,
+            gpu.driverVersion.empty() ? "нет данных" : gpu.driverVersion.c_str(),
+            yawa::gpuPerfIndex(gpu.name, gpu.dedicatedMb));
+    }
+    std::printf("  RAM: %s\n", yawa::describeMemory(info.memory).c_str());
+    const double tck = info.memory.cycleTimeNs();
+    std::printf("       частота %.0f МТ/с (паспорт %.0f), tCK %.3f нс, профиль %s\n", info.memory.configuredMt,
+        info.memory.ratedMt, tck, info.memory.profileEnabled ? "включён" : "не включён");
+    std::printf("       тайминги SPD (tCL-tRCD-tRP-tRAS) без драйвера недоступны — показываем частоты\n");
+    for (const yawa::DisplayIdentity& display : info.displays) {
+        std::printf("  экран: %s%s\n", yawa::describeDisplay(display).c_str(), display.primary ? " (основной)" : "");
+    }
+
+    const yawa::BottleneckResult balance
+        = yawa::analyzeBottleneck(info, yawa::loadFromStore(store, targetFps));
+    std::printf("  баланс: %s — %u%% (%s)\n", balance.headline.c_str(), balance.percent,
+        balance.measured ? "по живым замерам" : "прогноз по индексу");
+    for (const yawa::BottleneckAdvice& advice : balance.advice) {
+        std::printf("    · %s — %s\n", advice.title.c_str(), advice.text.c_str());
+    }
+    std::printf("\n");
 }
 
 void printHeader(const yawa::SystemSensors& sensors)
@@ -194,6 +238,8 @@ int wmain(int argc, wchar_t** argv)
             break;
         }
     }
+
+    printMachine(sensors, store, kDefaultTargetFps);
 
     std::printf("\nкадров из ETW: %llu, отклонено событий: %llu, потеряно сэмплов: %llu, потоков: %zu\n",
         static_cast<unsigned long long>(etw.eventsReceived()),

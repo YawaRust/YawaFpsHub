@@ -123,7 +123,7 @@ std::string settingsPath()
     }
     ensureDirectory(toUtf8(directory));
     const std::wstring target = directory + L"\\YawaFpsHub.ini";
-    migrateLegacyFile(toWide(toUtf8(executableDirectory()) + "\\YawaFpsHub.ini"), target);
+    migrateLegacyFile(toWide(executableDirectory() + "\\YawaFpsHub.ini"), target);
     return toUtf8(target);
 }
 
@@ -135,7 +135,7 @@ std::string logPath()
     }
     ensureDirectory(toUtf8(directory));
     const std::wstring target = directory + L"\\YawaFpsHub.log";
-    migrateLegacyFile(toWide(toUtf8(executableDirectory()) + "\\YawaFpsHub.log"), target);
+    migrateLegacyFile(toWide(executableDirectory() + "\\YawaFpsHub.log"), target);
     return toUtf8(target);
 }
 

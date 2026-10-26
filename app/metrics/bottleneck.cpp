@@ -35,7 +35,11 @@ long firstModelNumber(const std::string& text)
         }
         const std::size_t length = end - index;
         if (length >= 3 && length <= 5) {
-            return std::stol(text.substr(index, length));
+            long value = 0;
+            for (std::size_t digit = index; digit < end; ++digit) {
+                value = value * 10 + (text[digit] - '0');
+            }
+            return value;
         }
         index = end;
     }

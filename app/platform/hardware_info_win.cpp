@@ -172,11 +172,12 @@ void collectCpu(HardwareIdentity& info)
             }
         } else if (entry->Relationship == RelationCache && entry->Cache.Level == 3) {
             // Кэш L3 общий для группы ядер: суммировать нельзя, берём максимальный.
-            l3Mb = std::max(l3Mb, static_cast<std::uint32_t>(entry->Cache.Size / (1024 * 1024)));
+            const std::uint32_t size = static_cast<std::uint32_t>(entry->Cache.CacheSize / (1024ull * 1024ull));
+            l3Mb = std::max(l3Mb, size);
         }
 
-        const std::size_t stride = entry->Length == 0 ? sizeof(*entry) : entry->Length;
-        cursor += stride;
+        // Каждая запись буфера несёт собственный размер в поле Size.
+        cursor += entry->Size == 0 ? sizeof(*entry) : entry->Size;
     }
 
     info.cpu.physicalCores = physical;

@@ -3,6 +3,7 @@ add_executable(yawa-probe
     ../../app/platform/log.cpp
     ../../app/platform/etw_frames.cpp
     ../../app/platform/dxgi_adapters.cpp
+    ../../app/platform/hardware_info_win.cpp
     ../../app/platform/nvml_sensors.cpp
     ../../app/platform/pdh_query.cpp
     ../../app/platform/sensors_win.cpp
