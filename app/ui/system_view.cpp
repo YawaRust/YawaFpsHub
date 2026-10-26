@@ -196,8 +196,8 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
     }
     top += 58.0f;
 
-    // Таблица планок: слот, объём, модуль, напряжение. Именно это и спрашивают
-    // «2×16 или 1×32».
+    // Таблица планок: слева «DIMM A1 · 16 ГБ DDR5-6000», справа вендор, партномер и
+    // напряжение — ровно как в демо. Именно эту строку спрашивают про «2×16 или 1×32».
     for (const MemoryModule& module : memory.modules) {
         if (!module.populated) {
             continue;
@@ -205,25 +205,38 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
         if (top + 16.0f > inner.bottom) {
             break;
         }
-        std::wstring line = module.slot.empty() ? L"слот" : wideText(module.slot);
-        line += L" · " + wideText(formatValue(module.sizeGb, 0) + " ГБ");
+
+        std::wstring left = (module.slot.empty() ? std::wstring(L"слот") : wideText(module.slot))
+            + L" · " + wideText(formatValue(module.sizeGb, 0) + " ГБ");
         if (!module.type.empty()) {
-            line += wideText(" " + module.type);
+            left += wideText(" " + module.type);
         }
         if (module.configuredMt > 0.0) {
-            line += wideText("-" + std::to_string(static_cast<int>(module.configuredMt)));
+            left += wideText("-" + std::to_string(static_cast<int>(module.configuredMt)));
         }
-        if (!module.vendor.empty()) {
-            line += wideText(" · " + module.vendor);
-        }
-        if (!module.part.empty()) {
-            line += wideText(" · " + module.part);
+
+        std::wstring right;
+        for (const std::string& part : { module.vendor, module.part }) {
+            if (part.empty()) {
+                continue;
+            }
+            right += right.empty() ? L"" : L" · ";
+            right += wideText(part);
         }
         if (module.voltage > 0.0) {
-            line += wideText(" · " + formatValue(module.voltage, 2) + " В");
+            right += right.empty() ? L"" : L" · ";
+            right += wideText(formatValue(module.voltage, 2) + " В");
         }
-        renderer.text(clipText(renderer, line, TextRole::Small, inner.width()),
-            Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
+
+        const float rightWidth = right.empty() ? 0.0f : renderer.measureText(right, TextRole::Mono) + 4.0f;
+        const float leftWidth = std::max(60.0f, inner.width() - rightWidth);
+        renderer.text(clipText(renderer, left, TextRole::Small, leftWidth),
+            Rect{ inner.left, top, inner.left + leftWidth, top + 16.0f }, TextRole::Small, theme.text);
+        if (!right.empty()) {
+            renderer.text(clipText(renderer, right, TextRole::Mono, inner.width() - leftWidth),
+                Rect{ inner.left + leftWidth, top, inner.right, top + 16.0f }, TextRole::Mono, theme.textFaint,
+                TextAlign::Right);
+        }
         top += 18.0f;
     }
 
@@ -288,8 +301,7 @@ void drawSystemView(Renderer& renderer, const AppModel& model, const Theme& them
 
     const float wideTop = area.top;
     const float narrowStep = rowHeight + kGap;
-    drawOsCard(renderer, model, theme, columns.span(narrow ? 0 : 0, narrow ? 12 : 4,
-        narrow ? wideTop : wideTop, rowHeight));
+    drawOsCard(renderer, model, theme, columns.span(0, narrow ? 12 : 4, wideTop, rowHeight));
     drawCpuCard(renderer, model, theme,
         columns.span(narrow ? 0 : 4, narrow ? 12 : 4, narrow ? wideTop + narrowStep : wideTop, rowHeight));
     drawGpuCard(renderer, model, theme,
