@@ -18,9 +18,9 @@ namespace yawa {
 namespace {
 
     // Публичный протокол PawnIO 2.2.0; PawnIOLib не линкуется.
-    constexpr DWORD kLoadModule = CTL_CODE(41394, 0x821, METHOD_BUFFERED, FILE_ANY_ACCESS);
-    constexpr DWORD kExecute = CTL_CODE(41394, 0x841, METHOD_BUFFERED, FILE_ANY_ACCESS);
-    constexpr DWORD kVersion = CTL_CODE(41394, 0x861, METHOD_BUFFERED, FILE_ANY_ACCESS);
+    constexpr DWORD kLoadModule = CTL_CODE(41394u, 0x821, METHOD_BUFFERED, FILE_ANY_ACCESS);
+    constexpr DWORD kExecute = CTL_CODE(41394u, 0x841, METHOD_BUFFERED, FILE_ANY_ACCESS);
+    constexpr DWORD kVersion = CTL_CODE(41394u, 0x861, METHOD_BUFFERED, FILE_ANY_ACCESS);
 
     std::array<unsigned, 4> cpuid(unsigned leaf)
     {
