@@ -31,6 +31,11 @@ std::wstring orNoData(const std::string& text)
     return text.empty() ? L"нет данных" : wideText(text);
 }
 
+std::wstring fieldText(const std::string& text)
+{
+    return wideText(text);
+}
+
 // Цвет зависит от того, насколько сильно узкое место: 0…12 % — норма, дальше
 // предупреждение, а за 35 % — уже красный.
 Color severityColor(std::uint32_t percent, const Theme& theme)
@@ -78,7 +83,7 @@ void drawVerdictCard(Renderer& renderer, const AppModel& model, const Theme& the
         : wideText(std::to_string(balance.percent) + "%");
     drawGauge(renderer, centerX, centerY, radius, static_cast<float>(balance.percent) / 100.0f, color, theme.line,
         percentText, theme.text);
-    renderer.text(L"ПОМЕХИ", Rect{ centerX - radius, centerY + radius - 10.0f, centerX + radius,
+    renderer.text(L"помехи", Rect{ centerX - radius, centerY + radius - 10.0f, centerX + radius,
                                 centerY + radius + 4.0f },
         TextRole::Tiny, theme.textFaint, TextAlign::Center);
 
@@ -87,12 +92,12 @@ void drawVerdictCard(Renderer& renderer, const AppModel& model, const Theme& the
         Rect{ textLeft, inner.top + 44.0f, inner.right, inner.top + 70.0f }, TextRole::Value, color);
     drawWrappedText(renderer, wideText(balance.detail), Rect{ textLeft, inner.top + 76.0f, inner.right,
                                                                    inner.bottom },
-        TextRole::Small, theme.textDim, 15.0f, 3);
+        TextRole::Body, theme.textDim, 18.0f, 3);
 
     // Пропускная способность узлов: два числа рядом, чтобы было видно, из чего вывод.
     const float numbersTop = inner.bottom - 26.0f;
-    const std::wstring cpuLine = L"CPU: ~" + wideText(formatValue(balance.cpuCapacityFps, 0)) + L" к/с";
-    const std::wstring gpuLine = L"GPU: ~" + wideText(formatValue(balance.gpuCapacityFps, 0)) + L" к/с";
+    const std::wstring cpuLine = L"CPU ~" + wideText(formatValue(balance.cpuCapacityFps, 0)) + L" к/с";
+    const std::wstring gpuLine = L"GPU ~" + wideText(formatValue(balance.gpuCapacityFps, 0)) + L" к/с";
     renderer.text(cpuLine, Rect{ inner.left, numbersTop, inner.left + 150.0f, numbersTop + 16.0f }, TextRole::Small,
         theme.cpu.withAlpha(0.9f));
     renderer.text(gpuLine, Rect{ inner.left + 150.0f, numbersTop, inner.left + 300.0f, numbersTop + 16.0f },
@@ -125,9 +130,7 @@ void drawPairCard(Renderer& renderer, const AppModel& model, const Theme& theme,
         const double index = cpuPerfIndex(model.hardware.cpu.name, model.hardware.cpu.physicalCores,
             model.hardware.cpu.logicalProcessors);
         row.value = index > 0.0 ? wideText(formatValue(index, 0)) : L"—";
-        row.note = model.hardware.cpu.name.empty()
-            ? L""
-            : L"индекс " + wideText(formatValue(index, 0)) + L" из 100";
+        row.note = fieldText(model.hardware.cpu.name);
         row.fraction = static_cast<float>(std::clamp(index / 120.0, 0.0, 1.0));
         row.color = theme.cpu;
         rows.push_back(row);
@@ -137,7 +140,7 @@ void drawPairCard(Renderer& renderer, const AppModel& model, const Theme& theme,
         const double index = gpuPerfIndex(gpu->name, gpu->dedicatedMb);
         row.label = L"Видеокарта";
         row.value = index > 0.0 ? wideText(formatValue(index, 0)) : L"—";
-        row.note = L"индекс " + wideText(formatValue(index, 0)) + L" из 100";
+        row.note = fieldText(gpu->name);
         row.fraction = static_cast<float>(std::clamp(index / 150.0, 0.0, 1.0));
         row.color = theme.gpu;
         rows.push_back(row);
@@ -169,13 +172,17 @@ void drawPairCard(Renderer& renderer, const AppModel& model, const Theme& theme,
         }
         renderer.text(row.label, Rect{ inner.left, top, inner.left + 110.0f, top + 16.0f }, TextRole::Small,
             theme.textDim);
-        renderer.text(row.value, Rect{ inner.left + 110.0f, top - 4.0f, inner.right, top + 16.0f }, TextRole::Body,
-            theme.text, TextAlign::Right);
+        // Значение прижимаем справа и подрезаем: «4×16 ГБ = 64 ГБ DDR5-6000, 2 канала»
+        // длиннее карточки, а наезжать на подпись строки оно не должно.
+        const float labelWidth = renderer.measureText(row.label, TextRole::Small) + 12.0f;
+        renderer.text(clipText(renderer, row.value, TextRole::Body, inner.right - inner.left - labelWidth - 8.0f),
+            Rect{ inner.left + labelWidth, top - 4.0f, inner.right, top + 16.0f }, TextRole::Body, theme.text,
+            TextAlign::Right);
         const Rect bar{ inner.left, top + 20.0f, inner.right, top + 26.0f };
         drawBar(renderer, bar, row.fraction, row.color, theme);
         if (!row.note.empty()) {
-            renderer.text(row.note, Rect{ inner.left, top + 28.0f, inner.right, top + 40.0f }, TextRole::Tiny,
-                theme.textFaint);
+            renderer.text(clipText(renderer, row.note, TextRole::Tiny, inner.width()),
+                Rect{ inner.left, top + 28.0f, inner.right, top + 40.0f }, TextRole::Tiny, theme.textFaint);
         }
         top += 46.0f;
     }
@@ -254,16 +261,22 @@ void drawBottleneckView(Renderer& renderer, const AppModel& model, const Theme& 
     (void)hits; // экран пока только показывает расчёт: действий на нём нет
 
     const Columns columns{ area };
-    const float top = area.top;
-    drawVerdictCard(renderer, model, theme, columns.span(0, 12, top, 214.0f));
-    drawPairCard(renderer, model, theme, columns.span(0, 7, top + 228.0f, 250.0f));
-    drawLoadCard(renderer, model, theme, columns.span(7, 5, top + 228.0f, 250.0f));
+    // Узкое окно — как в прототипе: ряд 7+5 распадается на две карточки друг под другом.
+    const bool narrow = area.width() < kDashboardNarrowWidth;
+    const float firstHeight = 214.0f;
+    const float secondHeight = 268.0f;
 
-    const float adviceTop = top + 492.0f;
+    drawVerdictCard(renderer, model, theme, columns.span(0, 12, area.top, firstHeight));
+    const float pairTop = area.top + firstHeight + kGap;
+    drawPairCard(renderer, model, theme, columns.span(0, narrow ? 12 : 7, pairTop, secondHeight));
+    const float loadTop = narrow ? pairTop + secondHeight + kGap : pairTop;
+    drawLoadCard(renderer, model, theme, columns.span(narrow ? 0 : 7, narrow ? 12 : 5, loadTop, secondHeight));
+
+    const float adviceTop = loadTop + secondHeight + kGap;
     drawAdviceCard(renderer, model, theme, columns.span(0, 12, adviceTop, 260.0f));
 
     // Методика — внизу: вывод важнее пояснения, но проверить его всё равно должно быть можно.
-    const Rect note = columns.span(0, 12, top + 766.0f, 118.0f);
+    const Rect note = columns.span(0, 12, adviceTop + 260.0f + kGap, 118.0f);
     drawCard(renderer, note, theme);
     const Rect inner = note.inset(kCardPadding);
     drawCardHeader(renderer, note, L"Как считаем",

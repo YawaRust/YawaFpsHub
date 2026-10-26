@@ -597,7 +597,9 @@
     const tck = memory.configuredMt > 0 ? 2000 / memory.configuredMt : 0;
     const filled = memory.modules.filter((module) => module.populated).length;
     specRows("#memCard", [
-      ["Частота", `${fmt(memory.configuredMt, 0)} МТ/с из ${fmt(memory.ratedMt, 0)}`],
+      ["Частота", memory.ratedMt > memory.configuredMt + 1
+        ? `${fmt(memory.configuredMt, 0)} МТ/с из ${fmt(memory.ratedMt, 0)}`
+        : `${fmt(memory.configuredMt, 0)} МТ/с`],
       ["Такт tCK", tck > 0 ? `${fmt(tck, 3)} нс` : ""],
       ["XMP/EXPO", memory.profile ? "включён" : "не включён"],
       ["Слоты", memory.slots ? `${filled} из ${memory.slots}` : ""]

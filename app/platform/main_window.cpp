@@ -833,9 +833,9 @@ float MainWindow::contentDesignHeight() const
     case View::Settings:
         return kSettingsHeight;
     case View::Bottleneck:
-        return kBottleneckHeight;
+        return contentArea().width() < kDashboardNarrowWidth ? kBottleneckNarrowHeight : kBottleneckHeight;
     case View::System:
-        return kSystemHeight;
+        return contentArea().width() < kDashboardNarrowWidth ? kSystemNarrowHeight : kSystemHeight;
     }
     return kDashboardHeight;
 }

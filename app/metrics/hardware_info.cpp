@@ -35,17 +35,21 @@ const DisplayIdentity* HardwareIdentity::primaryDisplay() const
 std::string describeMemory(const MemoryIdentity& memory)
 {
     std::vector<double> sizes;
+    double sum = 0.0;
     for (const MemoryModule& module : memory.modules) {
         if (module.populated && module.sizeGb > 0.0) {
             sizes.push_back(module.sizeGb);
+            sum += module.sizeGb;
         }
     }
     std::sort(sizes.begin(), sizes.end());
 
     std::string text;
-    if (!sizes.empty()) {
-        // «2×16 ГБ» вместо перечисления планок: так конфиг читается с одного взгляда,
-        // и видно, что память стоит двумя модулями, а не одним.
+    // «2×16 ГБ» вместо перечисления планок: так видно, что память стоит двумя модулями.
+    // Раскладку показываем только когда она сходится с полным объёмом: на виртуалках
+    // SMBIOS рапортует по рангам, и «2×1 ГБ = 16 ГБ» выглядело бы поломкой.
+    const bool consistent = !sizes.empty() && (memory.totalGb <= 0.0 || sum > memory.totalGb * 0.75);
+    if (consistent) {
         const double smallest = sizes.front();
         const bool uniform = std::all_of(sizes.begin(), sizes.end(),
             [smallest](double size) { return std::abs(size - smallest) < 0.5; });
@@ -59,9 +63,14 @@ std::string describeMemory(const MemoryIdentity& memory)
                 text += formatValue(sizes[index], 0) + " ГБ";
             }
         }
-        text += " = " + formatValue(memory.totalGb, 0) + " ГБ";
+        if (memory.totalGb > 0.0) {
+            text += " = " + formatValue(memory.totalGb, 0) + " ГБ";
+        }
     } else if (memory.totalGb > 0.0) {
         text = formatValue(memory.totalGb, 0) + " ГБ";
+        if (!sizes.empty()) {
+            text += ", планок " + std::to_string(sizes.size());
+        }
     } else {
         return "нет данных";
     }
@@ -72,8 +81,12 @@ std::string describeMemory(const MemoryIdentity& memory)
             text += "-" + std::to_string(static_cast<int>(std::lround(memory.configuredMt)));
         }
     }
-    if (memory.channels > 0) {
-        text += memory.channels == 1 ? ", один канал" : ", " + std::to_string(memory.channels) + " канала";
+    // Число каналов BIOS не сообщает: его выводим из раскладки слотов и показываем
+    // только когда в именах слотов есть буквы каналов, иначе «нет данных» честнее.
+    if (memory.channels == 1) {
+        text += ", один канал";
+    } else if (memory.channels > 1) {
+        text += ", " + std::to_string(memory.channels) + " канала";
     }
     return text;
 }

@@ -47,10 +47,12 @@ struct MemoryIdentity {
     double ratedMt = 0.0;
     double configuredMt = 0.0;
     std::string type;
+    // Сколько каналов — известно, только если BIOS передал буквы каналов в именах
+    // слотов (DIMM_A1/B1). 0 значит «не сообщает», выдумывать пару мы не можем.
     std::uint32_t channels = 0;
     std::uint32_t slots = 0;
-    // Число каналов BIOS не сообщает: оценка по количеству заселённых слотов.
-    bool channelsEstimated = false;
+    // Одна планка в двухслотовой машине — одноканальный режим, это проверяемо.
+    bool singleChannel = false;
     std::vector<MemoryModule> modules;
     bool profileEnabled = true;
 

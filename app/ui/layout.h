@@ -20,8 +20,10 @@ constexpr float kSettingsHeight = 1882.0f;
 constexpr float kOverlayHeight = 2422.0f;
 // «Баланс» и «Система»: карточки фиксированной высоты, экран целиком влезает
 // в окно 800 px по высоте, поэтому прокрутка появляется только в узком окне.
-constexpr float kBottleneckHeight = 892.0f;
-constexpr float kSystemHeight = 668.0f;
+constexpr float kBottleneckHeight = 902.0f;
+constexpr float kBottleneckNarrowHeight = 1184.0f;
+constexpr float kSystemHeight = 696.0f;
+constexpr float kSystemNarrowHeight = 1356.0f;
 
 
 constexpr float kCardRadius = 20.0f;

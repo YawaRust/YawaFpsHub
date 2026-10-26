@@ -9,7 +9,9 @@
 #include <windows.h>
 #include <intrin.h>
 
+#include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -238,6 +240,10 @@ void collectSmbiosMemory(HardwareIdentity& info)
 
     std::vector<MemoryModule> modules;
     std::uint32_t slots = 0;
+    // SMBIOS 2.7 перешёл с мегагерц на мегаперехваты в секунду; до него удваиваем.
+    const bool speedInMhz = table[1] < 2 || (table[1] == 2 && table[2] < 7);
+    const double speedScale = speedInMhz ? 2.0 : 1.0;
+    std::string channelLetters;
     while (cursor + 4 <= limit) {
         const BYTE type = cursor[0];
         const BYTE length = cursor[1];
@@ -313,13 +319,19 @@ void collectSmbiosMemory(HardwareIdentity& info)
                 const WORD rated = at(0x19);
                 const WORD configured = length >= 0x26 ? at(0x24) : 0;
                 const WORD millivolts = length >= 0x2C ? at(0x2A) : 0;
-                module.ratedMt = rated == 0xFFFF ? 0.0 : static_cast<double>(rated);
-                module.configuredMt = configured == 0xFFFF ? 0.0 : static_cast<double>(configured);
+                module.ratedMt = rated == 0xFFFF ? 0.0 : static_cast<double>(rated) * speedScale;
+                module.configuredMt = configured == 0xFFFF ? 0.0 : static_cast<double>(configured) * speedScale;
                 module.voltage = millivolts > 0 ? static_cast<double>(millivolts) / 1000.0 : 0.0;
                 module.type = memoryTypeName(byteAt(0x16));
                 module.slot = stringAt(byteAt(0x14));
                 module.vendor = stringAt(byteAt(0x1B));
                 module.part = stringAt(byteAt(0x1E));
+                for (const char symbol : module.slot) {
+                    const char upper = static_cast<char>(std::toupper(static_cast<unsigned char>(symbol)));
+                    if (upper >= 'A' && upper <= 'H' && channelLetters.find(upper) == std::string::npos) {
+                        channelLetters.push_back(upper);
+                    }
+                }
                 modules.push_back(module);
             }
         }
@@ -335,6 +347,7 @@ void collectSmbiosMemory(HardwareIdentity& info)
     if (!modules.empty()) {
         info.memory.modules = modules;
         info.memory.slots = std::max<std::uint32_t>(slots, static_cast<std::uint32_t>(modules.size()));
+        info.memory.channels = static_cast<std::uint32_t>(channelLetters.size());
     }
 }
 
@@ -369,11 +382,9 @@ void collectMemory(HardwareIdentity& info)
     info.memory.configuredMt = configured > 0.0 ? configured : rated;
     // Разница паспортной и рабочей частот — и есть признак невыключенного XMP/EXPO.
     info.memory.profileEnabled = rated <= 0.0 || configured <= 0.0 || configured + 1.0 >= rated;
-    if (populated > 0) {
-        // Число каналов SMBIOS не отдаёт честно: считаем парами заселённых слотов.
-        info.memory.channels = std::max<std::uint32_t>(1, populated / 2);
-        info.memory.channelsEstimated = true;
-    }
+    // Один заселённый слот из двух и больше — это одноканальный режим, его можно
+    // утверждать. Сколько именно каналов при двух планках — сказать без SMBus нельзя.
+    info.memory.singleChannel = populated == 1 && (info.memory.slots == 0 || info.memory.slots >= 2);
 }
 
 void collectDisplays(HardwareIdentity& info)

@@ -3,7 +3,9 @@
 #include "ui/layout.h"
 
 #include <algorithm>
+#include <array>
 #include <string>
+#include <utility>
 
 namespace yawa {
 namespace {
@@ -51,9 +53,8 @@ void drawOsCard(Renderer& renderer, const AppModel& model, const Theme& theme, c
     }
 
     float top = inner.top + 42.0f;
-    drawRow(renderer, Rect{ inner.left, top, inner.right, top + 18.0f }, L"Система", field(os.product), theme,
-        TextRole::Value);
-    top += 34.0f;
+    drawRow(renderer, Rect{ inner.left, top, inner.right, top + 18.0f }, L"Система", field(os.product), theme);
+    top += 26.0f;
     drawRow(renderer, Rect{ inner.left, top, inner.right, top + 18.0f }, L"Сборка", build, theme);
     top += 26.0f;
     drawRow(renderer, Rect{ inner.left, top, inner.right, top + 18.0f }, L"Издание", field(os.edition), theme);
@@ -70,8 +71,9 @@ void drawCpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
     drawCardHeader(renderer, card, L"Процессор", L"CPUID и GetLogicalProcessorInformationEx", theme);
 
     float top = inner.top + 42.0f;
-    renderer.text(field(cpu.name), Rect{ inner.left, top, inner.right, top + 36.0f }, TextRole::Body, theme.text);
-    top += 42.0f;
+    renderer.text(clipText(renderer, field(cpu.name), TextRole::Heading, inner.width()),
+        Rect{ inner.left, top, inner.right, top + 20.0f }, TextRole::Heading, theme.text);
+    top += 30.0f;
 
     std::wstring cores = L"—";
     if (cpu.physicalCores > 0) {
@@ -149,31 +151,25 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
         L"SMBIOS Type 17: раскладка по слотам, частоты и напряжение модулей", theme);
 
     float top = inner.top + 42.0f;
-    drawRow(renderer, Rect{ inner.left, top, inner.right, top + 18.0f }, L"Конфигурация",
-        field(describeMemory(memory)), theme, TextRole::Value);
-    top += 32.0f;
+    // Конфигурация — заголовок карточки слева: «2×16 ГБ» должно читаться первым.
+    renderer.text(clipText(renderer, field(describeMemory(memory)), TextRole::Heading, inner.width()),
+        Rect{ inner.left, top, inner.right, top + 20.0f }, TextRole::Heading, theme.text);
+    top += 28.0f;
 
     std::wstring speed = L"—";
     if (memory.configuredMt > 0.0) {
-        speed = wideText(formatWithUnit(memory.configuredMt, MetricUnit::Megahertz, 0) + " МТ/с");
+        // SMBIOS отдаёт частоту в мегаперехватах в секунду: «МГц» здесь было бы ошибкой.
+        speed = wideText(formatValue(memory.configuredMt, 0) + " МТ/с");
         if (memory.ratedMt > 0.0 && memory.ratedMt > memory.configuredMt + 1.0) {
-            speed += wideText(" из " + formatWithUnit(memory.ratedMt, MetricUnit::Megahertz, 0));
+            speed += wideText(" из " + formatValue(memory.ratedMt, 0));
         }
     }
-    drawRow(renderer, Rect{ inner.left, top, inner.right, top + 18.0f }, L"Частота", speed, theme);
-    top += 26.0f;
 
     const double tck = memory.cycleTimeNs();
-    drawRow(renderer, Rect{ inner.left, top, inner.right, top + 18.0f }, L"Такт tCK",
-        tck > 0.0 ? wideText(formatValue(tck, 3) + " нс") : std::wstring(L"—"), theme);
-    top += 26.0f;
-
     std::wstring profile = memory.profileEnabled ? L"включён" : L"не включён";
     if (memory.ratedMt <= 0.0) {
         profile = L"нет данных";
     }
-    drawRow(renderer, Rect{ inner.left, top, inner.right, top + 18.0f }, L"XMP/EXPO", profile, theme);
-    top += 26.0f;
 
     std::wstring slots = L"—";
     if (memory.slots > 0) {
@@ -185,8 +181,20 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
         }
         slots = wideText(std::to_string(populated) + " из " + std::to_string(memory.slots));
     }
-    drawRow(renderer, Rect{ inner.left, top, inner.right, top + 18.0f }, L"Слоты", slots, theme);
-    top += 30.0f;
+
+    // Четыре характеристики в сетке 2×2: в демо карточка памяти именно такая,
+    // и в одну колонку они не влезали в узком окне.
+    const std::array<std::pair<std::wstring, std::wstring>, 4> specs{ std::make_pair(L"Частота", speed),
+        { L"Такт tCK", tck > 0.0 ? wideText(formatValue(tck, 3) + " нс") : std::wstring(L"—") },
+        { L"XMP/EXPO", profile }, { L"Слоты", slots } };
+    const float half = inner.width() * 0.5f;
+    for (std::size_t index = 0; index < specs.size(); ++index) {
+        const Rect cell{ inner.left + static_cast<float>(index % 2) * half, top + static_cast<float>(index / 2) * 26.0f,
+            inner.left + (static_cast<float>(index % 2) + 1) * half - (index % 2 == 0 ? 18.0f : 0.0f),
+            top + static_cast<float>(index / 2) * 26.0f + 18.0f };
+        drawRow(renderer, cell, specs[index].first, specs[index].second, theme);
+    }
+    top += 58.0f;
 
     // Таблица планок: слот, объём, модуль, напряжение. Именно это и спрашивают
     // «2×16 или 1×32».
@@ -273,15 +281,30 @@ void drawSystemView(Renderer& renderer, const AppModel& model, const Theme& them
     (void)hits; // экран только показывает собранное: действий на нём нет
 
     const Columns columns{ area };
-    const float top = area.top;
-    drawOsCard(renderer, model, theme, columns.span(0, 4, top, 200.0f));
-    drawCpuCard(renderer, model, theme, columns.span(4, 4, top, 200.0f));
-    drawGpuCard(renderer, model, theme, columns.span(8, 4, top, 200.0f));
+    // Тот же порог перестройки, что у обзора и у прототипа: ниже 900 px карточки идут по одной.
+    const bool narrow = area.width() < kDashboardNarrowWidth;
+    const float rowHeight = 214.0f;
+    const float memoryHeight = 264.0f;
 
-    drawMemoryCard(renderer, model, theme, columns.span(0, 8, top + 214.0f, 250.0f));
-    drawDisplayCard(renderer, model, theme, columns.span(8, 4, top + 214.0f, 250.0f));
+    const float wideTop = area.top;
+    const float narrowStep = rowHeight + kGap;
+    drawOsCard(renderer, model, theme, columns.span(narrow ? 0 : 0, narrow ? 12 : 4,
+        narrow ? wideTop : wideTop, rowHeight));
+    drawCpuCard(renderer, model, theme,
+        columns.span(narrow ? 0 : 4, narrow ? 12 : 4, narrow ? wideTop + narrowStep : wideTop, rowHeight));
+    drawGpuCard(renderer, model, theme,
+        columns.span(narrow ? 0 : 8, narrow ? 12 : 4, narrow ? wideTop + 2.0f * narrowStep : wideTop, rowHeight));
 
-    const Rect note = columns.span(0, 12, top + 478.0f, kSystemHeight - 486.0f);
+    const float memoryTop = narrow ? wideTop + 3.0f * narrowStep : wideTop + rowHeight + kGap;
+    drawMemoryCard(renderer, model, theme, columns.span(0, narrow ? 12 : 8, memoryTop, memoryHeight));
+    drawDisplayCard(renderer, model, theme,
+        columns.span(narrow ? 0 : 8, narrow ? 12 : 4,
+            narrow ? memoryTop + memoryHeight + kGap : memoryTop,
+            narrow ? 190.0f : memoryHeight));
+
+    const float noteTop = narrow ? memoryTop + memoryHeight + 190.0f + 2.0f * kGap : memoryTop + memoryHeight + kGap;
+    const float designHeight = narrow ? kSystemNarrowHeight : kSystemHeight;
+    const Rect note = columns.span(0, 12, noteTop, area.top + designHeight - 8.0f - noteTop);
     drawCard(renderer, note, theme);
     const Rect inner = note.inset(kCardPadding);
     drawCardHeader(renderer, note, L"Откуда эти числа",

@@ -206,7 +206,7 @@ void cpuAdvice(const HardwareIdentity& hardware, BottleneckResult& result)
             "Память работает на " + formatValue(hardware.memory.configuredMt, 0) + " МТ/с вместо "
                 + formatValue(hardware.memory.ratedMt, 0) + ". Профиль памяти ускоряет именно CPU-зависимые игры.");
     }
-    if (hardware.memory.channels == 1 && hardware.memory.modules.size() < 2) {
+    if (hardware.memory.singleChannel) {
         pushAdvice(result, "Поставить вторую планку — два канала",
             "Одноканальный режим режет пропускную способность памяти вдвое: 1 % low в CPU-играх проседает "
             "на 10–20 %. Две планки того же объёма — самый дешёвый способ убрать провалы.");

@@ -1849,6 +1849,15 @@ body.is-paused .tag--live { color: var(--warn); border-color: rgba(255, 179, 71,
 
 
 /* ── «Баланс»: калькулятор узкого места и «Сведения о системе» ─────────────── */
+/* Ряды этих двух экранов не перестраиваются на 1180 px: приложение держит их
+   до 900 px, и иначе снимки эталона и сборки разошлись бы составом карточек. */
+.col-4 { grid-column: span 4; }
+.col-5 { grid-column: span 5; }
+.col-7 { grid-column: span 7; }
+.col-8 { grid-column: span 8; }
+@media (max-width: 900px) {
+  .col-4, .col-5, .col-7, .col-8 { grid-column: span 12; }
+}
 .card--balance .balance { display: flex; align-items: center; gap: 24px; }
 .balance__body { flex: 1 1 auto; min-width: 0; }
 .balance__headline {
@@ -1874,7 +1883,7 @@ body.is-paused .tag--live { color: var(--warn); border-color: rgba(255, 179, 71,
 .balance__pair .row em { font-style: normal; color: var(--text-faint); font-size: 11px; }
 .balance__pair .bar { height: 5px; margin-top: 7px; border-radius: 99px; background: rgba(255, 255, 255, 0.06); overflow: hidden; }
 .balance__pair .bar i { display: block; height: 100%; border-radius: inherit; background: var(--c, var(--accent)); opacity: 0.85; }
-.balance__pair .note { margin: 6px 0 0; font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint); }
+.balance__pair .note { margin: 6px 0 0; font-size: 9.5px; letter-spacing: 0.04em; color: var(--text-faint); }
 
 .balance__load li { padding: 8px 0; border-bottom: 1px solid var(--line-soft); }
 .balance__load li:last-child { border-bottom: 0; }
@@ -1920,7 +1929,6 @@ body.is-paused .tag--live { color: var(--warn); border-color: rgba(255, 179, 71,
 .balance__modules code { font-family: var(--mono); font-size: 10.5px; color: var(--text-faint); }
 
 @media (max-width: 1180px) {
-  .card--balance .balance { flex-direction: column; align-items: flex-start; }
   .balance__specs--two { grid-template-columns: 1fr; }
 }
 
