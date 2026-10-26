@@ -7,6 +7,7 @@ add_executable(metrics_tests
     test_frame_tracker.cpp
     test_settings.cpp
     test_gpu_registry.cpp
+    test_bottleneck.cpp
 )
 
 target_link_libraries(metrics_tests PRIVATE yawa_metrics)

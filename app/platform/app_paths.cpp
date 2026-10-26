@@ -1,6 +1,9 @@
 #include "platform/app_paths.h"
 
 #include <windows.h>
+#include <objbase.h>
+#include <knownfolders.h>
+#include <shlobj.h>
 #include <shellapi.h>
 
 #include <fstream>
@@ -71,20 +74,79 @@ std::string executableDirectory()
     return toUtf8(full);
 }
 
+namespace {
+
+// Каталог данных: %LOCALAPPDATA%\\YawaFpsHub. EXE при этом остаётся единственным
+// файлом программы — его можно положить куда угодно и запустить оттуда.
+std::wstring dataDirectoryWide()
+{
+    PWSTR known = nullptr;
+    std::wstring base;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &known)) && known != nullptr) {
+        base = known;
+        CoTaskMemFree(known);
+    }
+    if (base.empty()) {
+        // Локальный профиль недоступен (редкость: портативный запуск без профиля):
+        // откатываемся на каталог рядом с exe, чтобы настройки не потерялись.
+        wchar_t path[MAX_PATH]{};
+        if (FAILED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, 0, path))) {
+            return {};
+        }
+        base = path;
+    }
+    while (!base.empty() && (base.back() == L'\\' || base.back() == L'/')) {
+        base.pop_back();
+    }
+    return base + L"\\YawaFpsHub";
+}
+
+// Старые версии держали ini рядом с exe. Переносим файл один раз: пользователь
+// не должен проснуться с настройками по умолчанию после обновления.
+void migrateLegacyFile(const std::wstring& from, const std::wstring& to)
+{
+    if (from.empty() || GetFileAttributesW(to.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        return;
+    }
+    if (GetFileAttributesW(from.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        CopyFileW(from.c_str(), to.c_str(), TRUE);
+    }
+}
+
+} // namespace
+
 std::string settingsPath()
 {
-    return executableDirectory() + "\\YawaFpsHub.ini";
+    const std::wstring directory = dataDirectoryWide();
+    if (directory.empty()) {
+        return executableDirectory() + "\\YawaFpsHub.ini";
+    }
+    ensureDirectory(toUtf8(directory));
+    const std::wstring target = directory + L"\\YawaFpsHub.ini";
+    migrateLegacyFile(toWide(toUtf8(executableDirectory()) + "\\YawaFpsHub.ini"), target);
+    return toUtf8(target);
 }
 
 std::string logPath()
 {
-    return executableDirectory() + "\\YawaFpsHub.log";
+    const std::wstring directory = dataDirectoryWide();
+    if (directory.empty()) {
+        return executableDirectory() + "\\YawaFpsHub.log";
+    }
+    ensureDirectory(toUtf8(directory));
+    return toUtf8(directory + L"\\YawaFpsHub.log");
 }
 
 std::string sessionsDirectory()
 {
-    return executableDirectory() + "\\sessions";
+    const std::wstring directory = dataDirectoryWide();
+    if (directory.empty()) {
+        return executableDirectory() + "\\sessions";
+    }
+    ensureDirectory(toUtf8(directory));
+    return toUtf8(directory + L"\\sessions");
 }
+
 
 bool readTextFile(const std::string& path, std::string& content)
 {

@@ -42,29 +42,7 @@ std::wstring historyWindowLabel(int intervalMs)
     return L"Последние " + wideText(std::to_string(seconds) + " секунд");
 }
 
-// Заголовок карточки: крупное название и строка-пояснение под ним.
-float drawCardHeader(Renderer& renderer, const Rect& card, std::wstring_view title, std::wstring_view subtitle,
-    const Theme& theme)
-{
-    const Rect inner = card.inset(kCardPadding);
-    renderer.text(title, Rect{ inner.left, inner.top, inner.right, inner.top + 20.0f }, TextRole::Heading, theme.text);
-    if (!subtitle.empty()) {
-        renderer.text(subtitle, Rect{ inner.left, inner.top + 18.0f, inner.right - 76.0f, inner.top + 34.0f },
-            TextRole::Tiny, theme.textFaint);
-    }
-    return inner.top + 36.0f;
-}
-
-void drawTag(Renderer& renderer, const Rect& card, std::wstring_view label, bool live, const Theme& theme)
-{
-    const float width = renderer.measureText(label, TextRole::Tiny) + 30.0f;
-    const Rect tag{ card.right - kCardPadding - width, card.top + kCardPadding - 2.0f, card.right - kCardPadding,
-        card.top + kCardPadding + 20.0f };
-    renderer.fillRoundRect(tag, 11.0f, live ? theme.accentSoft : theme.panelSoft);
-    renderer.fillCircle(tag.left + 11.0f, tag.centerY(), 3.0f, live ? theme.accent : theme.textFaint);
-    renderer.text(label, Rect{ tag.left + 20.0f, tag.top, tag.right - 6.0f, tag.bottom }, TextRole::Tiny,
-        live ? theme.accent : theme.textFaint);
-}
+// Заголовок и метка карточки переехали в layout.cpp: их используют и обзор, и «Баланс».
 
 void drawStatBlock(Renderer& renderer, const Rect& rect, std::wstring_view label, std::wstring_view value,
     const Theme& theme)

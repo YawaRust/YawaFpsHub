@@ -18,6 +18,10 @@ constexpr float kDashboardNarrowWidth = 900.0f;
 constexpr float kDashboardNarrowHeight = 2562.0f;
 constexpr float kSettingsHeight = 1882.0f;
 constexpr float kOverlayHeight = 2422.0f;
+// «Баланс» и «Система»: карточки фиксированной высоты, экран целиком влезает
+// в окно 800 px по высоте, поэтому прокрутка появляется только в узком окне.
+constexpr float kBottleneckHeight = 892.0f;
+constexpr float kSystemHeight = 668.0f;
 
 
 constexpr float kCardRadius = 20.0f;
@@ -36,6 +40,20 @@ void drawChip(Renderer& renderer, const Rect& rect, std::wstring_view label, boo
 void drawLabelValue(Renderer& renderer, const Rect& rect, std::wstring_view label, std::wstring_view value,
     const Theme& theme);
 void drawBar(Renderer& renderer, const Rect& rect, float fraction, const Color& color, const Theme& theme);
+
+// Заголовок карточки: крупное название и строка-пояснение под ним. Возвращает
+// координату, с которой можно начинать содержимое.
+float drawCardHeader(Renderer& renderer, const Rect& card, std::wstring_view title, std::wstring_view subtitle,
+    const Theme& theme);
+// Метка в правом верхнем углу карточки: «LIVE», «ОЦЕНКА», «НЕТ ДАННЫХ».
+void drawTag(Renderer& renderer, const Rect& card, std::wstring_view label, bool live, const Theme& theme);
+
+// Формат DirectWrite не переносит строки, поэтому абзацы режем сами по ширине карточки.
+// Возвращает занятую высоту, чтобы следующий блок встал под текстом, а не поперёк.
+// Обрезает строку по ширине с многоточием: имена путей и модулей бывают длиннее карточки.
+std::wstring clipText(Renderer& renderer, std::wstring_view text, TextRole role, float maxWidth);
+float drawWrappedText(Renderer& renderer, std::wstring_view text, const Rect& rect, TextRole role,
+    const Color& color, float lineHeight = 15.0f, std::uint32_t maxLines = 6);
 void drawGauge(Renderer& renderer, float centerX, float centerY, float radius, float fraction, const Color& color,
     const Color& track, std::wstring_view value, const Color& valueColor);
 

@@ -1,13 +1,16 @@
 #include "platform/main_window.h"
 #include "platform/app_paths.h"
 #include "platform/display_info.h"
+#include "platform/hardware_info_win.h"
 #include "platform/win_util.h"
+#include "ui/bottleneck_view.h"
 #include "ui/chrome.h"
 #include "ui/overlay_view.h"
 #include "render/overlay_painter.h"
 #include "ui/dashboard_view.h"
 #include "ui/layout.h"
 #include "ui/sensors_view.h"
+#include "ui/system_view.h"
 #include "ui/settings_view.h"
 
 #include <windowsx.h>
@@ -150,6 +153,22 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
     }
 
     const GpuRegistry& registry = m_sensors.gpus();
+
+    // Паспорт машины нужен «Балансу» и «Системе». Сбор — реестр, CPUID, SMBIOS и
+    // EnumDisplaySettings: это десятки миллисекунд один раз при старте, а не работа в кадре.
+    {
+        std::string hardwareError;
+        if (collectHardwareInfo(m_model.hardware, registry, hardwareError)) {
+            const CpuIdentity& cpu = m_model.hardware.cpu;
+            log.info("железо: " + (cpu.name.empty() ? std::string("CPU не определён") : cpu.name) + ", ядер "
+                + std::to_string(cpu.physicalCores) + "/" + std::to_string(cpu.logicalProcessors) + ", модулей "
+                + std::to_string(m_model.hardware.memory.modules.size()) + ", мониторов "
+                + std::to_string(m_model.hardware.displays.size()));
+        } else {
+            log.warning("сведения о системе: " + hardwareError);
+        }
+    }
+
     for (std::size_t index = 0; index < registry.count(); ++index) {
         const GpuAdapter* adapter = registry.byIndex(index);
         if (adapter != nullptr) {
@@ -813,6 +832,10 @@ float MainWindow::contentDesignHeight() const
         return kOverlayHeight;
     case View::Settings:
         return kSettingsHeight;
+    case View::Bottleneck:
+        return kBottleneckHeight;
+    case View::System:
+        return kSystemHeight;
     }
     return kDashboardHeight;
 }
@@ -888,6 +911,12 @@ std::vector<UiHit> MainWindow::buildHits()
         break;
     case View::Settings:
         drawSettings(m_renderer, m_model, m_theme, area, hits);
+        break;
+    case View::Bottleneck:
+        drawBottleneckView(m_renderer, m_model, m_theme, area, hits);
+        break;
+    case View::System:
+        drawSystemView(m_renderer, m_model, m_theme, area, hits);
         break;
     }
     if (scrolled) {
@@ -1626,6 +1655,10 @@ void MainWindow::samplingLoop()
                 m_model.cpuCores = m_sensors.coreCount();
                 m_model.cpuThreads = m_sensors.cpuThreads();
                 m_model.cpuName = m_sensors.cpuName();
+                // Узкое место пересчитываем на том же снимке, что и экраны: отдельного
+                // опроса железа нет, и цифры на «Балансе» всегда совпадают с «Обзором».
+                m_model.balance = analyzeBottleneck(m_model.hardware,
+                    loadFromStore(m_model.store, static_cast<double>(m_model.settings.capture.targetHz)));
                 m_model.etwRunning = m_etw.isRunning();
                 if (!foreground.empty()) {
                     m_model.foregroundApp = foreground;

@@ -71,10 +71,14 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
         }
     }
 
-    // --view=sensors|settings нужен CI, чтобы снять скриншоты всех экранов.
+    // --view=<экран> нужен CI, чтобы снять скриншоты всех экранов одним и тем же способом.
     yawa::View initialView = yawa::View::Dashboard;
     if (arguments.find(L"--view=sensors") != std::wstring_view::npos) {
         initialView = yawa::View::Sensors;
+    } else if (arguments.find(L"--view=bottleneck") != std::wstring_view::npos) {
+        initialView = yawa::View::Bottleneck;
+    } else if (arguments.find(L"--view=system") != std::wstring_view::npos) {
+        initialView = yawa::View::System;
     } else if (arguments.find(L"--view=overlay") != std::wstring_view::npos) {
         initialView = yawa::View::Overlay;
     } else if (arguments.find(L"--view=settings") != std::wstring_view::npos) {

@@ -16,8 +16,10 @@ constexpr std::array<int, 4> kTargets{ 60, 120, 144, 165 };
 constexpr std::array<std::wstring_view, 5> kAccentNames{ L"Мята", L"Лёд", L"Фиалка", L"Янтарь", L"Коралл" };
 constexpr std::array<std::uint32_t, 5> kAccentRgba{ 0xFF5EF29B, 0xFF6AA8FF, 0xFFB47BFF, 0xFFFFB347, 0xFFFF6F6F };
 
-float drawCardHeader(Renderer& renderer, const Rect& card, std::wstring_view title, std::wstring_view subtitle,
-    const Theme& theme)
+// Свой заголовок карточки: в настройках подпись идёт на всю ширину и занимает 34 px,
+// тогда как на обзоре и «Балансе» она короче на 2 px — поэтому helper не переиспользуем.
+float drawSettingsCardHeader(Renderer& renderer, const Rect& card, std::wstring_view title,
+    std::wstring_view subtitle, const Theme& theme)
 {
     const Rect inner = card.inset(kCardPadding);
     renderer.text(title, Rect{ inner.left, inner.top, inner.right, inner.top + 20.0f }, TextRole::Heading, theme.text);
@@ -73,7 +75,7 @@ void drawCaptureCard(Renderer& renderer, const AppModel& model, const Theme& the
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
-    float top = drawCardHeader(renderer, card, L"Сбор данных", L"как часто и что именно измеряем", theme);
+    float top = drawSettingsCardHeader(renderer, card, L"Сбор данных", L"как часто и что именно измеряем", theme);
 
     renderer.text(L"Интервал опроса", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small,
         theme.textDim);
@@ -142,7 +144,7 @@ void drawAppearanceCard(Renderer& renderer, const AppModel& model, const Theme& 
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
-    float top = drawCardHeader(renderer, card, L"Внешний вид", L"акцент меняет весь интерфейс и оверлей", theme);
+    float top = drawSettingsCardHeader(renderer, card, L"Внешний вид", L"акцент меняет весь интерфейс и оверлей", theme);
 
     renderer.text(L"Акцент", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
     top += 20.0f;
@@ -190,11 +192,12 @@ void drawPortableCard(Renderer& renderer, const AppModel& model, const Theme& th
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
-    float top = drawCardHeader(renderer, card, L"Портативность и данные", L"ничего не пишем в реестр и в сеть", theme);
+    float top = drawSettingsCardHeader(renderer, card, L"Портативность и данные",
+        L"один exe, настройки в каталоге пользователя, реестр и сеть не используются", theme);
 
-    const std::array<std::array<std::wstring_view, 2>, 3> rows{ std::array<std::wstring_view, 2>{ L"Файл настроек",
-                                                                                               L"YawaFpsHub.ini" },
-        { L"Запись в реестр", L"нет" }, { L"Сетевые запросы", L"нет" } };
+    const std::array<std::array<std::wstring_view, 2>, 3> rows{ std::array<std::wstring_view, 2>{ L"Каталог данных",
+                                                                                               L"%LOCALAPPDATA%\\YawaFpsHub" },
+        { L"Файл настроек", L"YawaFpsHub.ini" }, { L"Сетевые запросы", L"нет" } };
 
     for (const auto& row : rows) {
         if (top + 16.0f > inner.bottom) {
@@ -227,7 +230,7 @@ void drawAboutCard(Renderer& renderer, const AppModel& model, const Theme& theme
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
-    float top = drawCardHeader(renderer, card, L"О программе", L"YawaFpsHub 0.4 · Windows 10/11 x64", theme);
+    float top = drawSettingsCardHeader(renderer, card, L"О программе", L"YawaFpsHub 0.4 · Windows 10/11 x64", theme);
 
     const std::array<std::array<std::wstring, 2>, 4> rows{ std::array<std::wstring, 2>{ L"Собственное потребление",
                                                                                       wideMetric(MetricId::SelfCpu,
@@ -266,7 +269,7 @@ void drawHotkeyCard(Renderer& renderer, const AppModel& model, const Theme& them
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
-    float top = drawCardHeader(renderer, card, L"Горячие клавиши",
+    float top = drawSettingsCardHeader(renderer, card, L"Горячие клавиши",
         L"нажмите строку и введите клавишу · Esc — отмена · Delete — выключить", theme);
 
     const std::array<std::wstring_view, 4> names{ L"Оверлей", L"Положение оверлея", L"Показать или скрыть окно",
@@ -302,7 +305,7 @@ void drawSourcesCard(Renderer& renderer, const AppModel& model, const Theme& the
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
-    const float top = drawCardHeader(renderer, card, L"Источники данных",
+    const float top = drawSettingsCardHeader(renderer, card, L"Источники данных",
         L"доступность проверяется при запуске, недоступное честно помечается", theme) + 10.0f;
 
     struct Source {

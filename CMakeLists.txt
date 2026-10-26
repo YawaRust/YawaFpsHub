@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(YawaFpsHub VERSION 0.2.0 LANGUAGES CXX)
+project(YawaFpsHub VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -31,6 +31,8 @@ add_library(yawa_metrics STATIC
     app/metrics/system_sampler.cpp
     app/metrics/frame_tracker.cpp
     app/metrics/gpu_registry.cpp
+    app/metrics/hardware_info.cpp
+    app/metrics/bottleneck.cpp
     app/ui/settings.cpp
 )
 

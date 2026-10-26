@@ -1,5 +1,6 @@
 #pragma once
 
+#include "metrics/bottleneck.h"
 #include "metrics/metric_store.h"
 #include "metrics/statistics.h"
 #include "platform/sensors_win.h"
@@ -12,7 +13,7 @@
 
 namespace yawa {
 
-enum class View : std::uint8_t { Dashboard, Sensors, Overlay, Settings };
+enum class View : std::uint8_t { Dashboard, Sensors, Overlay, Settings, Bottleneck, System };
 
 // Что именно нажали в интерфейсе. Окно разбирает эти события и меняет состояние,
 // сами экраны остаются «только рисующими».
@@ -148,6 +149,10 @@ struct AppModel {
     float contentHeight = 0.0f;
     // Состояние окна для своего заголовка: перетаскивание и кнопки рисуются вручную.
     bool maximized = false;
+    // Паспорт машины собирается один раз при старте, узкое место пересчитывается
+    // из последних показаний: экраны только рисуют то, что лежит в модели.
+    HardwareIdentity hardware;
+    BottleneckResult balance;
     float cursorX = -100.0f;
     float cursorY = -100.0f;
     bool cursorInside = false;

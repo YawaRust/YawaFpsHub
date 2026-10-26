@@ -1,6 +1,13 @@
 #include "ui/chrome.h"
 #include "ui/layout.h"
 
+#include <string>
+
+// CMake определяет версию из project(... VERSION); вне сборки (тесты ядра) её нет.
+#ifndef YAWA_VERSION_STRING
+#define YAWA_VERSION_STRING "0.0.0"
+#endif
+
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -9,8 +16,10 @@
 namespace yawa {
 namespace {
 
-constexpr std::array<std::wstring_view, 4> kTabNames{ L"Обзор", L"Датчики", L"Оверлей", L"Настройки" };
-constexpr std::array<View, 4> kTabViews{ View::Dashboard, View::Sensors, View::Overlay, View::Settings };
+constexpr std::array<std::wstring_view, 6> kTabNames{ L"Обзор", L"Датчики", L"Баланс", L"Система", L"Оверлей",
+    L"Настройки" };
+constexpr std::array<View, 6> kTabViews{ View::Dashboard, View::Sensors, View::Bottleneck, View::System,
+    View::Overlay, View::Settings };
 
 void drawGridIcon(Renderer& renderer, const Rect& box, const Color& color)
 {
@@ -47,6 +56,36 @@ void drawLayersIcon(Renderer& renderer, const Rect& box, const Color& color)
     renderer.strokeRoundRect(Rect{ left, box.centerY() - 3.0f, left + width, box.centerY() + 3.0f }, 2.0f, color, 1.4f);
     renderer.strokeRoundRect(Rect{ left, box.centerY() + 3.0f, left + width, box.centerY() + 9.0f }, 2.0f, color, 1.4f);
     (void)height;
+}
+
+// «Баланс»: два груза на коромысле — ровно то, что сравнивает калькулятор узкого места.
+void drawBalanceIcon(Renderer& renderer, const Rect& box, const Color& color)
+{
+    const float cx = box.centerX();
+    const float cy = box.centerY();
+    renderer.drawLine(cx - 11.0f, cy - 7.0f, cx + 11.0f, cy - 1.0f, color, 1.4f);
+    renderer.fillCircle(cx, cy - 5.0f, 2.0f, color);
+    for (const float side : { -8.5f, 8.5f }) {
+        const float pivotY = side < 0.0f ? cy - 6.6f : cy - 2.4f;
+        renderer.drawLine(cx + side, pivotY, cx + side, pivotY + 5.0f, color, 1.1f);
+        renderer.strokeEllipse(cx + side, pivotY + 8.0f, 5.4f, 3.0f, color, 1.2f);
+    }
+}
+
+// «Система»: корпус процессора с ножками — раздел о железе.
+void drawChipIcon(Renderer& renderer, const Rect& box, const Color& color)
+{
+    const float cx = box.centerX();
+    const float cy = box.centerY();
+    renderer.strokeRoundRect(Rect{ cx - 7.0f, cy - 7.0f, cx + 7.0f, cy + 7.0f }, 2.5f, color, 1.3f);
+    renderer.fillRoundRect(Rect{ cx - 3.0f, cy - 3.0f, cx + 3.0f, cy + 3.0f }, 1.0f, color);
+    for (int index = -1; index <= 1; ++index) {
+        const float offset = static_cast<float>(index) * 4.0f;
+        renderer.drawLine(cx + offset, cy - 10.5f, cx + offset, cy - 7.0f, color, 1.1f);
+        renderer.drawLine(cx + offset, cy + 7.0f, cx + offset, cy + 10.5f, color, 1.1f);
+        renderer.drawLine(cx - 10.5f, cy + offset, cx - 7.0f, cy + offset, color, 1.1f);
+        renderer.drawLine(cx + 7.0f, cy + offset, cx + 10.5f, cy + offset, color, 1.1f);
+    }
 }
 
 void drawSlidersIcon(Renderer& renderer, const Rect& box, const Color& color)
@@ -190,6 +229,10 @@ std::string_view viewTitle(View view)
         return "Обзор";
     case View::Sensors:
         return "Все датчики";
+    case View::Bottleneck:
+        return "Баланс системы";
+    case View::System:
+        return "Сведения о системе";
     case View::Overlay:
         return "Оверлей";
     case View::Settings:
@@ -206,6 +249,10 @@ std::string_view viewEyebrow(View view)
     // Надзаголовки совпадают с прототипом слово в слово: демо — эталон вида.
     case View::Sensors:
         return "ПОКАЗАТЕЛИ";
+    case View::Bottleneck:
+        return "УЗКОЕ МЕСТО";
+    case View::System:
+        return "ОБОРУДОВАНИЕ";
     case View::Overlay:
         return "ПОВЕРХ ИГРЫ";
     case View::Settings:
@@ -264,6 +311,12 @@ void drawRail(Renderer& renderer, const AppModel& model, const Theme& theme, std
         case View::Sensors:
             drawPulseIcon(renderer, button, icon);
             break;
+        case View::Bottleneck:
+            drawBalanceIcon(renderer, button, icon);
+            break;
+        case View::System:
+            drawChipIcon(renderer, button, icon);
+            break;
         case View::Overlay:
             drawLayersIcon(renderer, button, icon);
             break;
@@ -278,9 +331,11 @@ void drawRail(Renderer& renderer, const AppModel& model, const Theme& theme, std
 
     renderer.fillCircle(24.0f, renderer.height() - 54.0f, 3.0f,
         model.etwRunning ? theme.accent : theme.textFaint);
-    renderer.text(L"v0.4", Rect{ 14.0f, renderer.height() - 44.0f, kRailWidth - 6.0f,
-                                 renderer.height() - 26.0f },
-        TextRole::Tiny, theme.textFaint);
+    // Версия сборки приходит из CMake (project VERSION), чтобы рельс, свойства exe
+    // и тег релиза не разъезжались.
+    renderer.text(wideText(std::string("v") + YAWA_VERSION_STRING),
+        Rect{ 14.0f, renderer.height() - 44.0f, kRailWidth - 6.0f, renderer.height() - 26.0f }, TextRole::Tiny,
+        theme.textFaint);
 }
 
 void drawTopBar(Renderer& renderer, const AppModel& model, const Theme& theme, std::vector<UiHit>& hits)
