@@ -805,7 +805,8 @@ float MainWindow::contentDesignHeight() const
 {
     switch (m_model.view) {
     case View::Dashboard:
-        return kDashboardHeight;
+        // В узком окне карточки идут по одной — контент выше, и прокрутка должна доставать до конца.
+        return contentArea().width() < kDashboardNarrowWidth ? kDashboardNarrowHeight : kDashboardHeight;
     case View::Sensors:
         return contentArea().height();
     case View::Overlay:

@@ -424,9 +424,11 @@ void drawSensors(Renderer& renderer, AppModel& model, const Theme& theme, const 
             const bool pinned = field >= 0
                 && model.settings.overlay.visible[static_cast<std::size_t>(field)];
             const bool eyeHover = field >= 0 && isHovered(model, eye);
-            const Color eyeColor = pinned ? theme.accent : (field < 0 ? theme.line.withAlpha(0.9f) : theme.textFaint);
-            renderer.fillRoundRect(eye, 8.0f,
-                pinned ? theme.accentSoft : (eyeHover ? theme.panelSoft : theme.panelSoft.withAlpha(0.35f)));
+            // Как в демо: выключенный «глаз» — просто серый контур, включённый — зелёный чип.
+            const Color eyeColor = pinned ? theme.accent : theme.textFaint;
+            if (pinned || eyeHover) {
+                renderer.fillRoundRect(eye, 8.0f, pinned ? theme.accentSoft : theme.panelSoft);
+            }
             if (pinned) {
                 renderer.strokeRoundRect(eye, 8.0f, theme.accentGlow, 1.0f);
             }
@@ -434,9 +436,6 @@ void drawSensors(Renderer& renderer, AppModel& model, const Theme& theme, const 
             const float centerY = eye.centerY();
             renderer.strokeCircle(centerX, centerY, 4.5f, eyeColor, 1.2f);
             renderer.fillCircle(centerX, centerY, 1.8f, eyeColor);
-            if (!pinned) {
-                renderer.drawLine(centerX - 5.0f, centerY + 5.0f, centerX + 5.0f, centerY - 5.0f, eyeColor, 1.1f);
-            }
             if (field >= 0) {
                 hits.push_back(UiHit{ eye, ActionKind::ToggleMetric, field });
             }

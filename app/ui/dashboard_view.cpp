@@ -650,8 +650,8 @@ void drawAlertsCard(Renderer& renderer, const AppModel& model, const Theme& them
 void drawDashboard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area,
     std::vector<UiHit>& hits)
 {
-    // Раскладка как в прототипе: карточки идут одной колонкой, высоты сняты с демо.
-    // Экран получает демо-высоту целиком, а окно показывает его часть и прокручивает.
+    // Раскладка как в прототипе: сетка 12 колонок, высоты карточек компактные.
+    // Экран получает расчётную высоту целиком, а окно показывает его часть и прокручивает.
     const Columns columns{ area };
 
     const auto drawClipped = [&](const Rect& card, const auto& draw) {
@@ -660,24 +660,60 @@ void drawDashboard(Renderer& renderer, const AppModel& model, const Theme& theme
         renderer.popClip();
     };
 
-    float top = area.top;
-    const auto place = [&](float height) {
-        const Rect card{ area.left, top, area.right, top + height };
-        top += height + kGap;
-        return card;
+    // Сетка 12 колонок как в демо: кадры + сессия, затем три карточки в ряд,
+    // производительность + диски, температуры + уведомления. Так «Обзор» заметно
+    // компактнее, чем одна колонка во всю ширину. В узком окне сетка не читается,
+    // поэтому там карточки идут по одной.
+    if (area.width() < kDashboardNarrowWidth) {
+        float narrowTop = area.top;
+        const auto one = [&](float height) {
+            const Rect card{ area.left, narrowTop, area.right, narrowTop + height };
+            narrowTop += height + kGap;
+            return card;
+        };
+        drawClipped(one(300.0f), [&](const Rect& card) { drawFpsCard(renderer, model, theme, card); });
+        drawClipped(one(300.0f), [&](const Rect& card) { drawSessionCard(renderer, model, theme, card); });
+        drawClipped(one(250.0f), [&](const Rect& card) { drawCpuCard(renderer, model, theme, card); });
+        drawClipped(one(250.0f), [&](const Rect& card) { drawGpuCard(renderer, model, theme, card, hits); });
+        drawClipped(one(250.0f), [&](const Rect& card) { drawMemoryCard(renderer, model, theme, card); });
+        drawClipped(one(300.0f), [&](const Rect& card) { drawPerformanceCard(renderer, model, theme, card); });
+        drawClipped(one(300.0f), [&](const Rect& card) { drawDiskNetCard(renderer, model, theme, card); });
+        drawClipped(one(250.0f), [&](const Rect& card) { drawTemperaturesCard(renderer, model, theme, card); });
+        drawClipped(one(250.0f), [&](const Rect& card) { drawAlertsCard(renderer, model, theme, card); });
+        return;
+    }
+
+    float rowTop = area.top;
+    const auto nextRow = [&](float height) {
+        const float current = rowTop;
+        rowTop += height + kGap;
+        return current;
     };
 
-    // Компактные высоты: на экран помещается больше карточек, прокрутка нужна реже.
-    drawClipped(place(300.0f), [&](const Rect& card) { drawFpsCard(renderer, model, theme, card); });
-    drawClipped(place(300.0f), [&](const Rect& card) { drawSessionCard(renderer, model, theme, card); });
-    drawClipped(place(250.0f), [&](const Rect& card) { drawCpuCard(renderer, model, theme, card); });
-    drawClipped(place(230.0f), [&](const Rect& card) { drawGpuCard(renderer, model, theme, card, hits); });
-    drawClipped(place(250.0f), [&](const Rect& card) { drawMemoryCard(renderer, model, theme, card); });
-    drawClipped(place(250.0f), [&](const Rect& card) { drawPerformanceCard(renderer, model, theme, card); });
-    drawClipped(place(300.0f), [&](const Rect& card) { drawDiskNetCard(renderer, model, theme, card); });
-    drawClipped(columns.span(0.0f, 6.0f, top, 250.0f),
+    const float firstTop = nextRow(300.0f);
+    drawClipped(columns.span(0.0f, 8.0f, firstTop, 300.0f),
+        [&](const Rect& card) { drawFpsCard(renderer, model, theme, card); });
+    drawClipped(columns.span(8.0f, 4.0f, firstTop, 300.0f),
+        [&](const Rect& card) { drawSessionCard(renderer, model, theme, card); });
+
+    const float gaugesTop = nextRow(250.0f);
+    drawClipped(columns.span(0.0f, 4.0f, gaugesTop, 250.0f),
+        [&](const Rect& card) { drawCpuCard(renderer, model, theme, card); });
+    drawClipped(columns.span(4.0f, 4.0f, gaugesTop, 250.0f),
+        [&](const Rect& card) { drawGpuCard(renderer, model, theme, card, hits); });
+    drawClipped(columns.span(8.0f, 4.0f, gaugesTop, 250.0f),
+        [&](const Rect& card) { drawMemoryCard(renderer, model, theme, card); });
+
+    const float chartsTop = nextRow(300.0f);
+    drawClipped(columns.span(0.0f, 8.0f, chartsTop, 300.0f),
+        [&](const Rect& card) { drawPerformanceCard(renderer, model, theme, card); });
+    drawClipped(columns.span(8.0f, 4.0f, chartsTop, 300.0f),
+        [&](const Rect& card) { drawDiskNetCard(renderer, model, theme, card); });
+
+    const float listsTop = nextRow(250.0f);
+    drawClipped(columns.span(0.0f, 6.0f, listsTop, 250.0f),
         [&](const Rect& card) { drawTemperaturesCard(renderer, model, theme, card); });
-    drawClipped(columns.span(6.0f, 6.0f, top, 250.0f),
+    drawClipped(columns.span(6.0f, 6.0f, listsTop, 250.0f),
         [&](const Rect& card) { drawAlertsCard(renderer, model, theme, card); });
 }
 
