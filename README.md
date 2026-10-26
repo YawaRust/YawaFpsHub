@@ -26,7 +26,9 @@
 
 Остальные экраны — `docs/screenshots/sensors.png`, `docs/screenshots/overlay.png`,
 `docs/screenshots/settings.png`. Снимки узкого окна (`*-compact.png`) проверяют, что при
-сжатии окна ничего не наезжает. Пары «демо | приложение» — в `docs/ui-compare/`.
+сжатии окна ничего не наезжает, а `docs/screenshots/overlay-settings.png` — прокрученная
+панель настроек оверлея (цвета строк, рамка, тень, разрядка, регистр, знаки у FPS).
+Пары «демо | приложение» — в `docs/ui-compare/`.
 
 Оверлей — настоящее layered-окно поверх игры, пять стилей, четыре позиции:
 
