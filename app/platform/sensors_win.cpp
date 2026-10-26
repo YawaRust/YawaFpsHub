@@ -8,6 +8,8 @@
 #include <wbemidl.h>
 
 #include <algorithm>
+#include <cstdio>
+#include <vector>
 #include <string_view>
 
 namespace yawa {
@@ -110,12 +112,13 @@ struct ProcessorPerformance {
     long long dpcTime;
     long long interruptTime;
     unsigned long interruptCount;
-    unsigned long long reserved[2];
 };
 
 using NtQuerySystemInformationFn = long(__stdcall*)(int, void*, unsigned long, unsigned long*);
 
 constexpr int kSystemProcessorPerformanceInformation = 8;
+// NTSTATUS 0xC0000004: буфер меньше, чем нужно системе.
+constexpr long kStatusInfoLengthMismatch = static_cast<long>(0xC0000004u);
 
 // Частота процессора без PDH: powrprof.dll отдаёт текущие МГц по каждому потоку.
 // Это тот же источник, что был у диспетчера задач, и он работает без драйверов.
@@ -192,15 +195,27 @@ bool SystemSensors::sampleCoreTimes()
         return false;
     }
 
-    std::array<ProcessorPerformance, 64> buffer{};
+    // Буфер с запасом и одним повтором: на машине с сотней потоков первый вызов вернёт
+    // STATUS_INFO_LENGTH_MISMATCH и требуемый размер в written.
+    std::vector<ProcessorPerformance> buffer(64);
     unsigned long written = 0;
-    const long status = query(kSystemProcessorPerformanceInformation, buffer.data(),
+    long status = query(kSystemProcessorPerformanceInformation, buffer.data(),
         static_cast<unsigned long>(buffer.size() * sizeof(ProcessorPerformance)), &written);
+    if (status == kStatusInfoLengthMismatch && written > buffer.size() * sizeof(ProcessorPerformance)) {
+        buffer.resize(written / sizeof(ProcessorPerformance) + 1);
+        written = 0;
+        status = query(kSystemProcessorPerformanceInformation, buffer.data(),
+            static_cast<unsigned long>(buffer.size() * sizeof(ProcessorPerformance)), &written);
+    }
+    m_coreQueryStatus = status;
+    m_coreQueryWritten = written;
     if (status < 0 || written == 0) {
         return false;
     }
 
-    const std::size_t count = std::min<std::size_t>(written / sizeof(ProcessorPerformance), buffer.size());
+    // Дальше живут массивы на 16 ядер: лишние потоки отбрасываем, а не пишем мимо.
+    const std::size_t count = std::min<std::size_t>({ written / sizeof(ProcessorPerformance),
+        buffer.size(), m_coreIdleTicks.size() });
     m_coreTimeCount = static_cast<std::uint32_t>(count);
     for (std::size_t index = 0; index < count; ++index) {
         m_coreIdleTicks[index] = static_cast<std::uint64_t>(buffer[index].idleTime);
@@ -257,7 +272,11 @@ void SystemSensors::initializeCpu(Log& log)
         m_previousCoreTotal = m_coreTotalTicks;
         log.info("CPU: загрузка ядер через NtQuerySystemInformation, потоков " + std::to_string(m_coreCount));
     } else {
-        log.warning("CPU: время по ядрам недоступно");
+        // Код возврата в логе: без него причину «датчиков нет» на чужой машине не видно.
+        char message[96]{};
+        std::snprintf(message, sizeof(message), "CPU: время по ядрам недоступно (status 0x%08lX, %lu байт)",
+            static_cast<unsigned long>(m_coreQueryStatus) & 0xFFFFFFFFul, m_coreQueryWritten);
+        log.warning(message);
     }
 
     // Температура: ACPI-термозона читается через PDH, драйвер не нужен.

@@ -87,10 +87,13 @@ private:
     // поэтому «Датчики» больше не остаются пустыми на машинах без нужных счётчиков.
     bool sampleCoreTimes();
     std::array<std::uint64_t, 16> m_coreIdleTicks{};
-    std::array<std::uint64_t, 64> m_coreTotalTicks{};
+    std::array<std::uint64_t, 16> m_coreTotalTicks{};
     std::array<std::uint64_t, 16> m_previousCoreIdle{};
     std::array<std::uint64_t, 64> m_previousCoreTotal{};
     bool m_hasCoreTimes = false;
+    // Диагностика: код возврата и размер ответа системного вызова по ядрам.
+    long m_coreQueryStatus = 0;
+    unsigned long m_coreQueryWritten = 0;
     std::uint32_t m_coreTimeCount = 0;
 
     SensorAvailability m_availability;
