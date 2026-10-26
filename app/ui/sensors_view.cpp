@@ -46,7 +46,7 @@ std::vector<Group> makeGroups(std::uint32_t cores)
                              MetricId::GpuMemClock, MetricId::GpuPower, MetricId::GpuFan, MetricId::GpuEncode,
                              MetricId::GpuDecode, MetricId::PcieLoad, MetricId::VramUsed, MetricId::VramTotal } },
         { L"Память", { MetricId::RamUsed, MetricId::RamLoad, MetricId::RamCache, MetricId::RamFree,
-                         MetricId::PageFile, MetricId::PageFileLoad } },
+                         MetricId::PageFile, MetricId::PageFileTotal, MetricId::PageFileLoad } },
         { L"Диски и сеть", { MetricId::DiskRead, MetricId::DiskWrite, MetricId::DiskTemp, MetricId::NetDown,
                                MetricId::NetUp } },
         { L"Система", { MetricId::ChipsetTemp, MetricId::SelfCpu, MetricId::SelfRam, MetricId::SelfThreads } },
@@ -89,6 +89,7 @@ int overlayField(MetricId id)
     case MetricId::RamCache:
     case MetricId::RamFree:
     case MetricId::PageFile:
+    case MetricId::PageFileTotal:
     case MetricId::PageFileLoad:
         return static_cast<int>(LabelField::Ram);
     case MetricId::VramUsed:
@@ -112,8 +113,8 @@ bool valueKnown(MetricId id, const AppModel& model)
     if (id == MetricId::PcieLoad) {
         return model.availability.pcie;
     }
-    if (id == MetricId::PageFileLoad) {
-        // Ноль процентов — валидное значение: подкачка может быть пустой.
+    if (id == MetricId::PageFileLoad || id == MetricId::PageFileTotal) {
+        // Ноль процентов/гигабайт — валидное значение: подкачка может быть пустой.
         return model.availability.pageFile;
     }
 

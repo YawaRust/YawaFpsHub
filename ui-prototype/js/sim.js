@@ -61,7 +61,8 @@
     { id: "ramCache", label: "Память в кэше", group: "mem", unit: "ГБ", decimals: 1 },
     { id: "ramFree", label: "Память свободно", group: "mem", unit: "ГБ", decimals: 1 },
     { id: "ramClock", label: "Частота памяти", group: "mem", unit: "МГц", decimals: 0 },
-    { id: "pageFile", label: "Своп-файл", group: "mem", unit: "ГБ", decimals: 1 },
+    { id: "pageFile", label: "Своп-файл занято", group: "mem", unit: "ГБ", decimals: 1 },
+    { id: "pageFileTotal", label: "Файл подкачки всего", group: "mem", unit: "ГБ", decimals: 1 },
     { id: "pageFileLoad", label: "Загрузка файла подкачки", group: "mem", unit: "%", decimals: 0 },
 
     { id: "diskRead", label: "Диск: чтение", group: "io", unit: "МБ/с", decimals: 0 },
@@ -130,6 +131,7 @@
       case "ramFree": return 31.0;
       case "ramClock": return 6000;
       case "pageFile": return 0.9;
+      case "pageFileTotal": return 8.0;
       case "pageFileLoad": return 11;
       case "diskRead": return 184;
       case "diskWrite": return 42;
@@ -261,6 +263,7 @@
       ramCache: clamp(64 - state.ram - 31 + between(-0.2, 0.2), 4, 30),
       ramFree: clamp(64 - state.ram - 11.6, 1, 58),
       pageFile: clamp(0.9 + between(-0.05, 0.05), 0.4, 2.4),
+      pageFileTotal: 8.0,
       // Файл подкачки 8 ГБ: занято около 0,9 ГБ.
       pageFileLoad: clamp((0.9 / 8) * 100 + between(-0.2, 0.2), 1, 100),
       diskRead: clamp(isHitch ? between(320, 680) : 184 + Math.sin(second / 4) * 60 + between(-25, 25), 4, 720),

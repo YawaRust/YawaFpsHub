@@ -125,8 +125,8 @@ std::string formatLine(const yawa::MetricStore& store)
     if (store.hasValue(yawa::MetricId::PcieLoad)) {
         line += " | PCI-e " + value(yawa::MetricId::PcieLoad);
     }
-    line += " | ОЗУ " + value(yawa::MetricId::RamLoad) + ", подкачка " + value(yawa::MetricId::PageFile) + " ("
-        + value(yawa::MetricId::PageFileLoad) + ")";
+    line += " | ОЗУ " + value(yawa::MetricId::RamLoad) + ", подкачка " + value(yawa::MetricId::PageFile) + " / "
+        + value(yawa::MetricId::PageFileTotal) + " (" + value(yawa::MetricId::PageFileLoad) + ")";
     return line;
 }
 

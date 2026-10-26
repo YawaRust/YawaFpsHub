@@ -56,6 +56,7 @@ enum class MetricId : std::uint8_t {
     RamCache,
     RamFree,
     PageFile,
+    PageFileTotal,
     RamLoad,
     PageFileLoad,
 
@@ -97,7 +98,7 @@ struct MetricInfo {
     std::uint8_t decimals;
 };
 
-constexpr std::size_t kMetricCount = 55;
+constexpr std::size_t kMetricCount = 56;
 
 inline constexpr std::array<MetricInfo, kMetricCount> kMetricTable{{
     { MetricId::Fps, "fps", "FPS", MetricUnit::Count, 0 },
@@ -130,7 +131,8 @@ inline constexpr std::array<MetricInfo, kMetricCount> kMetricTable{{
     { MetricId::RamUsed, "ram_used", "Память занято", MetricUnit::Gigabytes, 1 },
     { MetricId::RamCache, "ram_cache", "Память в кэше", MetricUnit::Gigabytes, 1 },
     { MetricId::RamFree, "ram_free", "Память свободно", MetricUnit::Gigabytes, 1 },
-    { MetricId::PageFile, "page_file", "Своп-файл", MetricUnit::Gigabytes, 1 },
+    { MetricId::PageFile, "page_file", "Своп-файл занято", MetricUnit::Gigabytes, 1 },
+    { MetricId::PageFileTotal, "page_file_total", "Файл подкачки всего", MetricUnit::Gigabytes, 1 },
     { MetricId::RamLoad, "ram_load", "Загрузка ОЗУ", MetricUnit::Percent, 0 },
     { MetricId::PageFileLoad, "page_file_load", "Загрузка файла подкачки", MetricUnit::Percent, 0 },
 

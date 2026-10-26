@@ -133,6 +133,7 @@ void applySnapshot(MetricStore& store, const SystemSnapshot& snapshot, const Der
     store.set(MetricId::RamCache, values.ramCacheGb);
     store.set(MetricId::RamFree, values.ramFreeGb);
     store.set(MetricId::PageFile, values.pageFileGb);
+    store.set(MetricId::PageFileTotal, values.pageFileTotalGb);
     store.set(MetricId::RamLoad, values.ramLoad, smoothingPercent);
     store.set(MetricId::PageFileLoad, values.pageFileLoad, smoothingPercent);
 

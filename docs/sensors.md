@@ -60,7 +60,8 @@ RTSS, а не по одному последнему кадру: иначе зн
 | Нагрузка PCI-e | NVML `nvmlDeviceGetPcieThroughput` (TX+RX) к теоретической пропускной способности линии (`GetCurrPcieLinkWidth` × `GetCurrPcieLinkGeneration`) | только NVIDIA; на AMD и Intel честно «нет данных» |
 | Загрузка ОЗУ | `GlobalMemoryStatusEx`: занято / всего, % | везде |
 | Загрузка файла подкачки | занято / (commit limit − физическая память), % | везде |
-| Объём файла подкачки | `GetPerformanceInfo`: commit limit − физическая память | везде |
+| Объём файла подкачки | `GetPerformanceInfo`: commit limit − физическая память, всего и занято | везде |
+| Объём файла подкачки (всего) | `GetPerformanceInfo`: commit limit − физическая память | везде |
 
 Медиа-счётчики `engtype_VideoEncode`/`engtype_VideoDecode` появляются только когда игра или
 браузер реально нагружает движок, поэтому нулевые значения — это нормальный ответ, а не
