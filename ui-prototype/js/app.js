@@ -11,6 +11,8 @@
   const VIEWS = {
     dashboard: { eyebrow: "Мониторинг", title: "Обзор" },
     sensors: { eyebrow: "Показатели", title: "Все датчики" },
+    bottleneck: { eyebrow: "Узкое место", title: "Баланс системы" },
+    system: { eyebrow: "Оборудование", title: "Сведения о системе" },
     overlay: { eyebrow: "Поверх игры", title: "Оверлей" },
     settings: { eyebrow: "Настройки", title: "Поведение и вид" }
   };
@@ -417,7 +419,209 @@
     $("#railLive").classList.toggle("is-paused", snap.paused);
   }
 
+
+  // ── «Баланс» и «Сведения о системе» ────────────────────────────────────────
+  // Цвет verdict-блока зависит от того, в чем узкое место: ровно как в приложении,
+  // где его подбирает severityColor() по проценту помех.
+  function balanceColor(percent) {
+    if (percent >= 35) return "var(--danger)";
+    if (percent >= 12) return "var(--warn)";
+    return "var(--accent)";
+  }
+
+  function plural(count, one, few, many) {
+    const tail = count % 100;
+    const last = count % 10;
+    if (tail > 10 && tail < 20) return many;
+    if (last === 1) return one;
+    if (last > 1 && last < 5) return few;
+    return many;
+  }
+
+  function setText(selector, text) {
+    const node = $(selector);
+    if (node) node.textContent = text;
+  }
+
+  function renderBalance(snap) {
+    const balance = snap.balance;
+    const machine = snap.machine;
+    if (!balance || !machine) return;
+
+    const card = $("#balanceCard");
+    const tone = balanceColor(balance.percent);
+    if (card) card.style.setProperty("--balance-color", tone);
+    const gauge = $("#balanceGauge");
+    if (gauge) gauge.style.setProperty("--accent", tone);
+    if (gauge) gauge.style.setProperty("--p", balance.percent.toFixed(1));
+
+    const gpu = machine.gpus.find((item) => item.discrete) || machine.gpus[0];
+    const display = machine.displays.find((item) => item.primary) || machine.displays[0];
+    const subtitle = [machine.cpu.name, gpu && gpu.name, display && window.Sim.describeDisplay(display)]
+      .filter(Boolean).join(" · ");
+    setText("#balanceSubtitle", subtitle || "оборудование не определено");
+
+    const tag = $("#balanceMode");
+    if (tag) {
+      tag.classList.toggle("tag--live", balance.measured);
+      tag.querySelector("span").textContent = balance.measured ? "живые замеры" : "оценка ±15 %";
+    }
+
+    const quiet = balance.kind === "idle" || balance.kind === "no-data";
+    setText("#balancePercent", quiet ? "—" : `${balance.percent}%`);
+    setText("#balanceHeadline", balance.headline);
+    setText("#balanceDetail", balance.detail);
+
+    const caps = (selector, text) => {
+      const node = $(selector);
+      if (node) node.innerHTML = text;
+    };
+    caps("#balanceCpuCap", `CPU <b>~${Math.round(balance.cpuCapacity)} к/с</b>`);
+    caps("#balanceGpuCap", `GPU <b>~${Math.round(balance.gpuCapacity)} к/с</b>`);
+    caps("#balanceExpected", balance.expected > 0
+      ? `ожидание: <b>${Math.round(balance.expected)} к/с</b>` : "ожидание: —");
+
+    const cpuIndex = window.Sim.cpuPerfIndex(machine.cpu.name, machine.cpu.cores, machine.cpu.threads);
+    const gpuIndex = gpu ? window.Sim.gpuPerfIndex(gpu.name, gpu.dedicatedMb) : 0;
+    const pair = [
+      { label: "Процессор", value: cpuIndex > 0 ? Math.round(cpuIndex) : "—",
+        note: machine.cpu.name || "нет данных", color: "var(--cpu)",
+        fraction: Math.min(1, cpuIndex / 120) },
+      { label: "Видеокарта", value: gpuIndex > 0 ? Math.round(gpuIndex) : "—",
+        note: gpu ? gpu.name : "нет данных", color: "var(--gpu)",
+        fraction: Math.min(1, gpuIndex / 150) },
+      { label: "Память", value: window.Sim.describeMemory(machine.memory),
+        note: machine.memory.profile ? "профиль памяти активен" : "XMP/EXPO не включён",
+        color: "var(--ram)", fraction: Math.min(1, machine.memory.totalGb / 64) },
+      { label: "Экран", value: display ? `${display.width}×${display.height}` : "—",
+        note: display ? `${display.hz} Гц` : "нет данных", color: "var(--accent)", fraction: 1 }
+    ];
+    const pairHost = $("#balancePair");
+    if (pairHost) {
+      pairHost.innerHTML = pair.map((row) => `
+        <li>
+          <div class="row"><span>${row.label}</span><b>${row.value}</b></div>
+          <div class="bar" style="--c:${row.color}"><i style="width:${(row.fraction * 100).toFixed(1)}%"></i></div>
+          <p class="note">${row.note}</p>
+        </li>`).join("");
+    }
+
+    const sensorValue = (id) => {
+      const sensor = snap.sensors.get(id);
+      return sensor ? sensor : null;
+    };
+    const corePeak = Math.max(...Array.from({ length: 8 }, (_, index) => {
+      const sensor = sensorValue(`core${index}`);
+      return sensor ? sensor.value : 0;
+    }));
+    const vramTotal = gpu ? gpu.memoryGb : 0;
+    const load = [
+      { label: "Процессор", id: "cpu", unit: "%", decimals: 0, color: "var(--cpu)", total: 100 },
+      { label: "Пик по ядрам", value: corePeak, unit: "%", decimals: 0, color: "var(--cpu)", total: 100 },
+      { label: "Видеокарта", id: "gpu", unit: "%", decimals: 0, color: "var(--gpu)", total: 100 },
+      { label: "Видеопамять", id: "vramUsed", unit: "ГБ", decimals: 1, color: "var(--ram)", total: vramTotal }
+    ];
+    const loadHost = $("#balanceLoad");
+    if (loadHost) {
+      loadHost.innerHTML = load.map((row) => {
+        const sensor = row.id ? sensorValue(row.id) : null;
+        const known = row.value !== undefined || sensor;
+        const value = row.value !== undefined ? row.value : (sensor ? sensor.value : 0);
+        return `
+          <li>
+            <span>${row.label}</span>
+            <b class="${known ? "" : "is-muted"}">${known ? `${fmt(value, row.decimals)} ${row.unit}` : "нет данных"}</b>
+          </li>`;
+      }).join("");
+    }
+
+    const advice = balance.advice || [];
+    setText("#balanceAdviceCount", advice.length
+      ? `${advice.length} ${plural(advice.length, "рекомендация", "рекомендации", "рекомендаций")}`
+      : "рекомендаций нет — нагрузка или данные отсутствуют");
+    const adviceHost = $("#balanceAdvice");
+    if (adviceHost) {
+      adviceHost.innerHTML = advice.map((item) => `<li><b>${item.title}</b>${item.text}</li>`).join("");
+    }
+  }
+
+  function specRows(selector, rows) {
+    const host = $(selector);
+    if (!host) return;
+    host.innerHTML = rows.map((row) => `<li><span>${row[0]}</span><b>${row[1] || "нет данных"}</b></li>`).join("");
+  }
+
+  function renderSystem(snap) {
+    const machine = snap.machine;
+    if (!machine) return;
+
+    specRows("#osCard", [
+      ["Система", machine.os.product],
+      ["Сборка", `${machine.os.feature} · ${machine.os.build}`],
+      ["Издание", machine.os.edition],
+      ["Архитектура", machine.os.arch]
+    ]);
+
+    setText("#cpuName", machine.cpu.name || "нет данных");
+    const cpuIndex = window.Sim.cpuPerfIndex(machine.cpu.name, machine.cpu.cores, machine.cpu.threads);
+    specRows("#cpuCard", [
+      ["Ядра", `${machine.cpu.cores} ядер / ${machine.cpu.threads} потоков`],
+      ["Базовая частота", `${fmt(machine.cpu.baseMhz, 0)} МГц`],
+      ["Кэш L3", machine.cpu.l3Mb ? `${machine.cpu.l3Mb} МБ` : ""],
+      ["Вендор", machine.cpu.vendor],
+      ["Индекс", cpuIndex > 0 ? fmt(cpuIndex, 0) : ""]
+    ]);
+
+    const gpuHost = $("#gpuCard");
+    if (gpuHost) {
+      const primary = machine.gpus.find((item) => item.discrete) || machine.gpus[0];
+      gpuHost.innerHTML = machine.gpus.map((gpu) => {
+        const index = window.Sim.gpuPerfIndex(gpu.name, gpu.dedicatedMb);
+        const isActive = gpu === primary;
+        return `
+          <li>
+            <b class="${isActive ? "is-active" : ""}">${gpu.name}${isActive ? " · основная" : ""}</b>
+            <span>${[gpu.vendor, gpu.dedicatedMb ? `${fmt(gpu.dedicatedMb / 1024, 1)} ГБ выделено` : "",
+              gpu.driver ? `драйвер ${gpu.driver}` : "", index > 0 ? `индекс ${Math.round(index)}` : ""]
+              .filter(Boolean).join(" · ")}</span>
+          </li>`;
+      }).join("");
+    }
+
+    const memory = machine.memory;
+    setText("#memSummary", window.Sim.describeMemory(memory));
+    const tck = memory.configuredMt > 0 ? 2000 / memory.configuredMt : 0;
+    const filled = memory.modules.filter((module) => module.populated).length;
+    specRows("#memCard", [
+      ["Частота", `${fmt(memory.configuredMt, 0)} МТ/с из ${fmt(memory.ratedMt, 0)}`],
+      ["Такт tCK", tck > 0 ? `${fmt(tck, 3)} нс` : ""],
+      ["XMP/EXPO", memory.profile ? "включён" : "не включён"],
+      ["Слоты", memory.slots ? `${filled} из ${memory.slots}` : ""]
+    ]);
+
+    const modulesHost = $("#memModules");
+    if (modulesHost) {
+      modulesHost.innerHTML = memory.modules.filter((module) => module.populated).map((module) => `
+        <li>
+          <b>${module.slot} · ${module.sizeGb} ГБ ${module.type}-${Math.round(module.configuredMt)}</b>
+          <code>${[module.vendor, module.part, module.voltage ? `${fmt(module.voltage, 2)} В` : ""]
+            .filter(Boolean).join(" · ")}</code>
+        </li>`).join("");
+    }
+
+    const monitorHost = $("#monitorCard");
+    if (monitorHost) {
+      monitorHost.innerHTML = machine.displays.map((display) => `
+        <li>
+          <b>${display.name}${display.primary ? " · основной" : ""}</b>
+          <span>${display.width}×${display.height}${display.hz ? `, ${display.hz} Гц` : ""}${
+            display.scale > 1 ? `, масштаб ${Math.round(display.scale * 100)} %` : ""}</span>
+        </li>`).join("");
+    }
+  }
+
   let lastSnapshot = null;
+  let systemRendered = false;
 
   function onData(snap) {
     lastSnapshot = snap;
@@ -427,6 +631,12 @@
     updateProcesses(snap);
     drawCharts(snap);
     updateSensorTable(snap);
+    renderBalance(snap);
+    if (!systemRendered) {
+      // Паспорт машины статический: его достаточно отрисовать один раз за сессию.
+      systemRendered = true;
+      renderSystem(snap);
+    }
     updateStatus(snap);
 
     const free = TARGET_FRAME_MS - snap.frameMs;
@@ -462,7 +672,7 @@
 
     document.addEventListener("keydown", (event) => {
       if (event.target.closest("input, textarea")) return;
-      const order = ["dashboard", "sensors", "overlay", "settings"];
+      const order = ["dashboard", "sensors", "bottleneck", "system", "overlay", "settings"];
       const index = Number(event.key) - 1;
       if (index >= 0 && index < order.length) switchView(order[index]);
     });

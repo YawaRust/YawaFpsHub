@@ -1847,5 +1847,79 @@ body.is-paused .tag--live { color: var(--warn); border-color: rgba(255, 179, 71,
 .osd { cursor: grab; }
 .osd.is-dragging { cursor: grabbing; transition: none; }
 
+
+/* ── «Баланс»: калькулятор узкого места и «Сведения о системе» ─────────────── */
+.card--balance .balance { display: flex; align-items: center; gap: 24px; }
+.balance__body { flex: 1 1 auto; min-width: 0; }
+.balance__headline {
+  margin: 0 0 6px;
+  font-size: 26px;
+  font-weight: 620;
+  letter-spacing: -0.02em;
+  color: var(--balance-color, var(--accent));
+}
+.balance__detail { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--text-dim); max-width: 74ch; }
+.balance__caps { display: flex; gap: 16px; margin-top: 12px; font-size: 11.5px; color: var(--text-faint); }
+.balance__caps span { color: var(--text-dim); }
+.balance__caps b { color: var(--text); font-weight: 550; font-variant-numeric: tabular-nums; }
+.balance__caps-soft { color: var(--text-faint) !important; }
+
+.balance__pair, .balance__load, .balance__specs, .balance__advice, .balance__modules,
+.balance__gpus, .balance__monitors { list-style: none; margin: 14px 0 0; padding: 0; }
+
+.balance__pair li { padding: 9px 0; border-bottom: 1px solid var(--line-soft); }
+.balance__pair li:last-child { border-bottom: 0; }
+.balance__pair .row { display: flex; justify-content: space-between; gap: 12px; font-size: 11.5px; color: var(--text-dim); }
+.balance__pair .row b { color: var(--text); font-weight: 600; font-size: 14px; font-variant-numeric: tabular-nums; }
+.balance__pair .row em { font-style: normal; color: var(--text-faint); font-size: 11px; }
+.balance__pair .bar { height: 5px; margin-top: 7px; border-radius: 99px; background: rgba(255, 255, 255, 0.06); overflow: hidden; }
+.balance__pair .bar i { display: block; height: 100%; border-radius: inherit; background: var(--c, var(--accent)); opacity: 0.85; }
+.balance__pair .note { margin: 6px 0 0; font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint); }
+
+.balance__load li { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; font-size: 11.5px; color: var(--text-dim); border-bottom: 1px solid var(--line-soft); }
+.balance__load li:last-child { border-bottom: 0; }
+.balance__load b { color: var(--text); font-weight: 560; font-variant-numeric: tabular-nums; }
+.balance__load b.is-muted { color: var(--text-faint); font-weight: 500; }
+
+.balance__advice { display: flex; flex-direction: column; gap: 12px; }
+.balance__advice li {
+  position: relative;
+  padding-left: 18px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+.balance__advice li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--balance-color, var(--accent));
+}
+.balance__advice b { display: block; color: var(--text); font-weight: 600; margin-bottom: 2px; }
+
+.card--note .card__note, .card__note { margin: 12px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--text-faint); }
+.spec__headline { margin: 14px 0 0; font-size: 14px; font-weight: 600; color: var(--text); }
+.balance__specs li { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; font-size: 11.5px; color: var(--text-dim); border-bottom: 1px solid var(--line-soft); }
+.balance__specs li:last-child { border-bottom: 0; }
+.balance__specs b { color: var(--text); font-weight: 560; font-variant-numeric: tabular-nums; text-align: right; }
+.balance__specs--two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 18px; }
+.balance__gpus li, .balance__monitors li { padding: 9px 0; border-bottom: 1px solid var(--line-soft); font-size: 12.5px; color: var(--text); }
+.balance__gpus li:last-child, .balance__monitors li:last-child { border-bottom: 0; }
+.balance__gpus span, .balance__monitors span { display: block; margin-top: 3px; font-size: 9.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-faint); }
+.balance__gpus b.is-active { color: var(--accent); }
+.balance__modules li { display: flex; gap: 10px; justify-content: space-between; font-size: 11.5px; color: var(--text-dim); padding: 6px 0; border-bottom: 1px solid var(--line-soft); }
+.balance__modules li:last-child { border-bottom: 0; }
+.balance__modules b { color: var(--text); font-weight: 550; }
+.balance__modules code { font-family: var(--mono); font-size: 10.5px; color: var(--text-faint); }
+
+@media (max-width: 1180px) {
+  .card--balance .balance { flex-direction: column; align-items: flex-start; }
+  .balance__specs--two { grid-template-columns: 1fr; }
+}
+
 /* Режим скриншотов: без переходов и анимаций, чтобы снимки совпадали кадр в кадр. */
 .no-fx *, .no-fx *::before, .no-fx *::after { animation: none !important; transition: none !important; }

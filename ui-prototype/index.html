@@ -38,6 +38,12 @@
   <symbol id="i-chip" viewBox="0 0 24 24">
     <path d="M8 3h2v2h4V3h2v2h3v3h2v2h-2v4h2v2h-2v3h-3v2h-2v-2h-4v2H8v-2H5v-3H3v-2h2v-4H3V9h2V5h3V3Zm1 5v8h6V8H9Z"/>
   </symbol>
+  <symbol id="i-balance" viewBox="0 0 24 24">
+    <path d="M12 3.4v15.2M6.6 19.6h10.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+    <path d="M4 8.6 12 6.2l8 2.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+    <path d="M1.6 9.4a3.4 3.4 0 0 0 6.8 0ZM15.6 11.2a3.4 3.4 0 0 0 6.8 0Z" fill="none" stroke="currentColor"
+      stroke-width="1.5" stroke-linejoin="round"/>
+  </symbol>
   <symbol id="i-bolt" viewBox="0 0 24 24">
     <path d="M13.5 2 4 13.4h5.6L9.4 22 19 10.2h-5.9L13.5 2Z"/>
   </symbol>
@@ -57,6 +63,12 @@
       <button class="rail__item" data-view="sensors" aria-label="Датчики" title="Датчики">
         <svg class="icon"><use href="#i-pulse"/></svg>
       </button>
+      <button class="rail__item" data-view="bottleneck" aria-label="Баланс" title="Баланс системы">
+        <svg class="icon"><use href="#i-balance"/></svg>
+      </button>
+      <button class="rail__item" data-view="system" aria-label="Система" title="Сведения о системе">
+        <svg class="icon"><use href="#i-chip"/></svg>
+      </button>
       <button class="rail__item" data-view="overlay" aria-label="Оверлей" title="Оверлей">
         <svg class="icon"><use href="#i-layers"/></svg>
       </button>
@@ -67,7 +79,7 @@
 
     <div class="rail__foot">
       <span class="rail__live" id="railLive" title="Сбор данных активен"></span>
-      <span class="rail__label">v0.1</span>
+      <span class="rail__label">v1.0.0</span>
     </div>
   </aside>
 
@@ -445,6 +457,161 @@
           </div>
           <p class="footnote footnote--table">Источники: PDH для счётчиков GPU, NtQuerySystemInformation для CPU и памяти,
             D3DKMT для температур, DXGI для видеопамяти. Значения обновляются с выбранным интервалом опроса.</p>
+        </div>
+      </section>
+
+      <section class="view" data-view="bottleneck">
+        <div class="grid">
+
+          <article class="card span-12 card--balance" id="balanceCard">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Узкое место</h2>
+                <p class="card__sub" id="balanceSubtitle">оборудование не определено</p>
+              </div>
+              <span class="tag" id="balanceMode"><i></i><span>оценка</span></span>
+            </header>
+
+            <div class="balance">
+              <div class="gauge" id="balanceGauge" style="--size:112px; --p:0">
+                <svg viewBox="0 0 120 120" class="gauge__svg" aria-hidden="true">
+                  <circle class="gauge__track" cx="60" cy="60" r="52"/>
+                  <circle class="gauge__value" cx="60" cy="60" r="52"/>
+                </svg>
+                <div class="gauge__text"><b id="balancePercent">&mdash;</b><span>помехи</span></div>
+              </div>
+
+              <div class="balance__body">
+                <h3 class="balance__headline" id="balanceHeadline">&mdash;</h3>
+                <p class="balance__detail" id="balanceDetail">&mdash;</p>
+                <div class="balance__caps">
+                  <span id="balanceCpuCap">CPU: &mdash;</span>
+                  <span id="balanceGpuCap">GPU: &mdash;</span>
+                  <span id="balanceExpected" class="balance__caps-soft">ожидание: &mdash;</span>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article class="card span-7">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Связка</h2>
+                <p class="card__sub">индексы нормированы: флагман = 100</p>
+              </div>
+            </header>
+            <ul class="balance__pair" id="balancePair"></ul>
+          </article>
+
+          <article class="card span-5">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Нагрузка сейчас</h2>
+                <p class="card__sub">последний интервал опроса</p>
+              </div>
+            </header>
+            <ul class="balance__load" id="balanceLoad"></ul>
+          </article>
+
+          <article class="card span-12">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Что делать</h2>
+                <p class="card__sub" id="balanceAdviceCount">рекомендаций нет &mdash; нагрузка или данные отсутствуют</p>
+              </div>
+            </header>
+            <ol class="balance__advice" id="balanceAdvice"></ol>
+          </article>
+
+          <article class="card span-12 card--note">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Как считаем</h2>
+                <p class="card__sub">оба источника показаны отдельно: живые замеры точнее любого справочника</p>
+              </div>
+            </header>
+            <p class="card__note">Во время игры берём загрузку процессора (с учётом самого занятого ядра) и видеокарты:
+              узкое место &mdash; тот узел, что ближе к 100 %, а процент показывает, насколько простаивает второй.
+              Если игры нет, считаем прогноз по индексам производительности и разрешения экрана: потолок CPU от
+              пикселей почти не зависит, потолок GPU падает при росте разрешения. Прогноз &mdash; оценка &plusmn;15 %
+              и живые замеры он не заменяет.</p>
+          </article>
+
+        </div>
+      </section>
+
+      <section class="view" data-view="system">
+        <div class="grid">
+
+          <article class="card span-4">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Windows</h2>
+                <p class="card__sub">как в winver: выпуск, версия функционала и сборка</p>
+              </div>
+            </header>
+            <ul class="balance__specs" id="osCard"></ul>
+          </article>
+
+          <article class="card span-4">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Процессор</h2>
+                <p class="card__sub">CPUID и GetLogicalProcessorInformationEx</p>
+              </div>
+            </header>
+            <p class="spec__headline" id="cpuName">&mdash;</p>
+            <ul class="balance__specs" id="cpuCard"></ul>
+          </article>
+
+          <article class="card span-4">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Видеокарты</h2>
+                <p class="card__sub">DXGI и реестр класса Display</p>
+              </div>
+            </header>
+            <ul class="balance__gpus" id="gpuCard"></ul>
+          </article>
+
+          <article class="card span-8">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Память</h2>
+                <p class="card__sub">SMBIOS Type 17: раскладка по слотам, частоты и напряжение модулей</p>
+              </div>
+            </header>
+            <p class="spec__headline" id="memSummary">&mdash;</p>
+            <ul class="balance__specs balance__specs--two" id="memCard"></ul>
+            <ul class="balance__modules" id="memModules"></ul>
+            <p class="card__note">Точные тайминги (tCL-tRCD-tRP-tRAS) лежат в SPD на шине SMBus: их нельзя прочитать
+              без драйвера, а драйверы приложение не ставит и не грузит.</p>
+          </article>
+
+          <article class="card span-4">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Мониторы</h2>
+                <p class="card__sub">EnumDisplaySettings и EDID-имя драйвера монитора</p>
+              </div>
+            </header>
+            <ul class="balance__monitors" id="monitorCard"></ul>
+          </article>
+
+          <article class="card span-12 card--note">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Откуда эти числа</h2>
+                <p class="card__sub">реестр, CPUID, SMBIOS, DXGI и EnumDisplaySettings &mdash; без драйверов и без сети</p>
+              </div>
+            </header>
+            <p class="card__note">Версию Windows берём из CurrentVersion &mdash; оттуда же её берёт winver, поэтому
+              карточка и окно «О системе» совпадают. Модель процессора читается прямо из CPUID, ядра и кэш &mdash; из
+              GetLogicalProcessorInformationEx. Видеокарты перечисляет DXGI, а версию драйвера добавляет реестр класса
+              Display. Модули памяти и их частоты приложение берёт из таблиц SMBIOS, которые BIOS собирает из SPD:
+              именно так видно «2&times;16 ГБ», а не только «32 ГБ» суммарно.</p>
+          </article>
+
         </div>
       </section>
 
