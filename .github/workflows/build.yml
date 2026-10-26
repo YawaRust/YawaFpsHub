@@ -56,6 +56,15 @@ jobs:
         shell: bash
         run: |
           cmake --build build --config Release --parallel > build-log.txt 2>&1 || true
+          # Ссылки на zip логов Actions недоступны в некоторых окружениях;
+          # выводим ошибки компилятора в аннотации проверки PR.
+          (grep -iE '(^|[[:space:]])(fatal )?error (C[0-9]+|RC[0-9]+|LNK[0-9]+|MSB[0-9]+):' build-log.txt || true) | head -25 |
+            while IFS= read -r line; do
+              line=${line//'%'/'%25'}
+              line=${line//$'\r'/'%0D'}
+              line=${line//$'\n'/'%0A'}
+              echo "::error title=MSVC build::${line}"
+            done
 
       - name: Тесты
         run: ctest --test-dir build -C Release --output-on-failure
