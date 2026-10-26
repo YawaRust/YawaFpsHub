@@ -17,7 +17,7 @@ constexpr float kDashboardHeight = 1156.0f;
 constexpr float kDashboardNarrowWidth = 900.0f;
 constexpr float kDashboardNarrowHeight = 2562.0f;
 constexpr float kSettingsHeight = 1882.0f;
-constexpr float kOverlayHeight = 2412.0f;
+constexpr float kOverlayHeight = 2422.0f;
 
 
 constexpr float kCardRadius = 20.0f;

@@ -120,12 +120,13 @@ void drawRowColorRow(Renderer& renderer, const AppModel& model, const Theme& the
     float left = row.right - total;
     const auto palette = overlayColorPalette();
     for (int index = -1; index < kOverlayColorCount; ++index) {
-        const Rect chip{ left, row.top, left + chipWidth, row.top + 20.0f };
+        // Чипы той же высоты, что и строка: иначе подписи выглядели сдвинутыми вниз.
+        const Rect chip{ left, row.top, left + chipWidth, row.bottom };
         const bool active = index == selected;
         const bool hover = isHovered(model, chip);
-        renderer.fillRoundRect(chip, 6.0f, active ? theme.accentSoft : theme.panelSoft.withAlpha(hover ? 0.95f : 0.6f));
+        renderer.fillRoundRect(chip, 7.0f, active ? theme.accentSoft : theme.panelSoft.withAlpha(hover ? 0.95f : 0.6f));
         if (active) {
-            renderer.strokeRoundRect(chip, 6.0f, theme.accentGlow, 1.0f);
+            renderer.strokeRoundRect(chip, 7.0f, theme.accentGlow, 1.0f);
         }
         if (index < 0) {
             renderer.text(L"а", chip, TextRole::Tiny, active ? theme.accent : theme.textFaint, TextAlign::Center);
@@ -536,9 +537,9 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
         if (top + 20.0f > inner.bottom) {
             break;
         }
-        drawRowColorRow(renderer, model, theme, Rect{ inner.left, top, inner.right, top + 20.0f },
+        drawRowColorRow(renderer, model, theme, Rect{ inner.left, top, inner.right, top + 22.0f },
             rowNames[index], overlay.rowColors[index], static_cast<int>(index), hits);
-        top += 22.0f;
+        top += 24.0f;
     }
     top += 6.0f;
 
@@ -685,7 +686,7 @@ void drawOverlayView(Renderer& renderer, const AppModel& model, const Theme& the
 
     drawClipped(place(430.0f),
         [&](const Rect& card) { drawPreviewCard(renderer, model, theme, card, hits); });
-    drawClipped(place(1440.0f),
+    drawClipped(place(1450.0f),
         [&](const Rect& card) { drawControlsCard(renderer, model, theme, card, hits); });
     drawClipped(place(232.0f),
         [&](const Rect& card) { drawLabelsCard(renderer, model, theme, card, hits); });
