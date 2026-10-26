@@ -228,6 +228,8 @@ bool SystemSensors::sampleCoreTimes()
 bool SystemSensors::initialize(Log& log, std::string& error)
 {
     error.clear();
+    m_pawnio.initialize(log);
+    m_storage.initialize(log);
     initializeCpu(log);
 
     m_availability.memory = true;
@@ -253,6 +255,7 @@ bool SystemSensors::initialize(Log& log, std::string& error)
 
 void SystemSensors::initializeCpu(Log& log)
 {
+    m_availability.cpuTemperature = m_pawnio.read().temperature.has_value();
     m_nominalCpuMhz = readNominalCpuMhz();
     // Частота в PDH отдаётся в процентах от номинала; без номинала показывать нечего.
     m_availability.cpuClock = m_nominalCpuMhz != 0
@@ -283,7 +286,7 @@ void SystemSensors::initializeCpu(Log& log)
     // Счётчик есть не на каждой машине — тогда пробуем WMI (см. queryWmiTemperature).
     if (m_thermalZone.open(L"\\Thermal Zone Information(*)\\Temperature")) {
         log.info("CPU: термозона ACPI подключена");
-    } else {
+    } else if (!m_availability.cpuTemperature) {
         log.info("CPU: PDH-термозона молчит, включаем WMI MSAcpi_ThermalZoneTemperature");
         double celsius = 0.0;
         if (queryWmiTemperature(celsius)) {
@@ -315,20 +318,21 @@ bool SystemSensors::initializeGpu(Log& log, std::string& error)
 
     std::string nvmlError;
     if (m_nvml.initialize(nvmlError)) {
-        m_nvml.selectDevice(activeGpuName());
-        const GpuSensorReading reading = m_nvml.read();
-        m_availability.gpuTemperature = reading.available;
-        m_availability.gpuPower = reading.powerWatts > 0.0;
-        log.info("GPU: NVML подключён, температура доступна");
+        log.info("GPU: NVML подключён");
     } else {
         log.info("GPU: NVML недоступен — " + nvmlError);
     }
+    m_vendorGpu.initialize(m_adapters.registry(), log);
+    selectGpuSensors();
 
     return true;
 }
 
 void SystemSensors::shutdown()
 {
+    m_storage.shutdown();
+    m_vendorGpu.shutdown();
+    m_pawnio.shutdown();
     m_nvml.shutdown();
 }
 
@@ -344,10 +348,24 @@ void SystemSensors::selectGpu(std::size_t index)
     AdapterMemoryInfo memory;
     m_availability.gpuMemory = m_adapters.queryMemory(m_activeGpu, memory);
 
-    if (m_nvml.isAvailable()) {
-        m_nvml.selectDevice(activeGpuName());
-        m_availability.gpuTemperature = m_nvml.read().available;
-    }
+    selectGpuSensors();
+}
+
+void SystemSensors::selectGpuSensors()
+{
+    const GpuAdapter* adapter = m_adapters.registry().byIndex(m_activeGpu);
+    m_nvml.selectDevice(adapter && adapter->vendor == GpuVendor::Nvidia ? adapter->name : L"");
+    const auto& adapters = m_adapters.registry().adapters();
+    const auto count = adapter ? std::count_if(adapters.begin(), adapters.end(),
+                                     [adapter](const auto& item) { return item.vendor == adapter->vendor; })
+                               : 0;
+    m_vendorGpu.selectDevice(adapter, count == 1);
+    const GpuSensorReading reading
+        = adapter && adapter->vendor == GpuVendor::Nvidia ? m_nvml.read() : m_vendorGpu.read();
+    m_availability.gpuTemperature = reading.temperature > 0;
+    m_availability.gpuPower = reading.powerWatts > 0;
+    m_availability.gpuMedia = false;
+    m_availability.pcie = false;
 }
 
 std::wstring SystemSensors::activeGpuName() const
@@ -423,7 +441,15 @@ void SystemSensors::sampleCpu(SystemSnapshot& snapshot)
         // загрузку по их разнице, а не по готовым процентам.
     }
 
-    if (m_thermalZone.collect()) {
+    m_availability.cpuTemperature = false;
+    const CpuHardwareReading hardware = m_pawnio.read();
+    snapshot.cpuTemperature = hardware.temperature.value_or(0.0);
+    snapshot.cpuPowerWatts = hardware.powerWatts.value_or(0.0);
+    if (hardware.temperature) {
+        m_availability.cpuTemperature = true;
+    }
+
+    if (!hardware.temperature && m_thermalZone.collect()) {
         double hottest = -1000.0;
         for (const auto& [name, value] : m_thermalZone.values()) {
             (void)name;
@@ -441,7 +467,7 @@ void SystemSensors::sampleCpu(SystemSnapshot& snapshot)
 
     // Запасной источник — WMI. Опрашиваем нечасто: запрос идёт через COM и стоит
     // десятки миллисекунд, а температура меняется медленно.
-    if (snapshot.cpuTemperature <= 0.0 && !m_wmiFailed) {
+    if (!hardware.temperature && snapshot.cpuTemperature <= 0.0 && !m_wmiFailed) {
         const std::uint64_t now = GetTickCount64();
         if (!m_wmiAvailable || now - m_wmiQueriedAt > 15000) {
             m_wmiQueriedAt = now;
@@ -488,6 +514,7 @@ bool SystemSensors::queryWmiTemperature(double& celsius)
     // прошивка отдаёт через WMI. Классов несколько — от нового к старому, потому что
     // на разных машинах отвечает только один из них.
     struct WmiSource {
+        const wchar_t* nameSpace;
         const wchar_t* query;
         const wchar_t* property;
         // В одних классах значение в десятых долях Кельвина, в других — в Кельвинах.
@@ -495,23 +522,25 @@ bool SystemSensors::queryWmiTemperature(double& celsius)
     };
 
     static constexpr WmiSource kSources[] = {
-        { L"SELECT CurrentTemperature FROM MSAcpi_ThermalZoneTemperature", L"CurrentTemperature", true },
-        { L"SELECT HighPrecisionTemperature FROM Win32_PerfFormattedData_Counters_ThermalZoneInformation",
+        { L"ROOT\\WMI", L"SELECT CurrentTemperature FROM MSAcpi_ThermalZoneTemperature",
+            L"CurrentTemperature", true },
+        { L"ROOT\\CIMV2",
+            L"SELECT HighPrecisionTemperature FROM Win32_PerfFormattedData_Counters_ThermalZoneInformation",
             L"HighPrecisionTemperature", true },
-        { L"SELECT Temperature FROM Win32_PerfFormattedData_Counters_ThermalZoneInformation", L"Temperature",
-            false },
+        { L"ROOT\\CIMV2", L"SELECT Temperature FROM Win32_PerfFormattedData_Counters_ThermalZoneInformation",
+            L"Temperature", false },
     };
 
     for (const WmiSource& source : kSources) {
-        if (queryWmiValue(source.query, source.property, source.tenthsOfKelvin, celsius)) {
+        if (queryWmiValue(source.nameSpace, source.query, source.property, source.tenthsOfKelvin, celsius)) {
             return true;
         }
     }
     return false;
 }
 
-bool SystemSensors::queryWmiValue(const wchar_t* query, const wchar_t* property, bool tenthsOfKelvin,
-    double& celsius)
+bool SystemSensors::queryWmiValue(const wchar_t* nameSpace, const wchar_t* query, const wchar_t* property,
+    bool tenthsOfKelvin, double& celsius)
 {
     // COM инициализируется на потоке один раз за жизнь приложения.
     thread_local const bool comReady = [] {
@@ -529,7 +558,7 @@ bool SystemSensors::queryWmiValue(const wchar_t* query, const wchar_t* property,
     }
 
     IWbemServices* services = nullptr;
-    BSTR ns = SysAllocString(L"ROOT\\WMI");
+    BSTR ns = SysAllocString(nameSpace);
     const HRESULT connect = ns != nullptr
         ? locator->ConnectServer(ns, nullptr, nullptr, nullptr, 0, nullptr, nullptr, &services)
         : E_OUTOFMEMORY;
@@ -566,17 +595,19 @@ bool SystemSensors::queryWmiValue(const wchar_t* query, const wchar_t* property,
         }
 
         VARIANT value;
+        VARIANT numeric;
         VariantInit(&value);
+        VariantInit(&numeric);
+        // CIM_UINT64 может приходить как BSTR, а не как VT_UI4.
         if (SUCCEEDED(object->Get(property, 0, &value, nullptr, nullptr))
-            && (value.vt == VT_I4 || value.vt == VT_UI4 || value.vt == VT_R8)) {
-            const double raw = value.vt == VT_I4
-                ? static_cast<double>(value.lVal)
-                : (value.vt == VT_UI4 ? static_cast<double>(value.ulVal) : value.dblVal);
+            && SUCCEEDED(VariantChangeType(&numeric, &value, 0, VT_R8))) {
+            const double raw = numeric.dblVal;
             const double parsed = (tenthsOfKelvin ? raw / 10.0 : raw) - 273.15;
             if (parsed > -20.0 && parsed < 130.0) {
                 hottest = std::max(hottest, parsed);
             }
         }
+        VariantClear(&numeric);
         VariantClear(&value);
         object->Release();
     }
@@ -673,6 +704,7 @@ void SystemSensors::sampleMemory(SystemSnapshot& snapshot)
 
 void SystemSensors::sampleDiskAndNetwork(SystemSnapshot& snapshot)
 {
+    snapshot.diskTemperature = m_storage.temperature().value_or(0.0);
     if (m_availability.disk) {
         const bool readOk = m_diskRead.collect();
         const bool writeOk = m_diskWrite.collect();
@@ -764,8 +796,10 @@ void SystemSensors::sampleGpu(SystemSnapshot& snapshot)
         m_availability.gpuMedia = anyEngine || hasEncode || hasDecode;
     }
 
-    if (m_nvml.isAvailable()) {
-        const GpuSensorReading reading = m_nvml.read();
+    {
+        const GpuSensorReading reading
+            = adapter->vendor == GpuVendor::Nvidia ? m_nvml.read() : m_vendorGpu.read();
+        m_availability.pcie = false;
         // Доступность уточняется на каждом опросе: драйвер может ответить позже,
         // чем прошла инициализация, и тогда температура появляется сама.
         m_availability.gpuTemperature = reading.temperature > 0.0;
@@ -775,7 +809,7 @@ void SystemSensors::sampleGpu(SystemSnapshot& snapshot)
         snapshot.gpuMemClockMhz = reading.memoryClockMhz;
         snapshot.gpuPowerWatts = reading.powerWatts;
         snapshot.gpuFanRpm = reading.fanRpm;
-        snapshot.gpuHotspot = 0.0;
+        snapshot.gpuHotspot = reading.hotspot;
 
         // PCI-e: только NVML отдаёт скорость обмена и ширину линии. На AMD/Intel
         // честно оставляем «нет данных», а не выдумываем число.

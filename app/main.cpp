@@ -1,6 +1,7 @@
 #include "platform/app_paths.h"
 #include "platform/log.h"
 #include "platform/main_window.h"
+#include "platform/pawnio_package.h"
 #include "platform/win_util.h"
 
 #include <windows.h>
@@ -35,6 +36,10 @@ bool isAlreadyRunning()
 
 int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
 {
+    const int sensorCommand = yawa::runSensorCommandLine();
+    if (sensorCommand >= 0) {
+        return sensorCommand;
+    }
     const std::wstring_view arguments = commandLine != nullptr ? commandLine : L"";
     const std::size_t smokeFlag = arguments.find(L"--smoke");
     const bool smoke = smokeFlag != std::wstring_view::npos;

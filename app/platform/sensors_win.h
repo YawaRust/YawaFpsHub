@@ -4,7 +4,10 @@
 #include "metrics/system_sampler.h"
 #include "platform/dxgi_adapters.h"
 #include "platform/nvml_sensors.h"
+#include "platform/pawnio_sensors.h"
 #include "platform/pdh_query.h"
+#include "platform/storage_sensors.h"
+#include "platform/vendor_gpu_sensors.h"
 
 #include <array>
 #include <cstddef>
@@ -65,11 +68,13 @@ private:
     void initializeCpu(Log& log);
     bool initializeGpu(Log& log, std::string& error);
     void sampleCpu(SystemSnapshot& snapshot);
+    void selectGpuSensors();
     void sampleGameThread(SystemSnapshot& snapshot);
     // ACPI-термозона через WMI: работает там, где PDH-счётчик тепловых зон молчит.
     bool queryWmiTemperature(double& celsius);
     // Один WMI-запрос: значение свойства из первого объекта, переведённое в градусы.
-    bool queryWmiValue(const wchar_t* query, const wchar_t* property, bool tenthsOfKelvin, double& celsius);
+    bool queryWmiValue(const wchar_t* nameSpace, const wchar_t* query, const wchar_t* property,
+        bool tenthsOfKelvin, double& celsius);
     void sampleMemory(SystemSnapshot& snapshot);
     void sampleDiskAndNetwork(SystemSnapshot& snapshot);
     void sampleGpu(SystemSnapshot& snapshot);
@@ -77,6 +82,9 @@ private:
 
     DxgiAdapterList m_adapters;
     NvmlSensors m_nvml;
+    PawnioSensors m_pawnio;
+    StorageSensors m_storage;
+    VendorGpuSensors m_vendorGpu;
     PdhCounter m_cpuPerformance;
     PdhCounter m_diskRead;
     PdhCounter m_diskWrite;

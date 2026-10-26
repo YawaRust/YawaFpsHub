@@ -5,13 +5,19 @@ add_executable(yawa-probe
     ../../app/platform/dxgi_adapters.cpp
     ../../app/platform/hardware_info_win.cpp
     ../../app/platform/nvml_sensors.cpp
+    ../../app/platform/pawnio_sensors.cpp
     ../../app/platform/pdh_query.cpp
+    ../../app/platform/storage_sensors.cpp
+    ../../app/platform/vendor_gpu_sensors.cpp
     ../../app/platform/sensors_win.cpp
     ../../app/platform/win_util.cpp
 )
 
 target_link_libraries(yawa-probe PRIVATE
     yawa_metrics
+    setupapi
+    shell32
+    user32
     advapi32
     dxgi
     pdh
@@ -27,3 +33,9 @@ target_compile_definitions(yawa-probe PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_ME
 target_compile_features(yawa-probe PRIVATE cxx_std_20)
 
 set_target_properties(yawa-probe PROPERTIES OUTPUT_NAME "yawa-probe")
+
+yawa_embed_pawnio(yawa-probe)
+
+target_include_directories(yawa-probe SYSTEM PRIVATE
+    ${CMAKE_SOURCE_DIR}/third_party/gpu_sdk/adl
+    ${CMAKE_SOURCE_DIR}/third_party/gpu_sdk/igcl)

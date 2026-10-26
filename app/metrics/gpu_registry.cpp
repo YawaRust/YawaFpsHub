@@ -1,5 +1,7 @@
 #include "metrics/gpu_registry.h"
 
+#include <algorithm>
+#include <cwctype>
 #include <utility>
 
 namespace yawa {
@@ -107,6 +109,32 @@ std::string toUtf8(const std::wstring& text)
         }
     }
     return result;
+}
+
+std::optional<std::size_t> uniqueGpuNameMatch(std::wstring_view hint, const std::vector<std::wstring>& names)
+{
+    const auto lower = [](std::wstring_view name) {
+        std::wstring result(name);
+        std::transform(result.begin(), result.end(), result.begin(),
+            [](wchar_t c) { return static_cast<wchar_t>(std::towlower(c)); });
+        return result;
+    };
+    const std::wstring target = lower(hint);
+    if (target.empty()) {
+        return std::nullopt;
+    }
+    std::optional<std::size_t> selected;
+    for (std::size_t i = 0; i < names.size(); ++i) {
+        const std::wstring name = lower(names[i]);
+        if (!name.empty()
+            && (target.find(name) != std::wstring::npos || name.find(target) != std::wstring::npos)) {
+            if (selected) {
+                return std::nullopt;
+            }
+            selected = i;
+        }
+    }
+    return selected;
 }
 
 } // namespace yawa

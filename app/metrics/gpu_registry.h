@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace yawa {
@@ -43,6 +45,8 @@ public:
 private:
     std::vector<GpuAdapter> m_adapters;
 };
+
+std::optional<std::size_t> uniqueGpuNameMatch(std::wstring_view hint, const std::vector<std::wstring>& names);
 
 GpuVendor vendorFromId(std::uint32_t vendorId);
 std::string toUtf8(const std::wstring& text);

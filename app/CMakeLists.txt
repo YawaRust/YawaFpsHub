@@ -18,7 +18,11 @@ add_executable(YawaFpsHub WIN32
     platform/main_window.cpp
     platform/nvml_sensors.cpp
     platform/overlay_window.cpp
+    platform/pawnio_sensors.cpp
+    platform/pawnio_package.cpp
     platform/pdh_query.cpp
+    platform/storage_sensors.cpp
+    platform/vendor_gpu_sensors.cpp
     platform/sensors_win.cpp
     platform/win_util.cpp
     render/d2d.cpp
@@ -45,7 +49,7 @@ endif()
 
 target_include_directories(YawaFpsHub PRIVATE ${CMAKE_SOURCE_DIR}/app)
 target_link_libraries(YawaFpsHub PRIVATE d2d1 dwrite dxgi dwmapi pdh psapi shell32 user32 gdi32 advapi32 ole32
-    oleaut32 wbemuuid windowscodecs)
+    oleaut32 wbemuuid windowscodecs bcrypt setupapi newdev wintrust)
 # Один exe без зависимостей от установщика Visual C++: рантайм линкуем статически.
 # Без этого YawaFpsHub.exe не запускается на чистой Windows, если там нет VC++ Redistributable.
 if(MSVC)
@@ -57,3 +61,9 @@ target_compile_definitions(YawaFpsHub PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_ME
 target_compile_features(YawaFpsHub PRIVATE cxx_std_20)
 
 set_target_properties(YawaFpsHub PROPERTIES OUTPUT_NAME "YawaFpsHub")
+
+yawa_embed_pawnio(YawaFpsHub)
+
+target_include_directories(YawaFpsHub SYSTEM PRIVATE
+    ${CMAKE_SOURCE_DIR}/third_party/gpu_sdk/adl
+    ${CMAKE_SOURCE_DIR}/third_party/gpu_sdk/igcl)

@@ -84,6 +84,11 @@ void testUtf8Conversion()
 
 void runGpuRegistryTests()
 {
+    CHECK(uniqueGpuNameMatch(L"NVIDIA RTX 4080", { L"AMD Radeon", L"nvidia rtx 4080" }) == 1);
+    CHECK(!uniqueGpuNameMatch(L"AMD Radeon", { L"NVIDIA RTX 4080" }));
+    CHECK(!uniqueGpuNameMatch(L"", { L"NVIDIA RTX 4080" }));
+    CHECK(!uniqueGpuNameMatch(L"NVIDIA RTX 4080", { L"NVIDIA RTX 4080", L"NVIDIA RTX 4080" }));
+    CHECK(!uniqueGpuNameMatch(L"GTX 1060", { L"GTX 1060", L"GTX 1060 Ti" }));
     testVendorMapping();
     testPreferredIsDiscrete();
     testSoftwareAdapterIsSkipped();

@@ -1,7 +1,7 @@
 name: build
 
 permissions:
-  contents: write
+  contents: read
 
 on:
   push:
@@ -56,12 +56,6 @@ jobs:
         shell: bash
         run: |
           cmake --build build --config Release --parallel > build-log.txt 2>&1 || true
-          git config user.email "ci@yawafpshub.local"
-          git config user.name "ci"
-          git checkout -B ci-logs
-          git add -f build-log.txt
-          git commit -m "build log" || true
-          git push -f origin ci-logs
 
       - name: Тесты
         run: ctest --test-dir build -C Release --output-on-failure
@@ -330,8 +324,7 @@ jobs:
           Stop-Process -Id $server.Id -Force
 
       - name: Лог приложения (диагностика)
-        # Лог лежит рядом с exe. Кладём его в ci-logs рядом со скриншотами: из песочницы
-        # иначе не видно, поднялась ли ETW-сессия и что с оверлеем на этой машине.
+        # Логи и снимки публикуются артефактами, без записи в служебные ветки.
         continue-on-error: true
         shell: pwsh
         run: |
@@ -342,29 +335,6 @@ jobs:
           } else {
             Write-Output "::warning title=YawaFpsHub::лог приложения не найден"
           }
-
-      - name: Опубликовать скриншоты
-        # Два прогона на один коммит (push и pull_request) соревнуются за ветку ci-logs,
-        # поэтому публикует только push-прогон: второй попытке push не хватает fast-forward.
-        if: github.event_name == 'push' && hashFiles('screenshot-*.png', 'demo-*.png') != ''
-        shell: bash
-        run: |
-          # Сначала убираем свежие PNG из рабочего дерева: в ветке ci-logs они уже есть,
-          # и checkout отказывается перезаписывать неотслеживаемые файлы.
-          mkdir -p /tmp/shots
-          mv screenshot-*.png /tmp/shots/ 2>/dev/null || true
-          mv style-*.png /tmp/shots/ 2>/dev/null || true
-          mv demo-*.png /tmp/shots/ 2>/dev/null || true
-          if [ -d shots ]; then mv shots/*.png /tmp/shots/ 2>/dev/null || true; fi
-          git config user.email "ci@yawafpshub.local"
-          git config user.name "ci"
-          git checkout -B ci-logs
-          cp /tmp/shots/*.png .
-          if [ -f app-log.txt ]; then cp app-log.txt /tmp/shots/ ; fi
-          git add -f ./*.png
-          if [ -f app-log.txt ]; then git add -f app-log.txt ; fi
-          git commit -m "screenshots" || true
-          git push -f origin ci-logs
 
       - name: Прогон диагностики
         shell: pwsh
@@ -383,3 +353,17 @@ jobs:
           path: |
             build/**/YawaFpsHub.exe
             build/tools/probe/Release/yawa-probe.exe
+
+      - name: Диагностика и снимки
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: YawaFpsHub-diagnostics
+          if-no-files-found: ignore
+          path: |
+            build-log.txt
+            app-log.txt
+            screenshot-*.png
+            style-*.png
+            demo-*.png
+            shots/*.png

@@ -45,6 +45,8 @@ add_library(yawa_metrics STATIC
 target_include_directories(yawa_metrics PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/app)
 target_compile_features(yawa_metrics PUBLIC cxx_std_20)
 
+include(cmake/pawnio.cmake)
+
 include(CTest)
 if(BUILD_TESTING)
     add_subdirectory(tests)

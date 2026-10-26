@@ -1,0 +1,8 @@
+#pragma once
+
+#define IDR_PAWNIO_SYS 6101
+#define IDR_PAWNIO_CAT 6102
+#define IDR_PAWNIO_INF 6103
+#define IDR_PAWNIO_INTEL 6104
+#define IDR_PAWNIO_AMD 6105
+#define IDR_PAWNIO_SOURCES 6106
