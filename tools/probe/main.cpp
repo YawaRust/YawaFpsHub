@@ -70,9 +70,9 @@ std::string executableDirectory()
     return yawa::narrow(slash == std::wstring::npos ? full : full.substr(0, slash));
 }
 
-// Паспорт машины и вердикт по узкому месту: на разных GPU и CPU нужно видеть, что
-// определилось и что приложение собралось показывать.
-void printMachine(const yawa::SystemSensors& sensors, const yawa::MetricStore& store, double targetFps)
+// Паспорт машины; без привязки ETW к активной игре не выдаём паспортный прогноз
+// или общесистемную нагрузку за её узкое место.
+void printMachine(const yawa::SystemSensors& sensors, const yawa::MetricStore& store)
 {
     yawa::HardwareIdentity info;
     std::string error;
@@ -95,17 +95,19 @@ void printMachine(const yawa::SystemSensors& sensors, const yawa::MetricStore& s
     }
     std::printf("  RAM: %s\n", yawa::describeMemory(info.memory).c_str());
     const double tck = info.memory.cycleTimeNs();
-    std::printf("       частота %.0f МТ/с (паспорт %.0f), tCK %.3f нс, XMP/EXPO: не определяется из SMBIOS\n",
-        info.memory.configuredMt, info.memory.ratedMt, tck);
-    std::printf("       тайминги SPD (tCL-tRCD-tRP-tRAS) без драйвера недоступны — показываем частоты\n");
+    if (info.memory.configuredMt > 0.0) {
+        std::printf("       частота по SMBIOS %.0f МТ/с, tCK %.3f нс\n", info.memory.configuredMt, tck);
+    } else {
+        std::printf("       частота: нет данных\n");
+    }
+    std::printf("       действующие тайминги и XMP/EXPO из SMBIOS не определяются\n");
     for (const yawa::DisplayIdentity& display : info.displays) {
         std::printf("  экран: %s%s\n", yawa::describeDisplay(display).c_str(), display.primary ? " (основной)" : "");
     }
 
     const yawa::BottleneckResult balance
-        = yawa::analyzeBottleneck(info, yawa::loadFromStore(store, targetFps));
-    std::printf("  баланс: %s — %u%% (%s)\n", balance.headline.c_str(), balance.percent,
-        balance.measured ? "по живым замерам" : "прогноз по индексу");
+        = yawa::analyzeActiveGame(info, yawa::loadFromStore(store), false);
+    std::printf("  узкое место: %s — активная игра этим инструментом не выбрана\n", balance.headline.c_str());
     for (const yawa::BottleneckAdvice& advice : balance.advice) {
         std::printf("    · %s — %s\n", advice.title.c_str(), advice.text.c_str());
     }
@@ -239,7 +241,7 @@ int wmain(int argc, wchar_t** argv)
         }
     }
 
-    printMachine(sensors, store, kDefaultTargetFps);
+    printMachine(sensors, store);
 
     std::printf("\nкадров из ETW: %llu, отклонено событий: %llu, потеряно сэмплов: %llu, потоков: %zu\n",
         static_cast<unsigned long long>(etw.eventsReceived()),
