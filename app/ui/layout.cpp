@@ -103,6 +103,152 @@ void drawChip(Renderer& renderer, const Rect& rect, std::wstring_view label, boo
         TextAlign::Center);
 }
 
+namespace {
+
+// Ряды карточек «Баланса» и «Системы»: высота снята с demo-*-tall.png, шаг списка —
+// из той же разметки прототипа.
+constexpr float kBalanceVerdict = 204.0f;
+constexpr float kBalancePair = 363.0f;
+constexpr float kBalanceAdviceRow = 57.0f;
+constexpr float kBalanceAdviceHead = 42.0f;
+constexpr float kBalanceAdviceMin = 249.0f;
+constexpr float kBalanceNote = 144.0f;
+constexpr float kSystemRow = 274.0f;
+constexpr float kSystemMemory = 416.0f;
+constexpr float kSystemMonitor = 190.0f;
+constexpr float kSystemDisk = 184.0f;
+constexpr float kSystemNote = 143.0f;
+
+} // namespace
+
+float balanceHeight(std::size_t adviceCount, bool narrow)
+{
+    const float advice = std::max(kBalanceAdviceMin,
+        kBalanceAdviceHead + kBalanceAdviceRow * static_cast<float>(adviceCount) + 12.0f);
+    const float extraRow = narrow ? kBalancePair + kGap : 0.0f;
+    return 8.0f + kBalanceVerdict + kGap + kBalancePair + kGap + advice + kGap + kBalanceNote + extraRow + 8.0f;
+}
+
+float systemHeight(bool narrow)
+{
+    if (narrow) {
+        return 8.0f + 3.0f * (kSystemRow + kGap) + kSystemMemory + kGap + kSystemMonitor + kGap + kSystemDisk + kGap
+            + kSystemNote + 8.0f;
+    }
+    return 8.0f + kSystemRow + kGap + kSystemMemory + kGap + kSystemDisk + kGap + kSystemNote + 8.0f;
+}
+
+float drawCardHeader(Renderer& renderer, const Rect& card, std::wstring_view title, std::wstring_view subtitle,
+    const Theme& theme)
+{
+    const Rect inner = card.inset(kCardPadding);
+    renderer.text(title, Rect{ inner.left, inner.top, inner.right, inner.top + 20.0f }, TextRole::Heading, theme.text);
+    if (!subtitle.empty()) {
+        renderer.text(subtitle, Rect{ inner.left, inner.top + 18.0f, inner.right - 76.0f, inner.top + 34.0f },
+            TextRole::Tiny, theme.textFaint);
+    }
+    return inner.top + 36.0f;
+}
+
+void drawTag(Renderer& renderer, const Rect& card, std::wstring_view label, bool live, const Theme& theme)
+{
+    const float width = renderer.measureText(label, TextRole::Tiny) + 30.0f;
+    const Rect tag{ card.right - kCardPadding - width, card.top + kCardPadding - 2.0f, card.right - kCardPadding,
+        card.top + kCardPadding + 20.0f };
+    renderer.fillRoundRect(tag, 11.0f, live ? theme.accentSoft : theme.panelSoft);
+    renderer.fillCircle(tag.left + 11.0f, tag.centerY(), 3.0f, live ? theme.accent : theme.textFaint);
+    renderer.text(label, Rect{ tag.left + 20.0f, tag.top, tag.right - 6.0f, tag.bottom }, TextRole::Tiny,
+        live ? theme.accent : theme.textFaint);
+}
+
+std::wstring clipText(Renderer& renderer, std::wstring_view text, TextRole role, float maxWidth)
+{
+    if (text.empty() || renderer.measureText(text, role) <= maxWidth) {
+        return std::wstring(text);
+    }
+
+    std::wstring clipped;
+    for (const wchar_t symbol : text) {
+        if (renderer.measureText(clipped + symbol + L"…", role) > maxWidth) {
+            break;
+        }
+        clipped.push_back(symbol);
+    }
+    return clipped.empty() ? std::wstring(L"…") : clipped + L"…";
+}
+
+float drawWrappedText(Renderer& renderer, std::wstring_view text, const Rect& rect, TextRole role,
+    const Color& color, float lineHeight, std::uint32_t maxLines)
+{
+    if (text.empty()) {
+        return 0.0f;
+    }
+
+    // Переносим по пробелам: в DirectWrite формат создан без переноса, поэтому длинная
+    // строка иначе просто обрезалась бы по ширине карточки.
+    std::wstring line;
+    std::wstring word;
+    std::uint32_t lines = 0;
+    for (const wchar_t symbol : text) {
+        if (symbol == L'\n') {
+            ++lines;
+            if (lines >= maxLines) {
+                renderer.text(line + word, rect, role, color);
+                return static_cast<float>(lines) * lineHeight;
+            }
+            renderer.text(line + word,
+                Rect{ rect.left, rect.top + static_cast<float>(lines - 1) * lineHeight, rect.right,
+                    rect.top + static_cast<float>(lines) * lineHeight },
+                role, color);
+            line.clear();
+            word.clear();
+            continue;
+        }
+        if (symbol != L' ') {
+            word.push_back(symbol);
+            continue;
+        }
+
+        const std::wstring candidate = line.empty() ? word : line + L" " + word;
+        if (renderer.measureText(candidate, role) > rect.width() && !line.empty()) {
+            ++lines;
+            if (lines >= maxLines) {
+                line += L"…";
+                break;
+            }
+            renderer.text(line,
+                Rect{ rect.left, rect.top + static_cast<float>(lines - 1) * lineHeight, rect.right,
+                    rect.top + static_cast<float>(lines) * lineHeight },
+                role, color);
+            line = word;
+        } else {
+            line = candidate;
+        }
+        word.clear();
+    }
+
+    if (!word.empty()) {
+        const std::wstring candidate = line.empty() ? word : line + L" " + word;
+        if (renderer.measureText(candidate, role) > rect.width() && !line.empty() && lines + 1 < maxLines) {
+            ++lines;
+            renderer.text(line,
+                Rect{ rect.left, rect.top + static_cast<float>(lines - 1) * lineHeight, rect.right,
+                    rect.top + static_cast<float>(lines) * lineHeight },
+                role, color);
+            line = word;
+        } else {
+            line = candidate;
+        }
+    }
+
+    ++lines;
+    renderer.text(line,
+        Rect{ rect.left, rect.top + static_cast<float>(lines - 1) * lineHeight, rect.right,
+            rect.top + static_cast<float>(lines) * lineHeight },
+        role, color);
+    return static_cast<float>(lines) * lineHeight;
+}
+
 void drawBar(Renderer& renderer, const Rect& rect, float fraction, const Color& color, const Theme& theme)
 {
     const float radius = rect.height() * 0.5f;

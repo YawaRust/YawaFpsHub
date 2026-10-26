@@ -68,6 +68,36 @@ void testActiveStreamIsFaster()
     CHECK_NEAR(tracker.summary(144.0).currentFps, 144.0, 2.0);
 }
 
+// Ровно та ситуация, из-за которой в игре было 120 кадров, а программа показывала 144:
+// композитор рабочего стола подаёт кадры чаще игры.
+void testForegroundGameBeatsDesktopCompositor()
+{
+    FrameTracker tracker(kQpc);
+    for (int millisecond = 0; millisecond < 3000; ++millisecond) {
+        const auto qpc = kQpc + static_cast<std::uint64_t>(millisecond) * kQpc / 1000;
+        if (millisecond % 7 == 0) {
+            tracker.onPresent({ qpc, 500, 1, 0xD00D }); // рабочий стол: ~143 кадра
+        }
+        if (millisecond % 8 == 0) {
+            tracker.onPresent({ qpc, 600, 2, 0x600D }); // игра: 125 кадров
+        }
+    }
+
+    // Без подсказки побеждает самый быстрый поток — это и был завышенный FPS.
+    CHECK(tracker.activeProcessId() == 500);
+
+    tracker.setForegroundProcess(600);
+    CHECK(tracker.activeProcessId() == 600);
+    CHECK_NEAR(tracker.summary(120.0).currentFps, 125.0, 2.0);
+
+    // Служебный процесс не становится «игрой», даже если он в активном окне.
+    tracker.setForegroundProcess(500);
+    const std::uint32_t system = 500;
+    tracker.setSystemProcesses(&system, 1);
+    CHECK(tracker.isSystemProcess(500));
+    CHECK(tracker.activeProcessId() == 600);
+}
+
 void testStoppedStreamLosesActivity()
 {
     FrameTracker tracker(kQpc);
@@ -141,6 +171,7 @@ void runFrameTrackerTests()
     testSingleStreamFps();
     testHitchLowersTailPercentiles();
     testActiveStreamIsFaster();
+    testForegroundGameBeatsDesktopCompositor();
     testStoppedStreamLosesActivity();
     testLongPauseDoesNotPolluteWindow();
     testStreamLimitKeepsWorking();

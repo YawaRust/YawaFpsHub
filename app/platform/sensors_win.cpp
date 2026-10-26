@@ -8,6 +8,8 @@
 #include <wbemidl.h>
 
 #include <algorithm>
+#include <cstdio>
+#include <vector>
 #include <string_view>
 
 namespace yawa {
@@ -99,6 +101,130 @@ std::uint32_t countProcessThreads()
 
 } // namespace
 
+namespace {
+
+// Те же данные, что у диспетчера задач: ядро отдаёт время простоя и полное время
+// по каждому логическому процессору. Доступно без прав администратора и без драйверов.
+struct ProcessorPerformance {
+    long long idleTime;
+    long long kernelTime;
+    long long userTime;
+    long long dpcTime;
+    long long interruptTime;
+    unsigned long interruptCount;
+};
+
+using NtQuerySystemInformationFn = long(__stdcall*)(int, void*, unsigned long, unsigned long*);
+
+constexpr int kSystemProcessorPerformanceInformation = 8;
+// NTSTATUS 0xC0000004: буфер меньше, чем нужно системе.
+constexpr long kStatusInfoLengthMismatch = static_cast<long>(0xC0000004u);
+
+// Частота процессора без PDH: powrprof.dll отдаёт текущие МГц по каждому потоку.
+// Это тот же источник, что был у диспетчера задач, и он работает без драйверов.
+struct ProcessorPowerInformation {
+    unsigned long number;
+    unsigned long maxMhz;
+    unsigned long currentMhz;
+    unsigned long mhzLimit;
+    unsigned long maxIdleState;
+    unsigned long currentIdleState;
+};
+
+using CallNtPowerInformationFn = long(__stdcall*)(int, void*, unsigned long, void*, unsigned long);
+
+constexpr int kProcessorInformation = 11;
+
+CallNtPowerInformationFn resolveCallNtPowerInformation()
+{
+    static CallNtPowerInformationFn function = [] {
+        HMODULE module = LoadLibraryW(L"powrprof.dll");
+        if (module == nullptr) {
+            return static_cast<CallNtPowerInformationFn>(nullptr);
+        }
+        return reinterpret_cast<CallNtPowerInformationFn>(
+            GetProcAddress(module, "CallNtPowerInformation"));
+    }();
+    return function;
+}
+
+double currentClockFromPowerInformation()
+{
+    const CallNtPowerInformationFn query = resolveCallNtPowerInformation();
+    if (query == nullptr) {
+        return 0.0;
+    }
+
+    std::array<ProcessorPowerInformation, 64> buffer{};
+    const long status = query(kProcessorInformation, nullptr, 0, buffer.data(),
+        static_cast<unsigned long>(buffer.size() * sizeof(ProcessorPowerInformation)));
+    if (status < 0) {
+        return 0.0;
+    }
+
+    // Максимум по потокам: у спящих ядер частоты нулевые, среднее занижало бы значение.
+    unsigned long clock = 0;
+    for (const ProcessorPowerInformation& info : buffer) {
+        clock = std::max(clock, info.currentMhz);
+    }
+    return static_cast<double>(clock);
+}
+
+NtQuerySystemInformationFn resolveNtQuerySystemInformation()
+{
+    static NtQuerySystemInformationFn function = [] {
+        HMODULE module = GetModuleHandleW(L"ntdll.dll");
+        if (module == nullptr) {
+            module = LoadLibraryW(L"ntdll.dll");
+        }
+        if (module == nullptr) {
+            return static_cast<NtQuerySystemInformationFn>(nullptr);
+        }
+        return reinterpret_cast<NtQuerySystemInformationFn>(
+            GetProcAddress(module, "NtQuerySystemInformation"));
+    }();
+    return function;
+}
+
+} // namespace
+
+bool SystemSensors::sampleCoreTimes()
+{
+    const NtQuerySystemInformationFn query = resolveNtQuerySystemInformation();
+    if (query == nullptr) {
+        return false;
+    }
+
+    // Буфер с запасом и одним повтором: на машине с сотней потоков первый вызов вернёт
+    // STATUS_INFO_LENGTH_MISMATCH и требуемый размер в written.
+    std::vector<ProcessorPerformance> buffer(64);
+    unsigned long written = 0;
+    long status = query(kSystemProcessorPerformanceInformation, buffer.data(),
+        static_cast<unsigned long>(buffer.size() * sizeof(ProcessorPerformance)), &written);
+    if (status == kStatusInfoLengthMismatch && written > buffer.size() * sizeof(ProcessorPerformance)) {
+        buffer.resize(written / sizeof(ProcessorPerformance) + 1);
+        written = 0;
+        status = query(kSystemProcessorPerformanceInformation, buffer.data(),
+            static_cast<unsigned long>(buffer.size() * sizeof(ProcessorPerformance)), &written);
+    }
+    m_coreQueryStatus = status;
+    m_coreQueryWritten = written;
+    if (status < 0 || written == 0) {
+        return false;
+    }
+
+    // Дальше живут массивы на 16 ядер: лишние потоки отбрасываем, а не пишем мимо.
+    const std::size_t count = std::min<std::size_t>({ written / sizeof(ProcessorPerformance),
+        buffer.size(), m_coreIdleTicks.size() });
+    m_coreTimeCount = static_cast<std::uint32_t>(count);
+    for (std::size_t index = 0; index < count; ++index) {
+        m_coreIdleTicks[index] = static_cast<std::uint64_t>(buffer[index].idleTime);
+        m_coreTotalTicks[index] = static_cast<std::uint64_t>(buffer[index].kernelTime)
+            + static_cast<std::uint64_t>(buffer[index].userTime);
+    }
+    return count > 0;
+}
+
 bool SystemSensors::initialize(Log& log, std::string& error)
 {
     error.clear();
@@ -133,27 +259,24 @@ void SystemSensors::initializeCpu(Log& log)
         && m_cpuPerformance.open(L"\\Processor Information(_Total)\\% Processor Performance");
     m_availability.cpu = true;
 
-    if (!m_availability.cpuClock) {
-        log.warning("CPU: частота недоступна, нет счётчика % Processor Performance");
-    }
+    // Даже без PDH частоту отдаст powrprof или номинал из реестра — строка не останется пустой.
+    log.info(m_availability.cpuClock ? "CPU: частота через PDH % Processor Performance"
+                                     : "CPU: PDH-частоты нет, используем powrprof/номинал");
 
-    // Загрузка по ядрам: \Processor Information(0,N)\% Processor Time. Диспетчер задач
-    // берёт те же счётчики, поэтому цифры совпадают.
-    const DWORD coreCount = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
-    for (std::size_t index = 0; index < m_coreLoad.size(); ++index) {
-        if (index >= coreCount) {
-            break;
-        }
-        const std::wstring path
-            = L"\\Processor Information(0," + std::to_wstring(index) + L")\\% Processor Time";
-        auto counter = std::make_unique<PdhCounter>();
-        if (counter->open(path.c_str())) {
-            m_coreLoad[index] = std::move(counter);
-            ++m_coreCount;
-        }
-    }
-    if (!m_coreLoad[0]) {
-        log.warning("CPU: счётчики по ядрам недоступны");
+    // Загрузка по ядрам не требует PDH: берём её из системного вызова, который
+    // отдаёт время простоя и полное время каждого логического процессора.
+    if (sampleCoreTimes()) {
+        m_coreCount = m_coreTimeCount;
+        m_hasCoreTimes = true;
+        m_previousCoreIdle = m_coreIdleTicks;
+        m_previousCoreTotal = m_coreTotalTicks;
+        log.info("CPU: загрузка ядер через NtQuerySystemInformation, потоков " + std::to_string(m_coreCount));
+    } else {
+        // Код возврата в логе: без него причину «датчиков нет» на чужой машине не видно.
+        char message[96]{};
+        std::snprintf(message, sizeof(message), "CPU: время по ядрам недоступно (status 0x%08lX, %lu байт)",
+            static_cast<unsigned long>(m_coreQueryStatus) & 0xFFFFFFFFul, m_coreQueryWritten);
+        log.warning(message);
     }
 
     // Температура: ACPI-термозона читается через PDH, драйвер не нужен.
@@ -256,22 +379,49 @@ void SystemSensors::sampleCpu(SystemSnapshot& snapshot)
     snapshot.cpuIdleTicks = fileTimeToTicks(idle);
     snapshot.cpuTotalTicks = fileTimeToTicks(kernel) + fileTimeToTicks(user);
 
-    if (m_availability.cpuClock && m_cpuPerformance.collect()) {
+    if (m_cpuPerformance.collect()) {
         const double percent = std::clamp(m_cpuPerformance.value(), 0.0, 300.0);
         snapshot.cpuClockMhz = static_cast<double>(m_nominalCpuMhz) * percent / 100.0;
+        if (snapshot.cpuClockMhz > 0.0) {
+            m_availability.cpuClock = true;
+        }
+    }
+    // PDH-счётчик частоты есть не на каждой машине: тогда берём powrprof.
+    if (snapshot.cpuClockMhz <= 0.0) {
+        const double mhz = currentClockFromPowerInformation();
+        if (mhz > 0.0) {
+            snapshot.cpuClockMhz = mhz;
+            m_availability.cpuClock = true;
+        } else if (m_nominalCpuMhz != 0) {
+            // Последний резерв — номинал из реестра: лучше номинал, чем пустая строка.
+            snapshot.cpuClockMhz = static_cast<double>(m_nominalCpuMhz);
+            m_availability.cpuClock = true;
+        }
     }
 
     sampleGameThread(snapshot);
 
-    std::uint32_t cores = 0;
-    for (std::size_t index = 0; index < m_coreLoad.size(); ++index) {
-        if (m_coreLoad[index] == nullptr || !m_coreLoad[index]->collect()) {
-            continue;
+    // Загрузка ядер: разница времён между двумя опросами, как считает диспетчер задач.
+    if (m_hasCoreTimes && sampleCoreTimes()) {
+        const std::size_t cores = std::min<std::size_t>(m_coreTimeCount, snapshot.coreLoadPercent.size());
+        for (std::size_t index = 0; index < cores; ++index) {
+            const std::uint64_t idleTicks = m_coreIdleTicks[index] >= m_previousCoreIdle[index]
+                ? m_coreIdleTicks[index] - m_previousCoreIdle[index]
+                : 0;
+            const std::uint64_t total = m_coreTotalTicks[index] >= m_previousCoreTotal[index]
+                ? m_coreTotalTicks[index] - m_previousCoreTotal[index]
+                : 0;
+            snapshot.coreLoadPercent[index]
+                = total > 0 ? std::clamp(100.0 * (1.0 - static_cast<double>(idleTicks) / static_cast<double>(total)),
+                    0.0, 100.0)
+                            : 0.0;
         }
-        snapshot.coreLoadPercent[index] = std::clamp(m_coreLoad[index]->value(), 0.0, 100.0);
-        ++cores;
+        snapshot.coreCount = static_cast<std::uint32_t>(cores);
+        m_previousCoreIdle = m_coreIdleTicks;
+        m_previousCoreTotal = m_coreTotalTicks;
+        // Суммарные тики остаются накопительными (GetSystemTimes): сборщик считает
+        // загрузку по их разнице, а не по готовым процентам.
     }
-    snapshot.coreCount = cores;
 
     if (m_thermalZone.collect()) {
         double hottest = -1000.0;
@@ -334,6 +484,35 @@ std::uint32_t SystemSensors::cpuThreads() const
 
 bool SystemSensors::queryWmiTemperature(double& celsius)
 {
+    // Драйвер не нужен и не ставится: температура берётся из ACPI-термозон, которые
+    // прошивка отдаёт через WMI. Классов несколько — от нового к старому, потому что
+    // на разных машинах отвечает только один из них.
+    struct WmiSource {
+        const wchar_t* query;
+        const wchar_t* property;
+        // В одних классах значение в десятых долях Кельвина, в других — в Кельвинах.
+        bool tenthsOfKelvin;
+    };
+
+    static constexpr WmiSource kSources[] = {
+        { L"SELECT CurrentTemperature FROM MSAcpi_ThermalZoneTemperature", L"CurrentTemperature", true },
+        { L"SELECT HighPrecisionTemperature FROM Win32_PerfFormattedData_Counters_ThermalZoneInformation",
+            L"HighPrecisionTemperature", true },
+        { L"SELECT Temperature FROM Win32_PerfFormattedData_Counters_ThermalZoneInformation", L"Temperature",
+            false },
+    };
+
+    for (const WmiSource& source : kSources) {
+        if (queryWmiValue(source.query, source.property, source.tenthsOfKelvin, celsius)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool SystemSensors::queryWmiValue(const wchar_t* query, const wchar_t* property, bool tenthsOfKelvin,
+    double& celsius)
+{
     // COM инициализируется на потоке один раз за жизнь приложения.
     thread_local const bool comReady = [] {
         const HRESULT result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -365,16 +544,16 @@ bool SystemSensors::queryWmiTemperature(double& celsius)
 
     IEnumWbemClassObject* enumerator = nullptr;
     BSTR language = SysAllocString(L"WQL");
-    BSTR wql = SysAllocString(L"SELECT CurrentTemperature FROM MSAcpi_ThermalZoneTemperature");
-    HRESULT query = E_OUTOFMEMORY;
+    BSTR wql = SysAllocString(query);
+    HRESULT execResult = E_OUTOFMEMORY;
     if (language != nullptr && wql != nullptr) {
-        query = services->ExecQuery(language, wql, WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY, nullptr,
-            &enumerator);
+        execResult = services->ExecQuery(language, wql, WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
+            nullptr, &enumerator);
     }
     SysFreeString(language);
     SysFreeString(wql);
     services->Release();
-    if (FAILED(query) || enumerator == nullptr) {
+    if (FAILED(execResult) || enumerator == nullptr) {
         return false;
     }
 
@@ -388,12 +567,12 @@ bool SystemSensors::queryWmiTemperature(double& celsius)
 
         VARIANT value;
         VariantInit(&value);
-        if (SUCCEEDED(object->Get(L"CurrentTemperature", 0, &value, nullptr, nullptr))
-            && (value.vt == VT_I4 || value.vt == VT_UI4)) {
-            // Значение приходит в десятых долях Кельвина.
-            const double kelvinTenths = value.vt == VT_I4 ? static_cast<double>(value.lVal)
-                                                          : static_cast<double>(value.ulVal);
-            const double parsed = kelvinTenths / 10.0 - 273.15;
+        if (SUCCEEDED(object->Get(property, 0, &value, nullptr, nullptr))
+            && (value.vt == VT_I4 || value.vt == VT_UI4 || value.vt == VT_R8)) {
+            const double raw = value.vt == VT_I4
+                ? static_cast<double>(value.lVal)
+                : (value.vt == VT_UI4 ? static_cast<double>(value.ulVal) : value.dblVal);
+            const double parsed = (tenthsOfKelvin ? raw / 10.0 : raw) - 273.15;
             if (parsed > -20.0 && parsed < 130.0) {
                 hottest = std::max(hottest, parsed);
             }
@@ -486,6 +665,9 @@ void SystemSensors::sampleMemory(SystemSnapshot& snapshot)
         if (snapshot.pageFileUsedBytes > limit) {
             snapshot.pageFileUsedBytes = limit;
         }
+        // Полный файл подкачки — разница между лимитом фиксации и физической памятью.
+        snapshot.pageFileTotalBytes = limit > status.ullTotalPhys ? limit - status.ullTotalPhys : 0;
+        m_availability.pageFile = snapshot.pageFileTotalBytes > 0;
     }
 }
 
@@ -546,7 +728,12 @@ void SystemSensors::sampleGpu(SystemSnapshot& snapshot)
         const std::wstring tag = luidTag(adapter->luidLow, adapter->luidHigh);
         double allEngines = 0.0;
         double threeD = 0.0;
+        double encode = 0.0;
+        double decode = 0.0;
         bool hasThreeD = false;
+        bool hasEncode = false;
+        bool hasDecode = false;
+        bool anyEngine = false;
 
         for (const auto& [name, value] : m_gpuEngine.values()) {
             if (name.find(tag) == std::wstring::npos) {
@@ -554,14 +741,27 @@ void SystemSensors::sampleGpu(SystemSnapshot& snapshot)
             }
             const double utilization = std::clamp(value, 0.0, 100.0);
             allEngines += utilization;
+            anyEngine = true;
             if (name.find(L"engtype_3D") != std::wstring::npos) {
                 threeD += utilization;
                 hasThreeD = true;
+            } else if (name.find(L"engtype_VideoEncode") != std::wstring::npos) {
+                encode += utilization;
+                hasEncode = true;
+            } else if (name.find(L"engtype_VideoDecode") != std::wstring::npos) {
+                decode += utilization;
+                hasDecode = true;
             }
         }
 
         m_gpuLoad = std::clamp(hasThreeD ? threeD : allEngines, 0.0, 100.0);
         snapshot.gpuLoadPercent = m_gpuLoad;
+        // Медиа-движки считаются теми же счётчиками GPU Engine: работает у NVIDIA, AMD и Intel.
+        snapshot.gpuEncodePercent = std::clamp(encode, 0.0, 100.0);
+        snapshot.gpuDecodePercent = std::clamp(decode, 0.0, 100.0);
+        // Счётчик GPU Engine перечисляет движки, которые уже работали: если движки
+        // адаптера видны, кодер и декодер существуют, даже когда оба простаивают.
+        m_availability.gpuMedia = anyEngine || hasEncode || hasDecode;
     }
 
     if (m_nvml.isAvailable()) {
@@ -576,6 +776,49 @@ void SystemSensors::sampleGpu(SystemSnapshot& snapshot)
         snapshot.gpuPowerWatts = reading.powerWatts;
         snapshot.gpuFanRpm = reading.fanRpm;
         snapshot.gpuHotspot = 0.0;
+
+        // PCI-e: только NVML отдаёт скорость обмена и ширину линии. На AMD/Intel
+        // честно оставляем «нет данных», а не выдумываем число.
+        if (reading.hasPcie && reading.pcieLinkWidth > 0) {
+            double laneMegabytes = 0.0;
+            switch (std::min(reading.pcieLinkGeneration, 5u)) {
+            case 1:
+                laneMegabytes = 250.0;
+                break;
+            case 2:
+                laneMegabytes = 500.0;
+                break;
+            case 3:
+                laneMegabytes = 985.0;
+                break;
+            case 4:
+                laneMegabytes = 1969.0;
+                break;
+            case 5:
+                laneMegabytes = 3938.0;
+                break;
+            default:
+                laneMegabytes = 0.0;
+                break;
+            }
+            const double capacity = laneMegabytes * static_cast<double>(reading.pcieLinkWidth);
+            const double used = (reading.pcieTxKilobytesPerSecond + reading.pcieRxKilobytesPerSecond) / 1024.0;
+            if (capacity > 0.0) {
+                snapshot.pcieLoadPercent = std::clamp(used / capacity * 100.0, 0.0, 100.0);
+                m_availability.pcie = true;
+            }
+        }
+        // Если PCI-e не читается, но кодеки NVML отвечают — берём их как более точные.
+        if (m_availability.gpuMedia) {
+            snapshot.gpuEncodePercent = std::max(snapshot.gpuEncodePercent,
+                std::clamp(reading.encoderPercent, 0.0, 100.0));
+            snapshot.gpuDecodePercent = std::max(snapshot.gpuDecodePercent,
+                std::clamp(reading.decoderPercent, 0.0, 100.0));
+        } else if (reading.encoderPercent > 0.0 || reading.decoderPercent > 0.0) {
+            snapshot.gpuEncodePercent = std::clamp(reading.encoderPercent, 0.0, 100.0);
+            snapshot.gpuDecodePercent = std::clamp(reading.decoderPercent, 0.0, 100.0);
+            m_availability.gpuMedia = true;
+        }
     }
 }
 

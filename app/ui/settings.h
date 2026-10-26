@@ -26,6 +26,8 @@ struct CaptureSettings {
     // 60 Гц — самый частый случай: на 120-герцовом профиле бюджет кадра считался бы
     // проваленным для любой игры, которая честно держит 60 кадров.
     int targetHz = 60;
+    // Авто: цель кадра берётся из герцовки монитора, определённой при запуске.
+    bool targetAuto = true;
 };
 
 struct OverlaySettings {
@@ -51,6 +53,34 @@ struct OverlaySettings {
     bool fontItalic = false;
     // 0 — без обводки, 1…3 — толщина в пикселях.
     int textOutline = 0;
+    // Размер именно шрифта: плашка может остаться компактной, а цифры — крупнее.
+    int textScalePercent = 100;
+    // -1 — значение из пресета. Иначе подложка получает свою прозрачность (0 — без фона).
+    int backgroundOpacityPercent = -1;
+    // -1 — отступы и межстрочный интервал из пресета, иначе ручные (px).
+    int paddingPx = -1;
+    int rowGapPx = -1;
+    // -1 — цвет из пресета, 0…5 — цвет палитры для значений и для подписей.
+    int valueColor = -1;
+    int labelColor = -1;
+    // Цвет каждой строки отдельно: в пресетах Fpsmon строки различаются цветом.
+    std::array<int, kLabelCount> rowColors{ -1, -1, -1, -1, -1 };
+    // -1 — акцент из пресета, иначе цвет палитры для линий, рамки и заголовков.
+    int accentColor = -1;
+    // -1 — толщина из пресета, 0 — без рамки, 1…3 — толщина в пикселях.
+    int borderWidth = -1;
+    // Сила тени и межбуквенный интервал — в процентах от пресета.
+    int shadowStrength = 100;
+    int letterSpacing = 100;
+    // -1 — как в пресете, 0 — обычные подписи, 1 — заглавными.
+    int uppercaseMode = -1;
+    // -1 — как в пресете, 0 — без разделителей строк, 1 — с разделителями.
+    int separatorsMode = -1;
+    // -1 — как в пресете, иначе 0…2 знака после запятой у кадров в секунду.
+    int fpsDecimals = -1;
+    // Сквозной клик: окно оверлея полностью пропускает мышь в игру. Выключается хоткеем,
+    // когда оверлей нужно перетащить.
+    bool clickThrough = false;
     // Состав: какие строки вообще показывать (fps, cpu, gpu, ram, vram).
     std::array<bool, kLabelCount> visible{ true, true, true, true, true };
     std::array<std::string, kLabelCount> labels{ "FPS", "CPU", "GPU", "RAM", "VRAM" };
@@ -60,7 +90,9 @@ struct UiSettings {
     Accent accent = Accent::Mint;
     bool compactDensity = false;
     bool animate = true;
-    bool closeToTray = true;
+    // По умолчанию приложение просто закрывается: неожиданный уход в трей пугает,
+    // и человек ищет окно, которого больше нет.
+    bool closeToTray = false;
 };
 
 struct GpuSelection {
@@ -75,6 +107,8 @@ struct HotkeySettings {
     unsigned int overlay = 0x79;
     unsigned int position = 0x7A;
     unsigned int window = 0x7B;
+    // F9 переключает сквозной клик по оверлею.
+    unsigned int clickThrough = 0x78;
 };
 
 struct Settings {

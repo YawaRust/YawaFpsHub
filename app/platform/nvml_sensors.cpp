@@ -19,6 +19,9 @@ constexpr int kNvmlTemperatureGpu = 0;
 constexpr int kNvmlClockGraphics = 0;
 constexpr int kNvmlClockMemory = 2;
 constexpr unsigned kBoundedBufferSize = 96;
+// nvmlPcieUtilCounter_t: 0 — переданные байты, 1 — принятые.
+constexpr int kNvmlPcieTxBytes = 0;
+constexpr int kNvmlPcieRxBytes = 1;
 
 struct NvmlApi {
     HMODULE module = nullptr;
@@ -33,6 +36,11 @@ struct NvmlApi {
     NvmlReturn (*deviceGetPowerUsage)(NvmlDevice, unsigned*) = nullptr;
     NvmlReturn (*deviceGetFanSpeed)(NvmlDevice, unsigned*) = nullptr;
     NvmlReturn (*deviceGetFanSpeedRpm)(NvmlDevice, unsigned*) = nullptr;
+    NvmlReturn (*deviceGetEncoderUtilization)(NvmlDevice, unsigned*, unsigned*) = nullptr;
+    NvmlReturn (*deviceGetDecoderUtilization)(NvmlDevice, unsigned*, unsigned*) = nullptr;
+    NvmlReturn (*deviceGetPcieThroughput)(NvmlDevice, int, unsigned*) = nullptr;
+    NvmlReturn (*deviceGetCurrPcieLinkWidth)(NvmlDevice, unsigned*) = nullptr;
+    NvmlReturn (*deviceGetCurrPcieLinkGeneration)(NvmlDevice, unsigned*) = nullptr;
 };
 
 std::wstring lowercase(std::string_view text)
@@ -119,6 +127,12 @@ bool NvmlSensors::initialize(std::string& error)
 
     // Версия RPM-вентилятора появилась в NVML 12: на старых драйверах её просто нет.
     loadSymbol(module, "nvmlDeviceGetFanSpeedRPM", m_impl->api.deviceGetFanSpeedRpm);
+    // Всё ниже есть только у относительно новых драйверов: символы необязательные.
+    loadSymbol(module, "nvmlDeviceGetEncoderUtilization", m_impl->api.deviceGetEncoderUtilization);
+    loadSymbol(module, "nvmlDeviceGetDecoderUtilization", m_impl->api.deviceGetDecoderUtilization);
+    loadSymbol(module, "nvmlDeviceGetPcieThroughput", m_impl->api.deviceGetPcieThroughput);
+    loadSymbol(module, "nvmlDeviceGetCurrPcieLinkWidth", m_impl->api.deviceGetCurrPcieLinkWidth);
+    loadSymbol(module, "nvmlDeviceGetCurrPcieLinkGeneration", m_impl->api.deviceGetCurrPcieLinkGeneration);
 
     if (!ok) {
         error = "nvml.dll загружен, но не совпадает по версии API";
@@ -212,6 +226,37 @@ GpuSensorReading NvmlSensors::read() const
     if (api.deviceGetPowerUsage(m_impl->device, &value) == kNvmlSuccess) {
         reading.powerWatts = static_cast<double>(value) / 1000.0;
     }
+    // Занятость медиа-движков и пропускная способность PCI-e.
+    unsigned samplingPeriod = 0;
+    if (api.deviceGetEncoderUtilization != nullptr
+        && api.deviceGetEncoderUtilization(m_impl->device, &value, &samplingPeriod) == kNvmlSuccess) {
+        reading.encoderPercent = static_cast<double>(value);
+    }
+    if (api.deviceGetDecoderUtilization != nullptr
+        && api.deviceGetDecoderUtilization(m_impl->device, &value, &samplingPeriod) == kNvmlSuccess) {
+        reading.decoderPercent = static_cast<double>(value);
+    }
+    if (api.deviceGetPcieThroughput != nullptr) {
+        unsigned throughput = 0;
+        if (api.deviceGetPcieThroughput(m_impl->device, kNvmlPcieTxBytes, &throughput) == kNvmlSuccess) {
+            reading.pcieTxKilobytesPerSecond = static_cast<double>(throughput);
+            reading.hasPcie = true;
+        }
+        if (api.deviceGetPcieThroughput(m_impl->device, kNvmlPcieRxBytes, &throughput) == kNvmlSuccess) {
+            reading.pcieRxKilobytesPerSecond = static_cast<double>(throughput);
+            reading.hasPcie = true;
+        }
+    }
+    unsigned link = 0;
+    if (api.deviceGetCurrPcieLinkWidth != nullptr
+        && api.deviceGetCurrPcieLinkWidth(m_impl->device, &link) == kNvmlSuccess) {
+        reading.pcieLinkWidth = link;
+    }
+    if (api.deviceGetCurrPcieLinkGeneration != nullptr
+        && api.deviceGetCurrPcieLinkGeneration(m_impl->device, &link) == kNvmlSuccess) {
+        reading.pcieLinkGeneration = link;
+    }
+
     if (api.deviceGetFanSpeedRpm != nullptr
         && api.deviceGetFanSpeedRpm(m_impl->device, &value) == kNvmlSuccess) {
         reading.fanRpm = value;

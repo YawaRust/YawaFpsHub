@@ -20,6 +20,66 @@ void testDefaultsRoundTrip()
     CHECK(parsed.overlay.style == OverlayStyle::Frosted);
     CHECK(parsed.overlay.position == OverlayPosition::TopLeft);
     CHECK(labelValue(parsed.overlay, LabelField::Gpu) == "GPU");
+    // Сворачивание в трей по умолчанию выключено: закрытие просто закрывает окно.
+    CHECK(!parsed.ui.closeToTray);
+    CHECK(!defaultSettings().ui.closeToTray);
+}
+
+void testOverlayCustomization()
+{
+    const std::string text =
+        "[overlay]\n"
+        "accent_color = 3\n"
+        "row_color_fps = 1\n"
+        "row_color_gpu = 5\n"
+        "border_width = 2\n"
+        "shadow_strength = 40\n"
+        "letter_spacing = 150\n"
+        "uppercase = 1\n"
+        "separators = 0\n"
+        "fps_decimals = 2\n";
+
+    Settings settings;
+    std::string error;
+    CHECK(parseSettings(text, settings, error));
+    CHECK(settings.overlay.accentColor == 3);
+    CHECK(settings.overlay.rowColors[0] == 1);
+    CHECK(settings.overlay.rowColors[2] == 5);
+    // Незаданные строки остаются «как в стиле».
+    CHECK(settings.overlay.rowColors[1] == -1);
+    CHECK(settings.overlay.borderWidth == 2);
+    CHECK(settings.overlay.shadowStrength == 40);
+    CHECK(settings.overlay.letterSpacing == 150);
+    CHECK(settings.overlay.uppercaseMode == 1);
+    CHECK(settings.overlay.separatorsMode == 0);
+    CHECK(settings.overlay.fpsDecimals == 2);
+
+    Settings copy;
+    CHECK(parseSettings(serializeSettings(settings), copy, error));
+    CHECK(copy.overlay.accentColor == 3);
+    CHECK(copy.overlay.rowColors[0] == 1);
+    CHECK(copy.overlay.rowColors[2] == 5);
+    CHECK(copy.overlay.borderWidth == 2);
+    CHECK(copy.overlay.fpsDecimals == 2);
+
+    // Смена пресета возвращает ручные подстройки к значениям стиля.
+    applyStyleDefaults(copy.overlay, OverlayStyle::Rtss);
+    CHECK(copy.overlay.accentColor == -1);
+    CHECK(copy.overlay.rowColors[0] == -1);
+    CHECK(copy.overlay.borderWidth == -1);
+    CHECK(copy.overlay.uppercaseMode == -1);
+}
+
+void testOverlayCustomizationClamps()
+{
+    Settings settings;
+    std::string error;
+    CHECK(parseSettings("[overlay]\nborder_width = 9\nshadow_strength = 500\nletter_spacing = -40\nfps_decimals = 7\n",
+        settings, error));
+    CHECK(settings.overlay.borderWidth == 3);
+    CHECK(settings.overlay.shadowStrength == 100);
+    CHECK(settings.overlay.letterSpacing == 0);
+    CHECK(settings.overlay.fpsDecimals == 2);
 }
 
 void testParsesValues()
@@ -152,6 +212,8 @@ void testCrlfFile()
 void runSettingsTests()
 {
     testDefaultsRoundTrip();
+    testOverlayCustomization();
+    testOverlayCustomizationClamps();
     testParsesValues();
     testClampsOutOfRange();
     testUnknownAndBrokenLines();

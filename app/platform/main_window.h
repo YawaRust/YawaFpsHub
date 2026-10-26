@@ -81,12 +81,15 @@ private:
     // Единая точка включения/выключения оверлея: логирует причину, если показать не удалось.
     void toggleOverlay();
     void selectGpu(std::size_t index);
+    // Служебный ли процесс (dwm.exe, explorer.exe и т.п.). Результат кэшируется:
+    // опрос идёт из потока сборщика, а открывать процесс на каждый кадр дорого.
+    bool isSystemProcessCached(std::uint32_t processId);
 
     Rect contentArea() const;
     // Экран рисуется целиком в «демо-высоте», а окно показывает его часть со сдвигом.
     float contentDesignHeight() const;
     void scrollContent(float delta);
-    void drawScrollBar(const Rect& viewport);
+    void drawScrollBar(const Rect& viewport, std::vector<UiHit>& hits);
     std::vector<UiHit> buildHits();
     void paintView();
 
@@ -102,6 +105,12 @@ private:
     AppModel m_model;
     Theme m_theme = makeTheme(Accent::Mint);
     std::vector<UiHit> m_hits;
+    std::vector<std::pair<std::uint32_t, bool>> m_systemProcessCache;
+    // Полоса прокрутки тянется мышью: запоминаем точку захвата бегунка.
+    Rect m_scrollTrack;
+    float m_scrollGrabDy = 0.0f;
+    bool m_draggingScroll = false;
+    bool m_draggingSensors = false;
     ActionKind m_dragAction = ActionKind::None;
     Rect m_dragRect;
     float m_dragStartX = 0.0f;

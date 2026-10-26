@@ -1,10 +1,12 @@
 // yawa-probe: диагностика датчиков на конкретной машине.
 // Показывает, какие источники поднялись, и печатает те же значения, что пойдут в интерфейс.
 
+#include "metrics/bottleneck.h"
 #include "metrics/frame_tracker.h"
 #include "metrics/system_sampler.h"
 #include "metrics/units.h"
 #include "platform/etw_frames.h"
+#include "platform/hardware_info_win.h"
 #include "platform/log.h"
 #include "platform/sensors_win.h"
 #include "platform/win_util.h"
@@ -68,6 +70,48 @@ std::string executableDirectory()
     return yawa::narrow(slash == std::wstring::npos ? full : full.substr(0, slash));
 }
 
+// Паспорт машины и вердикт по узкому месту: на разных GPU и CPU нужно видеть, что
+// определилось и что приложение собралось показывать.
+void printMachine(const yawa::SystemSensors& sensors, const yawa::MetricStore& store, double targetFps)
+{
+    yawa::HardwareIdentity info;
+    std::string error;
+    if (!yawa::collectHardwareInfo(info, sensors.gpus(), error)) {
+        std::printf("паспорт железа: %s\n\n", error.c_str());
+        return;
+    }
+
+    std::printf("железо\n");
+    std::printf("  ОС: %s, сборка %s (%s), %s\n", info.os.product.c_str(), info.os.build.c_str(),
+        info.os.featureVersion.empty() ? "версия не указана" : info.os.featureVersion.c_str(),
+        info.os.architecture.c_str());
+    std::printf("  CPU: %s — ядер %u, потоков %u, %.0f МГц, L3 %u МБ\n", info.cpu.name.c_str(),
+        info.cpu.physicalCores, info.cpu.logicalProcessors, info.cpu.baseMhz, info.cpu.l3CacheMb);
+    for (const yawa::GpuIdentity& gpu : info.gpus) {
+        std::printf("  GPU: %s%s — %.0f МБ, драйвер %s, индекс %.0f\n", gpu.name.c_str(),
+            gpu.discrete ? "" : " (встроенная)", gpu.dedicatedMb,
+            gpu.driverVersion.empty() ? "нет данных" : gpu.driverVersion.c_str(),
+            yawa::gpuPerfIndex(gpu.name, gpu.dedicatedMb));
+    }
+    std::printf("  RAM: %s\n", yawa::describeMemory(info.memory).c_str());
+    const double tck = info.memory.cycleTimeNs();
+    std::printf("       частота %.0f МТ/с (паспорт %.0f), tCK %.3f нс, профиль %s\n", info.memory.configuredMt,
+        info.memory.ratedMt, tck, info.memory.profileEnabled ? "включён" : "не включён");
+    std::printf("       тайминги SPD (tCL-tRCD-tRP-tRAS) без драйвера недоступны — показываем частоты\n");
+    for (const yawa::DisplayIdentity& display : info.displays) {
+        std::printf("  экран: %s%s\n", yawa::describeDisplay(display).c_str(), display.primary ? " (основной)" : "");
+    }
+
+    const yawa::BottleneckResult balance
+        = yawa::analyzeBottleneck(info, yawa::loadFromStore(store, targetFps));
+    std::printf("  баланс: %s — %u%% (%s)\n", balance.headline.c_str(), balance.percent,
+        balance.measured ? "по живым замерам" : "прогноз по индексу");
+    for (const yawa::BottleneckAdvice& advice : balance.advice) {
+        std::printf("    · %s — %s\n", advice.title.c_str(), advice.text.c_str());
+    }
+    std::printf("\n");
+}
+
 void printHeader(const yawa::SystemSensors& sensors)
 {
     const yawa::SensorAvailability& state = sensors.availability();
@@ -79,6 +123,8 @@ void printHeader(const yawa::SystemSensors& sensors)
     std::printf("  Память %s, диск %s, сеть %s\n", mark(state.memory), mark(state.disk), mark(state.network));
     std::printf("  GPU: нагрузка %s, видеопамять %s, температура %s, питание %s\n", mark(state.gpuLoad),
         mark(state.gpuMemory), mark(state.gpuTemperature), mark(state.gpuPower));
+    std::printf("  Медиа-движки %s, PCI-e %s, файл подкачки %s\n", mark(state.gpuMedia), mark(state.pcie),
+        mark(state.pageFile));
 
     const yawa::GpuRegistry& gpus = sensors.gpus();
     for (std::size_t index = 0; index < gpus.count(); ++index) {
@@ -117,6 +163,14 @@ std::string formatLine(const yawa::MetricStore& store)
     line += " | FPS " + value(yawa::MetricId::Fps) + " (1% " + value(yawa::MetricId::Low1Fps) + ")";
     line += " | Диск " + value(yawa::MetricId::DiskRead) + " / " + value(yawa::MetricId::DiskWrite);
     line += " | Сеть " + value(yawa::MetricId::NetDown) + " / " + value(yawa::MetricId::NetUp);
+    if (store.hasValue(yawa::MetricId::GpuEncode) || store.hasValue(yawa::MetricId::GpuDecode)) {
+        line += " | Кодек " + value(yawa::MetricId::GpuEncode) + " / " + value(yawa::MetricId::GpuDecode);
+    }
+    if (store.hasValue(yawa::MetricId::PcieLoad)) {
+        line += " | PCI-e " + value(yawa::MetricId::PcieLoad);
+    }
+    line += " | ОЗУ " + value(yawa::MetricId::RamLoad) + ", подкачка " + value(yawa::MetricId::PageFile) + " / "
+        + value(yawa::MetricId::PageFileTotal) + " (" + value(yawa::MetricId::PageFileLoad) + ")";
     return line;
 }
 
@@ -184,6 +238,8 @@ int wmain(int argc, wchar_t** argv)
             break;
         }
     }
+
+    printMachine(sensors, store, kDefaultTargetFps);
 
     std::printf("\nкадров из ETW: %llu, отклонено событий: %llu, потеряно сэмплов: %llu, потоков: %zu\n",
         static_cast<unsigned long long>(etw.eventsReceived()),

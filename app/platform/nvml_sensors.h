@@ -13,6 +13,16 @@ struct GpuSensorReading {
     double memoryClockMhz = 0.0;
     double powerWatts = 0.0;
     std::uint32_t fanRpm = 0;
+    // Медиа-движки: сколько процентов времени заняты кодер и декодер.
+    double encoderPercent = 0.0;
+    double decoderPercent = 0.0;
+    // Шина PCI-e: скорость обмена и текущая ширина/поколение линии. Нужны, чтобы
+    // посчитать загрузку PCI-e в процентах от теоретической пропускной способности.
+    double pcieTxKilobytesPerSecond = 0.0;
+    double pcieRxKilobytesPerSecond = 0.0;
+    unsigned pcieLinkWidth = 0;
+    unsigned pcieLinkGeneration = 0;
+    bool hasPcie = false;
 };
 
 // Температуры, частоты и питание есть только у драйвера вендора: NVML ставится вместе

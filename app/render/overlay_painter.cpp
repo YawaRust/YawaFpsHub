@@ -144,6 +144,9 @@ struct OverlayChrome {
     bool shadow = true;
     // -1 — радиус из пресета.
     float radius = -1.0f;
+    // Множитель толщины рамки и силы тени: 1 — как в пресете.
+    float borderWidth = 1.0f;
+    float shadowStrength = 1.0f;
 };
 
 class Painter {
@@ -163,18 +166,22 @@ public:
     // Подложка оверлея: уважает переключатель «Фон» и пользовательский радиус углов.
     void plate(const Rect& rect, float radius, const Color& color, float alphaScale = 1.0f)
     {
-        if (!m_chrome.background) {
+        if (!m_chrome.background || m_backgroundOpacity <= 0.0f) {
             return;
         }
-        fillRound(rect, chromeRadius(radius), color, alphaScale);
+        fillRound(rect, chromeRadius(radius), color, alphaScale * m_backgroundOpacity);
     }
+
+    // Прозрачность самой подложки: общая прозрачность окна и прозрачность плашки
+    // настраиваются отдельно, иначе «Фон» нельзя сделать почти незаметным.
+    void setBackgroundOpacity(float value) { m_backgroundOpacity = std::clamp(value, 0.0f, 1.0f); }
 
     void outline(const Rect& rect, float radius, const Color& color, float thickness, float alphaScale = 1.0f)
     {
         if (!m_chrome.border) {
             return;
         }
-        strokeRound(rect, chromeRadius(radius), color, thickness, alphaScale);
+        strokeRound(rect, chromeRadius(radius), color, thickness * m_chrome.borderWidth, alphaScale);
     }
 
     void dropShadow(const Rect& rect, float radius, const Color& color, float alphaScale)
@@ -182,7 +189,7 @@ public:
         if (!m_chrome.shadow) {
             return;
         }
-        fillRound(rect, chromeRadius(radius), color, alphaScale);
+        fillRound(rect, chromeRadius(radius), color, alphaScale * m_chrome.shadowStrength);
     }
 
     float textSize() const { return m_scale; }
@@ -330,6 +337,7 @@ private:
     float m_opacity = 1.0f;
     OverlayChrome m_chrome;
     float m_outline = 0.0f;
+    float m_backgroundOpacity = 1.0f;
 };
 
 // Полный визуальный набор стиля: палитра, форма, типографика. Раньше стили отличались
@@ -972,11 +980,21 @@ OverlaySwatch overlaySwatch(OverlayStyle style)
     return swatch;
 }
 
+// Палитра вынесена из анонимного namespace: она объявлена в заголовке и нужна редактору.
+std::array<Color, kOverlayColorCount> overlayColorPalette()
+{
+    return { styleColor(0xFFFFFFu), styleColor(0x5EF29Bu), styleColor(0x6AA8FFu), styleColor(0xB47BFFu),
+        styleColor(0xFFB347u), styleColor(0xFF6F6Fu) };
+}
+
 OverlayText makeOverlayText(const OverlaySettings& settings, const OverlayValues& values)
 {
     OverlayText text;
-    text.fps = formatNumber(values.fps, 0, std::wstring_view());
-    text.low1 = formatNumber(values.low1, 0, std::wstring_view());
+    // Знаки после запятой у кадров: 0 — как в большинстве мониторов, 1–2 — для точности.
+    const int fpsDecimals = std::clamp(settings.fpsDecimals, -1, 2);
+    const int fpsDigits = fpsDecimals < 0 ? 0 : fpsDecimals;
+    text.fps = formatNumber(values.fps, fpsDigits, std::wstring_view());
+    text.low1 = formatNumber(values.low1, fpsDigits, std::wstring_view());
     text.cpu = formatNumber(values.cpuLoad, 0, L"%");
     text.cpuTemp = temperatureText(values.cpuTemp, values.hasCpuTemp);
     text.gpu = formatNumber(values.gpuLoad, 0, L"%");
@@ -1003,15 +1021,55 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
     }
 
     const float opacity = static_cast<float>(std::clamp(settings.opacityPercent, 0, 100)) / 100.0f;
-    const StyleLook look = lookFor(settings.style);
+    const StyleLook preset = lookFor(settings.style);
+    StyleLook look = preset;
+    // Ручные подстройки: отступы, интервал, цвета и типографика. -1 — как в пресете.
+    if (settings.paddingPx >= 0) {
+        look.padding = static_cast<float>(settings.paddingPx);
+    }
+    if (settings.rowGapPx >= 0) {
+        look.rowGap = static_cast<float>(settings.rowGapPx);
+    }
+    const std::array<Color, kOverlayColorCount> palette = overlayColorPalette();
+    const auto pickColor = [&palette](int index) { return palette[static_cast<std::size_t>(index)]; };
+    if (settings.valueColor >= 0 && settings.valueColor < kOverlayColorCount) {
+        look.value = pickColor(settings.valueColor);
+    }
+    if (settings.labelColor >= 0 && settings.labelColor < kOverlayColorCount) {
+        look.label = pickColor(settings.labelColor);
+    }
+    if (settings.accentColor >= 0 && settings.accentColor < kOverlayColorCount) {
+        look.accent = pickColor(settings.accentColor);
+    }
+    // Цвет каждой строки: в демо и в пресетах строки раскрашены по-разному.
+    for (std::size_t index = 0; index < kLabelCount; ++index) {
+        const int color = settings.rowColors[index];
+        if (color >= 0 && color < kOverlayColorCount) {
+            look.palette[index] = pickColor(color);
+        }
+    }
+    // Регистр и разделители: -1 — из стиля, иначе явное значение пользователя.
+    if (settings.uppercaseMode >= 0) {
+        look.uppercase = settings.uppercaseMode == 1;
+    }
+    if (settings.separatorsMode >= 0) {
+        look.separators = settings.separatorsMode == 1;
+    }
+    look.letterSpacing *= static_cast<float>(std::clamp(settings.letterSpacing, 0, 200)) / 100.0f;
+    // Размер шрифта отдельно от масштаба плашки: 85…130 %.
+    const float textFactor = static_cast<float>(std::clamp(settings.textScalePercent, 85, 130)) / 100.0f;
+    const float backgroundOpacity = settings.backgroundOpacityPercent >= 0
+        ? static_cast<float>(std::clamp(settings.backgroundOpacityPercent, 0, 100)) / 100.0f
+        : 1.0f;
 
     // Шрифты масштабируются вместе с рамкой, а семейство, начертание и обводка берутся
     // из редактора текста: иначе «Масштаб» растягивал только подложку.
     std::array<IDWriteTextFormat*, 4> owned{};
     OverlayFormats scaled = formats;
     const bool customFont = settings.fontFamily != 0 || settings.fontBold || settings.fontItalic;
-    if (formats.factory != nullptr && (customFont || (scale > 0.0f && (scale < 0.999f || scale > 1.001f)))) {
-        const float factor = scale > 0.0f ? scale : 1.0f;
+    const float textScale = (scale > 0.0f ? scale : 1.0f) * textFactor;
+    if (formats.factory != nullptr && (customFont || textScale < 0.999f || textScale > 1.001f)) {
+        const float factor = textScale;
         owned = { styledFormat(formats.factory, formats.key, factor, settings),
             styledFormat(formats.factory, formats.value, factor, settings),
             styledFormat(formats.factory, formats.smallText, factor, settings),
@@ -1034,10 +1092,30 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
     chrome.border = settings.showBorder;
     chrome.shadow = settings.showShadow;
     chrome.radius = settings.cornerRadius >= 0 ? static_cast<float>(settings.cornerRadius) : -1.0f;
+    chrome.borderWidth = settings.borderWidth >= 0 ? static_cast<float>(settings.borderWidth) : 1.0f;
+    chrome.shadowStrength = static_cast<float>(std::clamp(settings.shadowStrength, 0, 100)) / 100.0f;
 
     Painter measurer(target, theme, scaled, scale, opacity, chrome, settings.textOutline);
+    measurer.setBackgroundOpacity(backgroundOpacity);
     const float lineWidth = measurer.measure(inlineText(text), look.mono ? TextRole::Mono : TextRole::Small);
-    const StyleSpec spec = styleSpec(settings, text, lineWidth);
+    StyleSpec spec = styleSpec(settings, text, lineWidth);
+    // Плашка растёт вместе с отступами, интервалом строк и размером шрифта:
+    // иначе содержимое вылезало бы за её край.
+    if (settings.layout == OverlayLayout::Plates) {
+        const float rows = static_cast<float>(std::max<std::size_t>(visibleRows(text), 1) - 1);
+        if (settings.paddingPx >= 0) {
+            const float delta = look.padding - preset.padding;
+            spec.width += delta * 2.0f;
+            spec.height += delta * 2.0f;
+        }
+        if (settings.rowGapPx >= 0) {
+            spec.height += (look.rowGap - preset.rowGap) * rows;
+        }
+        if (textFactor > 1.0f) {
+            spec.width *= 0.72f + 0.28f * textFactor;
+            spec.height *= 0.82f + 0.18f * textFactor;
+        }
+    }
     const float width = spec.width * scale;
     const float height = spec.height * scale;
 
@@ -1059,6 +1137,7 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
 
     const Rect frame{ left, top, left + width, top + height };
     Painter painter(target, theme, scaled, scale, opacity, chrome, settings.textOutline);
+    painter.setBackgroundOpacity(backgroundOpacity);
 
     if (settings.layout == OverlayLayout::Line) {
         drawInline(painter, settings, text, frame, look);

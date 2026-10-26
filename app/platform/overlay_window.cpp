@@ -51,15 +51,18 @@ LRESULT CALLBACK OverlayWindow::windowProc(HWND window, UINT message, WPARAM wPa
     }
 
     case WM_NCHITTEST:
-        // Обычно окно прозрачно для мыши и не мешает играть. С зажатым Ctrl оно
-        // принимает клики только над самим оверлеем: так его можно перетащить на месте,
-        // не блокируя остальной экран.
-        if (self != nullptr && (GetKeyState(VK_CONTROL) & 0x8000) != 0) {
-            const int x = GET_X_LPARAM(lParam);
-            const int y = GET_Y_LPARAM(lParam);
+        // Окно прозрачно для мыши везде, кроме самого оверлея: клики по игре проходят,
+        // а оверлей можно взять обычным нажатием левой кнопки и перетащить куда угодно.
+        if (self != nullptr && self->m_settings.clickThrough) {
+            // Сквозной клик: окно не забирает мышь даже над оверлеем, всё уходит в игру.
+            return HTTRANSPARENT;
+        }
+        if (self != nullptr) {
+            POINT point{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+            ScreenToClient(window, &point);
             const D2D1_RECT_F& area = self->m_contentRectD2D;
-            const float fx = static_cast<float>(x);
-            const float fy = static_cast<float>(y);
+            const float fx = static_cast<float>(point.x);
+            const float fy = static_cast<float>(point.y);
             if (area.right > area.left && fx >= area.left - 4.0f && fx <= area.right + 4.0f
                 && fy >= area.top - 4.0f && fy <= area.bottom + 4.0f) {
                 return HTCLIENT;
@@ -68,7 +71,7 @@ LRESULT CALLBACK OverlayWindow::windowProc(HWND window, UINT message, WPARAM wPa
         return HTTRANSPARENT;
 
     case WM_SETCURSOR:
-        if (self != nullptr) {
+        if (self != nullptr && !self->m_settings.clickThrough) {
             POINT cursor{};
             GetCursorPos(&cursor);
             ScreenToClient(window, &cursor);
@@ -77,7 +80,7 @@ LRESULT CALLBACK OverlayWindow::windowProc(HWND window, UINT message, WPARAM wPa
                 && static_cast<float>(cursor.x) <= area.right + 4.0f
                 && static_cast<float>(cursor.y) >= area.top - 4.0f
                 && static_cast<float>(cursor.y) <= area.bottom + 4.0f;
-            if ((GetKeyState(VK_CONTROL) & 0x8000) != 0 && overContent) {
+            if (overContent) {
                 SetCursor(LoadCursorW(nullptr, IDC_SIZEALL));
                 return TRUE;
             }
@@ -89,6 +92,15 @@ LRESULT CALLBACK OverlayWindow::windowProc(HWND window, UINT message, WPARAM wPa
             self->beginDrag(GET_X_LPARAM(lParam) + static_cast<int>(self->m_monitorRect.left),
                 GET_Y_LPARAM(lParam) + static_cast<int>(self->m_monitorRect.top));
             SetCapture(window);
+            return 0;
+        }
+        break;
+
+    case WM_RBUTTONUP:
+        // Вернуться в приложение можно прямо с оверлея, не разыскивая иконку в трее.
+        if (self != nullptr && self->m_owner != nullptr) {
+            ShowWindow(self->m_owner, SW_RESTORE);
+            SetForegroundWindow(self->m_owner);
             return 0;
         }
         break;
@@ -143,7 +155,7 @@ bool OverlayWindow::create(HINSTANCE instance, std::string& error)
     windowClass.lpszClassName = kClassName;
     RegisterClassExW(&windowClass);
 
-    m_monitorRect = monitorRect();
+    m_monitorRect = screenRect();
     const int screenWidth = m_monitorRect.right - m_monitorRect.left;
     const int screenHeight = m_monitorRect.bottom - m_monitorRect.top;
 
@@ -179,20 +191,19 @@ bool OverlayWindow::create(HINSTANCE instance, std::string& error)
     return true;
 }
 
-RECT OverlayWindow::monitorRect() const
+RECT OverlayWindow::screenRect() const
 {
-    POINT cursor{};
-    GetCursorPos(&cursor);
-    const HMONITOR monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTOPRIMARY);
-
-    MONITORINFO info{};
-    info.cbSize = sizeof(info);
-    if (monitor != nullptr && GetMonitorInfoW(monitor, &info) != FALSE) {
-        return info.rcMonitor;
+    // Виртуальный экран: оверлей занимает все мониторы сразу, поэтому его можно
+    // перетащить на соседний экран, а не только в пределах одного.
+    RECT rect{};
+    rect.left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    rect.top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    rect.right = rect.left + GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    rect.bottom = rect.top + GetSystemMetrics(SM_CYVIRTUALSCREEN);
+    if (rect.right <= rect.left || rect.bottom <= rect.top) {
+        rect = RECT{ 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN) };
     }
-
-    RECT fallback{ 0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN) };
-    return fallback;
+    return rect;
 }
 
 void OverlayWindow::destroy()
@@ -243,13 +254,25 @@ void OverlayWindow::setSettings(const OverlaySettings& settings)
     // иначе анимировать было бы нечего. Сдвиг и подписи не анимируем — при
     // перетаскивании setSettings приходит на каждое движение мыши.
     const OverlaySettings previous = animatedSettings();
+    // Анимируем только «крупные» изменения: стиль, геометрию и прозрачность. Цвета,
+    // отступы, шрифт и подписи применяются сразу — иначе каждый пиксель ползунка
+    // перезапускал анимацию, и оверлей дрожал вместо плавного изменения.
+    const bool styleChanged = settings.style != m_settings.style;
+    const bool chromeChanged = settings.layout != m_settings.layout
+        || settings.position != m_settings.position || settings.showBackground != m_settings.showBackground
+        || settings.showBorder != m_settings.showBorder || settings.showShadow != m_settings.showShadow
+        || settings.cornerRadius != m_settings.cornerRadius
+        || settings.scalePercent != m_settings.scalePercent
+        || settings.opacityPercent != m_settings.opacityPercent
+        || settings.backgroundOpacityPercent != m_settings.backgroundOpacityPercent;
+    const bool movedOnly = settings.offsetX != m_settings.offsetX || settings.offsetY != m_settings.offsetY;
     m_settings = settings;
-    const bool movedOnly = settings.offsetX != previous.offsetX || settings.offsetY != previous.offsetY;
-    if (movedOnly) {
+    // Сдвиг и «мелкие» настройки рисуем сразу, без анимации.
+    if (movedOnly || (!styleChanged && !chromeChanged)) {
         repaint();
         return;
     }
-    startAnimation(previous);
+    startAnimation(previous, styleChanged);
     repaint();
 }
 
@@ -294,7 +317,7 @@ void OverlayWindow::endDrag()
     }
 }
 
-void OverlayWindow::startAnimation(const OverlaySettings& from)
+void OverlayWindow::startAnimation(const OverlaySettings& from, bool fadeContent)
 {
     if (!m_visible) {
         m_animProgress = 1.0f;
@@ -309,8 +332,12 @@ void OverlayWindow::startAnimation(const OverlaySettings& from)
     m_animToScale = static_cast<float>(m_settings.scalePercent) / 100.0f;
     m_animToOpacity = static_cast<float>(m_settings.opacityPercent) / 100.0f;
     m_animToRadius = static_cast<float>(m_settings.cornerRadius);
-    m_animProgress = 0.0f;
-    m_fade = 0.0f;
+    // Если анимация уже идёт, продолжаем с середины: значения догоняют ползунок
+    // без рывка и без паузы в четверть секунды.
+    m_animProgress = m_animating ? 0.35f : 0.0f;
+    if (fadeContent) {
+        m_fade = 0.0f;
+    }
     m_animating = true;
     if (m_window != nullptr) {
         SetTimer(m_window, 1, 16, nullptr);
@@ -377,7 +404,7 @@ bool OverlayWindow::show(std::string* error)
     }
 
     // Монитор пересчитываем на каждом показе: пользователь мог перетащить игру на другой.
-    m_monitorRect = monitorRect();
+    m_monitorRect = screenRect();
     const int width = m_monitorRect.right - m_monitorRect.left;
     const int height = m_monitorRect.bottom - m_monitorRect.top;
 
@@ -534,7 +561,7 @@ bool OverlayWindow::render()
     }
 
     // Разрешение или монитор могли смениться, пока оверлей висел поверх игры.
-    const RECT currentMonitor = monitorRect();
+    const RECT currentMonitor = screenRect();
     if (currentMonitor.left != m_monitorRect.left || currentMonitor.top != m_monitorRect.top
         || currentMonitor.right != m_monitorRect.right || currentMonitor.bottom != m_monitorRect.bottom) {
         m_monitorRect = currentMonitor;
@@ -580,8 +607,8 @@ bool OverlayWindow::capturePng(const std::wstring& path, std::string& error)
         return false;
     }
 
-    const UINT screenWidth = static_cast<UINT>(GetSystemMetrics(SM_CXSCREEN));
-    const UINT screenHeight = static_cast<UINT>(GetSystemMetrics(SM_CYSCREEN));
+    const UINT screenWidth = static_cast<UINT>(m_monitorRect.right - m_monitorRect.left);
+    const UINT screenHeight = static_cast<UINT>(m_monitorRect.bottom - m_monitorRect.top);
     if (m_target == nullptr && !ensureRenderTarget(screenWidth, screenHeight)) {
         error = "не удалось подготовить поверхность оверлея";
         return false;

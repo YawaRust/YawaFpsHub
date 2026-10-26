@@ -45,6 +45,8 @@ public:
     // Перетаскивание прямо по оверлею: Ctrl + левая кнопка мыши. Приложение получает
     // новые смещения и сохраняет их в ini (finished == true — отпустили кнопку).
     void setMoveHandler(std::function<void(int offsetX, int offsetY, bool finished)> handler);
+    // Окно приложения: правый клик по оверлею показывает его, чтобы не искать в трее.
+    void setOwnerWindow(HWND owner) { m_owner = owner; }
 
     // Рисует текущее содержимое заново и сохраняет его в PNG. Нужно для скриншотов
     // в CI: layered-окно обычным PrintWindow не снимается.
@@ -54,8 +56,9 @@ private:
     static LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
     bool ensureRenderTarget(UINT width, UINT height);
     bool render();
-    // Монитор под курсором: оверлей должен появляться там, где игра, а не только на основном.
-    RECT monitorRect() const;
+    // Весь рабочий стол целиком (все мониторы): так оверлей можно перетащить
+    // на любой экран, а не только в пределах того, где он появился.
+    RECT screenRect() const;
     void drawScene(float scale);
     OverlayValues currentValues() const;
     void drawPlates(float scale);
@@ -66,7 +69,7 @@ private:
     void beginDrag(int screenX, int screenY);
     void updateDrag(int screenX, int screenY);
     void endDrag();
-    void startAnimation(const OverlaySettings& from);
+    void startAnimation(const OverlaySettings& from, bool fadeContent);
     void tickAnimation();
     OverlaySettings animatedSettings() const;
 
@@ -95,6 +98,7 @@ private:
     bool m_visible = false;
     bool m_hasContent = false;
     RECT m_monitorRect{};
+    HWND m_owner = nullptr;
 
     // Перетаскивание и плавные переходы.
     std::function<void(int, int, bool)> m_onMove;

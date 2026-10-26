@@ -37,6 +37,8 @@ struct FrameTimeWindow {
 
     double averageFps() const;
     double currentFps() const;
+    // Средний FPS по последнему окну (обычно 1000 мс): цифра не «дрожит» на каждом кадре.
+    double recentFps(double windowMs) const;
     static double fpsFromMs(double frameTimeMs);
     double droppedShare(double targetMs) const;
 

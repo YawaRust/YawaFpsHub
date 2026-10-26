@@ -1,6 +1,13 @@
 #include "ui/chrome.h"
 #include "ui/layout.h"
 
+#include <string>
+
+// CMake определяет версию из project(... VERSION); вне сборки (тесты ядра) её нет.
+#ifndef YAWA_VERSION_STRING
+#define YAWA_VERSION_STRING "0.0.0"
+#endif
+
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -9,8 +16,10 @@
 namespace yawa {
 namespace {
 
-constexpr std::array<std::wstring_view, 4> kTabNames{ L"Обзор", L"Датчики", L"Оверлей", L"Настройки" };
-constexpr std::array<View, 4> kTabViews{ View::Dashboard, View::Sensors, View::Overlay, View::Settings };
+constexpr std::array<std::wstring_view, 6> kTabNames{ L"Обзор", L"Датчики", L"Баланс", L"Система", L"Оверлей",
+    L"Настройки" };
+constexpr std::array<View, 6> kTabViews{ View::Dashboard, View::Sensors, View::Bottleneck, View::System,
+    View::Overlay, View::Settings };
 
 void drawGridIcon(Renderer& renderer, const Rect& box, const Color& color)
 {
@@ -47,6 +56,36 @@ void drawLayersIcon(Renderer& renderer, const Rect& box, const Color& color)
     renderer.strokeRoundRect(Rect{ left, box.centerY() - 3.0f, left + width, box.centerY() + 3.0f }, 2.0f, color, 1.4f);
     renderer.strokeRoundRect(Rect{ left, box.centerY() + 3.0f, left + width, box.centerY() + 9.0f }, 2.0f, color, 1.4f);
     (void)height;
+}
+
+// «Баланс»: два груза на коромысле — ровно то, что сравнивает калькулятор узкого места.
+void drawBalanceIcon(Renderer& renderer, const Rect& box, const Color& color)
+{
+    const float cx = box.centerX();
+    const float cy = box.centerY();
+    renderer.drawLine(cx - 11.0f, cy - 7.0f, cx + 11.0f, cy - 1.0f, color, 1.4f);
+    renderer.fillCircle(cx, cy - 5.0f, 2.0f, color);
+    for (const float side : { -8.5f, 8.5f }) {
+        const float pivotY = side < 0.0f ? cy - 6.6f : cy - 2.4f;
+        renderer.drawLine(cx + side, pivotY, cx + side, pivotY + 5.0f, color, 1.1f);
+        renderer.strokeEllipse(cx + side, pivotY + 8.0f, 5.4f, 3.0f, color, 1.2f);
+    }
+}
+
+// «Система»: корпус процессора с ножками — раздел о железе.
+void drawChipIcon(Renderer& renderer, const Rect& box, const Color& color)
+{
+    const float cx = box.centerX();
+    const float cy = box.centerY();
+    renderer.strokeRoundRect(Rect{ cx - 7.0f, cy - 7.0f, cx + 7.0f, cy + 7.0f }, 2.5f, color, 1.3f);
+    renderer.fillRoundRect(Rect{ cx - 3.0f, cy - 3.0f, cx + 3.0f, cy + 3.0f }, 1.0f, color);
+    for (int index = -1; index <= 1; ++index) {
+        const float offset = static_cast<float>(index) * 4.0f;
+        renderer.drawLine(cx + offset, cy - 10.5f, cx + offset, cy - 7.0f, color, 1.1f);
+        renderer.drawLine(cx + offset, cy + 7.0f, cx + offset, cy + 10.5f, color, 1.1f);
+        renderer.drawLine(cx - 10.5f, cy + offset, cx - 7.0f, cy + offset, color, 1.1f);
+        renderer.drawLine(cx + 7.0f, cy + offset, cx + 10.5f, cy + offset, color, 1.1f);
+    }
 }
 
 void drawSlidersIcon(Renderer& renderer, const Rect& box, const Color& color)
@@ -190,10 +229,14 @@ std::string_view viewTitle(View view)
         return "Обзор";
     case View::Sensors:
         return "Все датчики";
+    case View::Bottleneck:
+        return "Баланс системы";
+    case View::System:
+        return "Сведения о системе";
     case View::Overlay:
         return "Оверлей";
     case View::Settings:
-        return "Настройки";
+        return "Поведение и вид";
     }
     return "Обзор";
 }
@@ -203,12 +246,17 @@ std::string_view viewEyebrow(View view)
     switch (view) {
     case View::Dashboard:
         return "МОНИТОРИНГ";
+    // Надзаголовки совпадают с прототипом слово в слово: демо — эталон вида.
     case View::Sensors:
-        return "ДАТЧИКИ";
+        return "ПОКАЗАТЕЛИ";
+    case View::Bottleneck:
+        return "УЗКОЕ МЕСТО";
+    case View::System:
+        return "ОБОРУДОВАНИЕ";
     case View::Overlay:
-        return "НАЛОЖЕНИЕ ПОВЕРХ ИГРЫ";
+        return "ПОВЕРХ ИГРЫ";
     case View::Settings:
-        return "ПРИЛОЖЕНИЕ";
+        return "НАСТРОЙКИ";
     }
     return "МОНИТОРИНГ";
 }
@@ -263,6 +311,12 @@ void drawRail(Renderer& renderer, const AppModel& model, const Theme& theme, std
         case View::Sensors:
             drawPulseIcon(renderer, button, icon);
             break;
+        case View::Bottleneck:
+            drawBalanceIcon(renderer, button, icon);
+            break;
+        case View::System:
+            drawChipIcon(renderer, button, icon);
+            break;
         case View::Overlay:
             drawLayersIcon(renderer, button, icon);
             break;
@@ -277,9 +331,11 @@ void drawRail(Renderer& renderer, const AppModel& model, const Theme& theme, std
 
     renderer.fillCircle(24.0f, renderer.height() - 54.0f, 3.0f,
         model.etwRunning ? theme.accent : theme.textFaint);
-    renderer.text(L"v0.4", Rect{ 14.0f, renderer.height() - 44.0f, kRailWidth - 6.0f,
-                                 renderer.height() - 26.0f },
-        TextRole::Tiny, theme.textFaint);
+    // Версия сборки приходит из CMake (project VERSION), чтобы рельс, свойства exe
+    // и тег релиза не разъезжались.
+    renderer.text(wideText(std::string("v") + YAWA_VERSION_STRING),
+        Rect{ 14.0f, renderer.height() - 44.0f, kRailWidth - 6.0f, renderer.height() - 26.0f }, TextRole::Tiny,
+        theme.textFaint);
 }
 
 void drawTopBar(Renderer& renderer, const AppModel& model, const Theme& theme, std::vector<UiHit>& hits)
@@ -298,6 +354,26 @@ void drawTopBar(Renderer& renderer, const AppModel& model, const Theme& theme, s
     const float bottom = kTitleBarHeight + 62.0f;
     float right = renderer.width() - 20.0f;
 
+    // Сколько места остаётся правее заголовка экрана. При сжатии окна второстепенные
+    // элементы (палитра, интервал опроса) скрываются, иначе они наезжали на заголовок.
+    const float titleRight = kRailWidth + 24.0f
+        + renderer.measureText(wideText(viewTitle(model.view)), TextRole::Value) + 28.0f;
+    const float available = right - titleRight;
+    float used = 88.0f; // «Пауза» есть всегда.
+    const bool showOverlayButton = available >= used + 8.0f + 104.0f;
+    if (showOverlayButton) {
+        used += 8.0f + 104.0f;
+    }
+    const bool showSwatches = available >= used + 12.0f + 5.0f * 30.0f;
+    if (showSwatches) {
+        used += 12.0f + 5.0f * 30.0f;
+    }
+    const bool showIntervalChip = available >= used + 4.0f + 112.0f;
+    if (showIntervalChip) {
+        used += 4.0f + 112.0f;
+    }
+    const bool showLiveChip = available >= used + 8.0f + 168.0f;
+
     const Rect pause{ right - 88.0f, top, right, bottom };
     if (!model.paused && hovered(model, pause)) {
         renderer.fillRoundRect(pause, 9.0f, theme.panelSoft);
@@ -306,21 +382,23 @@ void drawTopBar(Renderer& renderer, const AppModel& model, const Theme& theme, s
     hits.push_back(UiHit{ pause, ActionKind::TogglePause, 0 });
     right = pause.left - 8.0f;
 
-    const Rect overlayButton{ right - 104.0f, top, right, bottom };
-    if (!model.overlayVisible && hovered(model, overlayButton)) {
-        renderer.strokeRoundRect(overlayButton, 10.0f, theme.lineStrong, 1.0f);
+    if (showOverlayButton) {
+        const Rect overlayButton{ right - 104.0f, top, right, bottom };
+        if (!model.overlayVisible && hovered(model, overlayButton)) {
+            renderer.strokeRoundRect(overlayButton, 10.0f, theme.lineStrong, 1.0f);
+        }
+        renderer.fillRoundRect(overlayButton, 10.0f, model.overlayVisible ? theme.accentSoft : theme.panelSoft);
+        renderer.fillCircle(overlayButton.left + 12.0f, overlayButton.centerY(), 3.0f,
+            model.overlayVisible ? theme.accent : theme.textFaint);
+        renderer.text(L"Оверлей", Rect{ overlayButton.left + 22.0f, overlayButton.top, overlayButton.right - 6.0f,
+                                         overlayButton.bottom },
+            TextRole::Tiny, model.overlayVisible ? theme.accent : theme.textDim);
+        hits.push_back(UiHit{ overlayButton, ActionKind::ToggleOverlay, 0 });
+        right = overlayButton.left - 12.0f;
     }
-    renderer.fillRoundRect(overlayButton, 10.0f, model.overlayVisible ? theme.accentSoft : theme.panelSoft);
-    renderer.fillCircle(overlayButton.left + 12.0f, overlayButton.centerY(), 3.0f,
-        model.overlayVisible ? theme.accent : theme.textFaint);
-    renderer.text(L"Оверлей", Rect{ overlayButton.left + 22.0f, overlayButton.top, overlayButton.right - 6.0f,
-                                     overlayButton.bottom },
-        TextRole::Tiny, model.overlayVisible ? theme.accent : theme.textDim);
-    hits.push_back(UiHit{ overlayButton, ActionKind::ToggleOverlay, 0 });
-    right = overlayButton.left - 12.0f;
 
     constexpr std::array<std::uint32_t, 5> kAccentRgba{ 0xFF5EF29B, 0xFF6AA8FF, 0xFFB47BFF, 0xFFFFB347, 0xFFFF6F6F };
-    for (std::size_t index = kAccentRgba.size(); index-- > 0;) {
+    for (std::size_t index = showSwatches ? kAccentRgba.size() : 0; index-- > 0;) {
         const float centerX = right - 8.0f;
         const Color color = fromRgba(kAccentRgba[index]);
         const bool isActive = static_cast<std::size_t>(model.settings.ui.accent) == index;
@@ -334,17 +412,21 @@ void drawTopBar(Renderer& renderer, const AppModel& model, const Theme& theme, s
     }
     right -= 4.0f;
 
-    const Rect interval{ right - 112.0f, top, right, bottom };
-    drawChip(renderer, interval, wideText("опрос " + std::to_string(model.settings.capture.intervalMs) + " мс"),
-        false, theme);
-    right = interval.left - 8.0f;
+    if (showIntervalChip) {
+        const Rect interval{ right - 112.0f, top, right, bottom };
+        drawChip(renderer, interval, wideText("опрос " + std::to_string(model.settings.capture.intervalMs) + " мс"),
+            false, theme);
+        right = interval.left - 8.0f;
+    }
 
-    const Rect live{ right - 168.0f, top, right, bottom };
-    renderer.fillRoundRect(live, 10.0f, model.etwRunning ? theme.accentSoft : theme.panelSoft);
-    renderer.fillCircle(live.left + 12.0f, live.centerY(), 3.0f, model.etwRunning ? theme.accent : theme.textFaint);
-    renderer.text(model.etwRunning ? L"ETW · кадры" : L"ETW выключен",
-        Rect{ live.left + 22.0f, live.top, live.right - 6.0f, live.bottom }, TextRole::Tiny,
-        model.etwRunning ? theme.accent : theme.textFaint);
+    if (showLiveChip) {
+        const Rect live{ right - 168.0f, top, right, bottom };
+        renderer.fillRoundRect(live, 10.0f, model.etwRunning ? theme.accentSoft : theme.panelSoft);
+        renderer.fillCircle(live.left + 12.0f, live.centerY(), 3.0f, model.etwRunning ? theme.accent : theme.textFaint);
+        renderer.text(model.etwRunning ? L"ETW · кадры" : L"ETW выключен",
+            Rect{ live.left + 22.0f, live.top, live.right - 6.0f, live.bottom }, TextRole::Tiny,
+            model.etwRunning ? theme.accent : theme.textFaint);
+    }
 }
 
 void drawStatusBar(Renderer& renderer, const AppModel& model, const Theme& theme)
@@ -359,22 +441,40 @@ void drawStatusBar(Renderer& renderer, const AppModel& model, const Theme& theme
     if (model.paused) {
         left += L" · сбор на паузе";
     }
-    renderer.text(left, Rect{ kRailWidth + 26.0f, top, kRailWidth + 460.0f, renderer.height() }, TextRole::Tiny,
-        theme.textFaint);
 
     const std::wstring right = L"приложение " + wideMetric(MetricId::SelfCpu, model.store.value(MetricId::SelfCpu))
         + L" · " + wideMetric(MetricId::SelfRam, model.store.value(MetricId::SelfRam))
         + L" · сессия " + formatClock(model.elapsedMs);
-    renderer.text(right, Rect{ renderer.width() - 520.0f, top, renderer.width() - 18.0f, renderer.height() },
-        TextRole::Tiny, theme.textFaint, TextAlign::Right);
 
     const std::wstring center = model.overlayError.empty()
-        ? std::wstring(L"F10 — оверлей · F11 — положение · F12 — окно")
+        ? std::wstring(L"F10 — оверлей · F11 — положение · F12 — окно · оверлей тянется мышью")
         : model.overlayError;
-    const float hintsWidth = renderer.measureText(center.c_str(), TextRole::Tiny);
-    renderer.text(center, Rect{ renderer.width() * 0.5f - hintsWidth * 0.5f, top,
-                             renderer.width() * 0.5f + hintsWidth * 0.5f, renderer.height() },
-        TextRole::Tiny, model.overlayError.empty() ? theme.textFaint : theme.danger, TextAlign::Center);
+
+    // Три части статус-бара показываем только тогда, когда они не наезжают друг на друга:
+    // в узком окне раньше «F10 — оверлей» ложилось на «ETW-сессия активна».
+    const float leftWidth = renderer.measureText(left, TextRole::Tiny);
+    const float rightWidth = renderer.measureText(right, TextRole::Tiny);
+    const float centerWidth = renderer.measureText(center, TextRole::Tiny);
+    const float gap = 16.0f;
+    float leftEdge = kRailWidth + 26.0f;
+    float rightEdge = renderer.width() - 18.0f;
+
+    renderer.text(left, Rect{ leftEdge, top, leftEdge + leftWidth + 2.0f, renderer.height() }, TextRole::Tiny,
+        theme.textFaint);
+    leftEdge += leftWidth + gap;
+
+    const bool showRight = rightEdge - rightWidth - gap > leftEdge;
+    if (showRight) {
+        renderer.text(right, Rect{ rightEdge - rightWidth, top, rightEdge, renderer.height() }, TextRole::Tiny,
+            theme.textFaint, TextAlign::Right);
+        rightEdge -= rightWidth + gap;
+    }
+
+    const float centerLeft = renderer.width() * 0.5f - centerWidth * 0.5f;
+    if (rightEdge - centerWidth > leftEdge && centerLeft >= leftEdge && centerLeft + centerWidth <= rightEdge) {
+        renderer.text(center, Rect{ centerLeft, top, centerLeft + centerWidth, renderer.height() }, TextRole::Tiny,
+            model.overlayError.empty() ? theme.textFaint : theme.danger, TextAlign::Center);
+    }
 }
 
 } // namespace yawa

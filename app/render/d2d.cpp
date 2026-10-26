@@ -341,6 +341,16 @@ void Renderer::strokeCircle(float centerX, float centerY, float radius, const Co
     m_target->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(centerX, centerY), radius, radius), brush, thickness);
 }
 
+void Renderer::strokeEllipse(float centerX, float centerY, float radiusX, float radiusY, const Color& color,
+    float thickness)
+{
+    ID2D1SolidColorBrush* brush = brushFor(color);
+    if (brush == nullptr) {
+        return;
+    }
+    m_target->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(centerX, centerY), radiusX, radiusY), brush, thickness);
+}
+
 void Renderer::drawArc(float centerX, float centerY, float radius, float thickness, float sweepFraction,
     const Color& color)
 {
@@ -501,7 +511,7 @@ void Renderer::drawSeries(const ChartSeries& series, const Rect& rect, float min
     if (series.filled) {
         // Мягкая подложка как в прототипе: насыщенность только у линии.
         if (ID2D1PathGeometry* area = buildPath(true)) {
-            if (ID2D1SolidColorBrush* brush = brushFor(series.color.withAlpha(0.16f))) {
+            if (ID2D1SolidColorBrush* brush = brushFor(series.color.withAlpha(0.09f))) {
                 m_target->FillGeometry(area, brush);
             }
             area->Release();

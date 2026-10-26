@@ -38,6 +38,12 @@
   <symbol id="i-chip" viewBox="0 0 24 24">
     <path d="M8 3h2v2h4V3h2v2h3v3h2v2h-2v4h2v2h-2v3h-3v2h-2v-2h-4v2H8v-2H5v-3H3v-2h2v-4H3V9h2V5h3V3Zm1 5v8h6V8H9Z"/>
   </symbol>
+  <symbol id="i-balance" viewBox="0 0 24 24">
+    <path d="M12 3.4v15.2M6.6 19.6h10.8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+    <path d="M4 8.6 12 6.2l8 2.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+    <path d="M1.6 9.4a3.4 3.4 0 0 0 6.8 0ZM15.6 11.2a3.4 3.4 0 0 0 6.8 0Z" fill="none" stroke="currentColor"
+      stroke-width="1.5" stroke-linejoin="round"/>
+  </symbol>
   <symbol id="i-bolt" viewBox="0 0 24 24">
     <path d="M13.5 2 4 13.4h5.6L9.4 22 19 10.2h-5.9L13.5 2Z"/>
   </symbol>
@@ -57,6 +63,12 @@
       <button class="rail__item" data-view="sensors" aria-label="Датчики" title="Датчики">
         <svg class="icon"><use href="#i-pulse"/></svg>
       </button>
+      <button class="rail__item" data-view="bottleneck" aria-label="Баланс" title="Баланс системы">
+        <svg class="icon"><use href="#i-balance"/></svg>
+      </button>
+      <button class="rail__item" data-view="system" aria-label="Система" title="Сведения о системе">
+        <svg class="icon"><use href="#i-chip"/></svg>
+      </button>
       <button class="rail__item" data-view="overlay" aria-label="Оверлей" title="Оверлей">
         <svg class="icon"><use href="#i-layers"/></svg>
       </button>
@@ -67,7 +79,7 @@
 
     <div class="rail__foot">
       <span class="rail__live" id="railLive" title="Сбор данных активен"></span>
-      <span class="rail__label">v0.1</span>
+      <span class="rail__label">v1.0.0</span>
     </div>
   </aside>
 
@@ -448,6 +460,171 @@
         </div>
       </section>
 
+      <section class="view" data-view="bottleneck">
+        <div class="grid">
+
+          <article class="card span-12 card--balance" id="balanceCard">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Узкое место</h2>
+                <p class="card__sub" id="balanceSubtitle">оборудование не определено</p>
+              </div>
+              <span class="tag" id="balanceMode"><i></i><span>ОЦЕНКА ±15 %</span></span>
+            </header>
+
+            <div class="balance">
+              <div class="gauge" id="balanceGauge" style="--size:112px; --p:0">
+                <svg viewBox="0 0 120 120" class="gauge__svg" aria-hidden="true">
+                  <circle class="gauge__track" cx="60" cy="60" r="52"/>
+                  <circle class="gauge__value" cx="60" cy="60" r="52"/>
+                </svg>
+                <div class="gauge__text"><b id="balancePercent">&mdash;</b><span>помехи</span></div>
+              </div>
+
+              <div class="balance__body">
+                <h3 class="balance__headline" id="balanceHeadline">&mdash;</h3>
+                <p class="balance__detail" id="balanceDetail">&mdash;</p>
+                <div class="balance__caps">
+                  <span id="balanceCpuCap">CPU: &mdash;</span>
+                  <span id="balanceGpuCap">GPU: &mdash;</span>
+                  <span id="balanceExpected" class="balance__caps-soft">ожидание: &mdash;</span>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <article class="card col-7">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Связка</h2>
+                <p class="card__sub">индексы нормированы: флагман = 100</p>
+              </div>
+            </header>
+            <ul class="balance__pair" id="balancePair"></ul>
+          </article>
+
+          <article class="card col-5">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Нагрузка сейчас</h2>
+                <p class="card__sub">последний интервал опроса</p>
+              </div>
+            </header>
+            <ul class="balance__load" id="balanceLoad"></ul>
+          </article>
+
+          <article class="card span-12">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Что делать</h2>
+                <p class="card__sub" id="balanceAdviceCount">рекомендаций нет &mdash; нагрузка или данные отсутствуют</p>
+              </div>
+            </header>
+            <ol class="balance__advice" id="balanceAdvice"></ol>
+          </article>
+
+          <article class="card span-12 card--note">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Как считаем</h2>
+                <p class="card__sub">оба источника показаны отдельно: живые замеры точнее любого справочника</p>
+              </div>
+            </header>
+            <p class="card__note">Во время игры берём загрузку процессора (с учётом самого занятого ядра) и видеокарты:
+              узкое место &mdash; тот узел, что ближе к 100 %, а процент показывает, насколько простаивает второй.
+              Если игры нет, считаем прогноз по индексам производительности и разрешения экрана: потолок CPU от
+              пикселей почти не зависит, потолок GPU падает при росте разрешения. Прогноз &mdash; оценка &plusmn;15 %
+              и живые замеры он не заменяет.</p>
+          </article>
+
+        </div>
+      </section>
+
+      <section class="view" data-view="system">
+        <div class="grid">
+
+          <article class="card col-4">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Windows</h2>
+                <p class="card__sub">как в winver: выпуск, версия функционала и сборка</p>
+              </div>
+            </header>
+            <ul class="balance__specs" id="osCard"></ul>
+          </article>
+
+          <article class="card col-4">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Процессор</h2>
+                <p class="card__sub">CPUID и GetLogicalProcessorInformationEx</p>
+              </div>
+            </header>
+            <p class="spec__headline" id="cpuName">&mdash;</p>
+            <ul class="balance__specs" id="cpuCard"></ul>
+          </article>
+
+          <article class="card col-4">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Видеокарты</h2>
+                <p class="card__sub">DXGI и реестр класса Display</p>
+              </div>
+            </header>
+            <ul class="balance__gpus" id="gpuCard"></ul>
+          </article>
+
+          <article class="card col-8">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Память</h2>
+                <p class="card__sub">SMBIOS Type 17: раскладка по слотам, частоты и напряжение модулей</p>
+              </div>
+            </header>
+            <p class="spec__headline" id="memSummary">&mdash;</p>
+            <ul class="balance__specs balance__specs--two" id="memCard"></ul>
+            <ul class="balance__modules" id="memModules"></ul>
+            <p class="card__note">Точные тайминги (tCL-tRCD-tRP-tRAS) лежат в SPD на шине SMBus: их нельзя прочитать
+              без драйвера, а драйверы приложение не ставит и не грузит.</p>
+          </article>
+
+          <article class="card col-4">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Мониторы</h2>
+                <p class="card__sub">EnumDisplaySettings и EDID-имя драйвера монитора</p>
+              </div>
+            </header>
+            <ul class="balance__monitors" id="monitorCard"></ul>
+          </article>
+
+          <article class="card span-12">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Диски</h2>
+                <p class="card__sub">WMI Win32_DiskDrive и GetDiskFreeSpaceEx: модель, интерфейс и объём</p>
+              </div>
+            </header>
+            <ul class="balance__monitors" id="diskCard"></ul>
+          </article>
+
+          <article class="card span-12 card--note">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Откуда эти числа</h2>
+                <p class="card__sub">реестр, CPUID, SMBIOS, DXGI и EnumDisplaySettings &mdash; без драйверов и без сети</p>
+              </div>
+            </header>
+            <p class="card__note">Версию Windows берём из CurrentVersion &mdash; оттуда же её берёт winver, поэтому
+              карточка и окно «О системе» совпадают. Модель процессора читается прямо из CPUID, ядра и кэш &mdash; из
+              GetLogicalProcessorInformationEx. Видеокарты перечисляет DXGI, а версию драйвера добавляет реестр класса
+              Display. Модули памяти и их частоты приложение берёт из таблиц SMBIOS, которые BIOS собирает из SPD:
+              именно так видно «2&times;16 ГБ», а не только «32 ГБ» суммарно.</p>
+          </article>
+
+        </div>
+      </section>
+
       <section class="view" data-view="overlay">
         <div class="grid">
                     <article class="card span-7">
@@ -542,10 +719,26 @@
 
             <div class="field">
               <div class="field__label-row">
-                <span class="field__label">Прозрачность фона</span>
+                <span class="field__label">Размер текста</span>
+                <b id="osdTextScaleValue">100%</b>
+              </div>
+              <input class="range" type="range" id="osdTextScale" min="85" max="130" step="5" value="100">
+            </div>
+
+            <div class="field">
+              <div class="field__label-row">
+                <span class="field__label">Прозрачность окна</span>
                 <b id="osdOpacityValue">72%</b>
               </div>
               <input class="range" type="range" id="osdOpacity" min="0" max="100" step="1" value="72">
+            </div>
+
+            <div class="field">
+              <div class="field__label-row">
+                <span class="field__label">Фон подложки</span>
+                <b id="osdBgValue">из стиля</b>
+              </div>
+              <input class="range" type="range" id="osdBg" min="0" max="100" step="1" value="100">
             </div>
 
             <div class="field">
@@ -554,6 +747,7 @@
                 <button class="is-active" data-chrome="background" type="button">Фон</button>
                 <button class="is-active" data-chrome="border" type="button">Рамка</button>
                 <button class="is-active" data-chrome="shadow" type="button">Тень</button>
+                <button data-chrome="clickThrough" type="button">Сквозной клик</button>
               </div>
             </div>
 
@@ -563,6 +757,22 @@
                 <b id="osdRadiusValue">8 px</b>
               </div>
               <input class="range" type="range" id="osdRadius" min="0" max="24" step="1" value="8">
+            </div>
+
+            <div class="field">
+              <div class="field__label-row">
+                <span class="field__label">Отступы внутри</span>
+                <b id="osdPadValue">из стиля</b>
+              </div>
+              <input class="range" type="range" id="osdPad" min="0" max="28" step="1" value="11">
+            </div>
+
+            <div class="field">
+              <div class="field__label-row">
+                <span class="field__label">Интервал строк</span>
+                <b id="osdGapValue">из стиля</b>
+              </div>
+              <input class="range" type="range" id="osdGap" min="0" max="14" step="1" value="3">
             </div>
 
             <div class="field">
@@ -585,6 +795,102 @@
                 <button data-outline="1" type="button">1 px</button>
                 <button data-outline="2" type="button">2 px</button>
                 <button data-outline="3" type="button">3 px</button>
+              </div>
+            </div>
+
+            <div class="field">
+              <span class="field__label">Цвет значений</span>
+              <div class="swatches" id="osdValueColor">
+                <button class="swatch is-active" data-color="-1" type="button">авто</button>
+                <button class="swatch" data-color="0" data-hex="#ffffff" type="button" aria-label="Белый"></button>
+                <button class="swatch" data-color="1" data-hex="#5ef29b" type="button" aria-label="Мятный"></button>
+                <button class="swatch" data-color="2" data-hex="#6aa8ff" type="button" aria-label="Ледяной"></button>
+                <button class="swatch" data-color="3" data-hex="#b47bff" type="button" aria-label="Фиалковый"></button>
+                <button class="swatch" data-color="4" data-hex="#ffb347" type="button" aria-label="Янтарный"></button>
+                <button class="swatch" data-color="5" data-hex="#ff6f6f" type="button" aria-label="Коралл"></button>
+              </div>
+            </div>
+
+            <div class="field">
+              <span class="field__label">Цвет подписей</span>
+              <div class="swatches" id="osdLabelColor">
+                <button class="swatch is-active" data-color="-1" type="button">авто</button>
+                <button class="swatch" data-color="0" data-hex="#ffffff" type="button" aria-label="Белый"></button>
+                <button class="swatch" data-color="1" data-hex="#5ef29b" type="button" aria-label="Мятный"></button>
+                <button class="swatch" data-color="2" data-hex="#6aa8ff" type="button" aria-label="Ледяной"></button>
+                <button class="swatch" data-color="3" data-hex="#b47bff" type="button" aria-label="Фиалковый"></button>
+                <button class="swatch" data-color="4" data-hex="#ffb347" type="button" aria-label="Янтарный"></button>
+                <button class="swatch" data-color="5" data-hex="#ff6f6f" type="button" aria-label="Коралл"></button>
+              </div>
+            </div>
+
+            <div class="field">
+              <span class="field__label">Цвет акцента</span>
+              <div class="swatches" id="osdAccentColor">
+                <button class="swatch is-active" data-color="-1" type="button">авто</button>
+                <button class="swatch" data-color="0" data-hex="#ffffff" type="button" aria-label="Белый"></button>
+                <button class="swatch" data-color="1" data-hex="#5ef29b" type="button" aria-label="Мятный"></button>
+                <button class="swatch" data-color="2" data-hex="#6aa8ff" type="button" aria-label="Ледяной"></button>
+                <button class="swatch" data-color="3" data-hex="#b47bff" type="button" aria-label="Фиалковый"></button>
+                <button class="swatch" data-color="4" data-hex="#ffb347" type="button" aria-label="Янтарный"></button>
+                <button class="swatch" data-color="5" data-hex="#ff6f6f" type="button" aria-label="Коралл"></button>
+              </div>
+            </div>
+
+            <div class="field">
+              <span class="field__label">Цвет строк</span>
+              <div class="swatch-rows" id="osdRowColors"></div>
+            </div>
+
+            <div class="field">
+              <div class="field__label-row">
+                <span class="field__label">Толщина рамки</span>
+                <b id="osdBorderValue">из стиля</b>
+              </div>
+              <input class="range" type="range" id="osdBorder" min="0" max="3" step="1" value="1">
+            </div>
+
+            <div class="field">
+              <div class="field__label-row">
+                <span class="field__label">Сила тени</span>
+                <b id="osdShadowValue">100%</b>
+              </div>
+              <input class="range" type="range" id="osdShadow" min="0" max="100" step="1" value="100">
+            </div>
+
+            <div class="field">
+              <div class="field__label-row">
+                <span class="field__label">Интервал букв</span>
+                <b id="osdTrackingValue">100%</b>
+              </div>
+              <input class="range" type="range" id="osdTracking" min="0" max="200" step="5" value="100">
+            </div>
+
+            <div class="field">
+              <span class="field__label">Заглавные подписи</span>
+              <div class="segmented segmented--chips" id="osdUppercase">
+                <button class="is-active" data-mode="-1" type="button">Стиль</button>
+                <button data-mode="1" type="button">Вкл</button>
+                <button data-mode="0" type="button">Выкл</button>
+              </div>
+            </div>
+
+            <div class="field">
+              <span class="field__label">Разделители строк</span>
+              <div class="segmented segmented--chips" id="osdSeparators">
+                <button class="is-active" data-mode="-1" type="button">Стиль</button>
+                <button data-mode="1" type="button">Вкл</button>
+                <button data-mode="0" type="button">Выкл</button>
+              </div>
+            </div>
+
+            <div class="field">
+              <span class="field__label">Знаки после запятой у FPS</span>
+              <div class="segmented segmented--chips" id="osdDecimals">
+                <button class="is-active" data-decimals="-1" type="button">Стиль</button>
+                <button data-decimals="0" type="button">0</button>
+                <button data-decimals="1" type="button">1</button>
+                <button data-decimals="2" type="button">2</button>
               </div>
             </div>
 
@@ -743,7 +1049,7 @@
               </li>
             </ul>
 
-            <p class="field__hint">Подписи сохраняются в YawaFpsHub.ini и применяются к оверлею и к записи сессии в CSV.</p>
+            <p class="field__hint">Подписи сохраняются в %LOCALAPPDATA%\YawaFpsHub\YawaFpsHub.ini и применяются к оверлею и к записи сессии в CSV.</p>
           </article>
 
           <article class="card span-6">
@@ -900,7 +1206,7 @@
               </li>
               <li>
                 <label class="switch">
-                  <input type="checkbox" id="trayToggle" checked>
+                  <input type="checkbox" id="trayToggle">
                   <span class="switch__track"><span class="switch__knob"></span></span>
                   <span class="switch__text">Сворачивать в трей при закрытии</span>
                 </label>
@@ -938,7 +1244,7 @@
 
             <ul class="metrics-list">
               <li><span>Файл настроек</span><b class="mono">YawaFpsHub.ini</b></li>
-              <li><span>Расположение</span><b class="mono">рядом с exe</b></li>
+              <li><span>Расположение</span><b class="mono">%LOCALAPPDATA%\YawaFpsHub</b></li>
               <li><span>Запись в реестр</span><b>нет</b></li>
               <li><span>Сетевые запросы</span><b>нет</b></li>
               <li><span>История сессий</span><b class="mono">sessions\*.csv</b></li>
@@ -974,6 +1280,10 @@
               <li class="hotkey" data-hotkey="window" tabindex="0">
                 <span class="hotkey__name">Показать или скрыть окно</span>
                 <span class="hotkey__key">F12</span>
+              </li>
+              <li class="hotkey" data-hotkey="clickThrough" tabindex="0">
+                <span class="hotkey__name">Сквозной клик по оверлею</span>
+                <span class="hotkey__key">F9</span>
               </li>
             </ul>
           </article>

@@ -21,12 +21,17 @@ constexpr std::array<std::wstring_view, 7> kFilterNames{ L"Все", L"Кадры
     L"Диски и сеть", L"Система" };
 
 constexpr float kToolbarHeight = 36.0f;
-constexpr float kRowHeight = 42.0f;
-constexpr float kGroupHeight = 34.0f;
+// Две строки панели, как в демо: поиск с фильтрами, под ним «только в оверлее».
+constexpr float kToolbarSecondRow = 26.0f;
+constexpr float kToolbarGap = 8.0f;
+// Компактные строки: на экран помещается больше датчиков, и таблицу не приходится
+// листать так часто. Выше плотности демо, но читается без напряжения.
+constexpr float kRowHeight = 38.0f;
+constexpr float kGroupHeight = 30.0f;
 
 std::vector<Group> makeGroups(std::uint32_t cores)
 {
-    std::vector<MetricId> cpu{ MetricId::CpuLoad, MetricId::CpuTemp, MetricId::CpuClock, MetricId::CpuPower,
+    std::vector<MetricId> cpu{ MetricId::CpuLoad, MetricId::CpuTemp, MetricId::CpuClock, MetricId::CpuPeakLoad,
         MetricId::GameThreadLoad };
     // Ядра добавляются только реально существующие: пустых строк «Ядро 17» быть не должно.
     for (std::uint32_t index = 0; index < std::min<std::uint32_t>(cores, 16); ++index) {
@@ -38,9 +43,10 @@ std::vector<Group> makeGroups(std::uint32_t cores)
                         MetricId::DroppedFrames } },
         { L"Процессор", std::move(cpu) },
         { L"Видеокарта", { MetricId::GpuLoad, MetricId::GpuTemp, MetricId::GpuHotspot, MetricId::GpuClock,
-                             MetricId::GpuMemClock, MetricId::GpuPower, MetricId::GpuFan, MetricId::VramUsed,
-                             MetricId::VramTotal } },
-        { L"Память", { MetricId::RamUsed, MetricId::RamCache, MetricId::RamFree, MetricId::PageFile } },
+                             MetricId::GpuMemClock, MetricId::GpuPower, MetricId::GpuFan, MetricId::GpuEncode,
+                             MetricId::GpuDecode, MetricId::PcieLoad, MetricId::VramUsed, MetricId::VramTotal } },
+        { L"Память", { MetricId::RamUsed, MetricId::RamLoad, MetricId::RamCache, MetricId::RamFree,
+                         MetricId::PageFile, MetricId::PageFileTotal, MetricId::PageFileLoad } },
         { L"Диски и сеть", { MetricId::DiskRead, MetricId::DiskWrite, MetricId::DiskTemp, MetricId::NetDown,
                                MetricId::NetUp } },
         { L"Система", { MetricId::ChipsetTemp, MetricId::SelfCpu, MetricId::SelfRam, MetricId::SelfThreads } },
@@ -51,15 +57,43 @@ std::vector<Group> makeGroups(std::uint32_t cores)
 int overlayField(MetricId id)
 {
     switch (id) {
+    // В оверлее пять строк; все датчики одной темы управляют своей строкой,
+    // поэтому «глаз» работает у каждой строки, а не только у пяти.
     case MetricId::Fps:
+    case MetricId::FrameTime:
+    case MetricId::Low1Fps:
+    case MetricId::Low01Fps:
+    case MetricId::AvgFps:
+    case MetricId::DroppedFrames:
         return static_cast<int>(LabelField::Fps);
     case MetricId::CpuLoad:
+    case MetricId::CpuTemp:
+    case MetricId::CpuClock:
+    case MetricId::CpuPeakLoad:
+    case MetricId::GameThreadLoad:
+    case MetricId::CpuPower:
         return static_cast<int>(LabelField::Cpu);
     case MetricId::GpuLoad:
+    case MetricId::GpuTemp:
+    case MetricId::GpuHotspot:
+    case MetricId::GpuClock:
+    case MetricId::GpuMemClock:
+    case MetricId::GpuPower:
+    case MetricId::GpuFan:
+    case MetricId::GpuEncode:
+    case MetricId::GpuDecode:
+    case MetricId::PcieLoad:
         return static_cast<int>(LabelField::Gpu);
     case MetricId::RamUsed:
+    case MetricId::RamLoad:
+    case MetricId::RamCache:
+    case MetricId::RamFree:
+    case MetricId::PageFile:
+    case MetricId::PageFileTotal:
+    case MetricId::PageFileLoad:
         return static_cast<int>(LabelField::Ram);
     case MetricId::VramUsed:
+    case MetricId::VramTotal:
         return static_cast<int>(LabelField::Vram);
     default:
         return -1;
@@ -72,6 +106,18 @@ bool valueKnown(MetricId id, const AppModel& model)
         return false;
     }
 
+    // Медиа-движки и PCI-e есть только там, где их реально отдают счётчики/драйвер.
+    if (id == MetricId::GpuEncode || id == MetricId::GpuDecode) {
+        return model.availability.gpuMedia;
+    }
+    if (id == MetricId::PcieLoad) {
+        return model.availability.pcie;
+    }
+    if (id == MetricId::PageFileLoad || id == MetricId::PageFileTotal) {
+        // Ноль процентов/гигабайт — валидное значение: подкачка может быть пустой.
+        return model.availability.pageFile;
+    }
+
     // Ноль у этих датчиков означает «источника нет», а не реальный ноль.
     switch (id) {
     case MetricId::CpuTemp:
@@ -79,6 +125,7 @@ bool valueKnown(MetricId id, const AppModel& model)
     case MetricId::CpuClock:
         return model.availability.cpuClock && model.store.value(id) > 0.0;
     case MetricId::CpuPower:
+    case MetricId::CpuPeakLoad:
     case MetricId::GameThreadLoad:
     case MetricId::GpuHotspot:
     case MetricId::GpuPower:
@@ -94,6 +141,28 @@ bool valueKnown(MetricId id, const AppModel& model)
     default:
         return true;
     }
+}
+
+// towupper в локали «C» не переводит кириллицу в верхний регистр, поэтому заголовки
+// групп переводим сами: это единственный способ получить капс без setlocale.
+wchar_t upperSymbol(wchar_t symbol)
+{
+    if (symbol >= L'а' && symbol <= L'я') {
+        return static_cast<wchar_t>(symbol - 0x20);
+    }
+    if (symbol == L'ё') {
+        return L'Ё';
+    }
+    return static_cast<wchar_t>(std::towupper(symbol));
+}
+
+std::wstring upperCopy(std::wstring_view text)
+{
+    std::wstring result(text);
+    for (wchar_t& symbol : result) {
+        symbol = upperSymbol(symbol);
+    }
+    return result;
 }
 
 std::wstring lowerCopy(std::wstring_view text)
@@ -162,7 +231,7 @@ void drawSearchBox(Renderer& renderer, const AppModel& model, const Theme& theme
 
 } // namespace
 
-void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area,
+void drawSensors(Renderer& renderer, AppModel& model, const Theme& theme, const Rect& area,
     std::vector<UiHit>& hits)
 {
     // --- Панель инструментов: поиск, фильтры, «только в оверлее».
@@ -170,13 +239,16 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
     const Rect search{ area.left, area.top, area.left + searchWidth, area.top + kToolbarHeight };
     drawSearchBox(renderer, model, theme, search, hits);
 
-    const Rect overlaySwitch{ area.right - 170.0f, area.top, area.right, area.top + kToolbarHeight };
+    // «Только в оверлее» — вторая строка панели под поиском, как в демо.
+    const float secondRowTop = area.top + kToolbarHeight + kToolbarGap;
+    const Rect overlaySwitch{ area.left, secondRowTop, area.left + 210.0f, secondRowTop + kToolbarSecondRow };
     const bool overlayOn = model.overlayOnly;
     const bool switchHover = isHovered(model, overlaySwitch);
-    renderer.text(L"Только в оверлее", Rect{ overlaySwitch.left, overlaySwitch.top, overlaySwitch.right - 44.0f,
-                                         overlaySwitch.bottom },
-        TextRole::Tiny, overlayOn || switchHover ? theme.text : theme.textDim, TextAlign::Right);
-    const Rect track{ overlaySwitch.right - 38.0f, overlaySwitch.centerY() - 9.0f, overlaySwitch.right,
+    // Подпись слева, переключатель сразу за ней: так строка читается как одна пара.
+    renderer.text(L"Только в оверлее",
+        Rect{ overlaySwitch.left, overlaySwitch.top, overlaySwitch.left + 152.0f, overlaySwitch.bottom },
+        TextRole::Small, overlayOn || switchHover ? theme.text : theme.textDim);
+    const Rect track{ overlaySwitch.left + 160.0f, overlaySwitch.centerY() - 9.0f, overlaySwitch.left + 196.0f,
         overlaySwitch.centerY() + 9.0f };
     renderer.fillRoundRect(track, 9.0f, overlayOn ? theme.accentSoft : theme.panelSoft);
     if (overlayOn) {
@@ -188,7 +260,7 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
 
     // Фильтры подстраиваются под ширину окна: на 1040 px последний чип раньше обрезался.
     float filterLeft = search.right + 10.0f;
-    const float filterRight = overlaySwitch.left - 8.0f;
+    const float filterRight = area.right;
     float gap = 6.0f;
     float padding = 12.0f;
     float textWidth = 0.0f;
@@ -218,7 +290,7 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
     }
 
     // --- Таблица: одна колонка на весь экран, как в демо.
-    const Rect card{ area.left, area.top + kToolbarHeight + 10.0f, area.right, area.bottom };
+    const Rect card{ area.left, secondRowTop + kToolbarSecondRow + 12.0f, area.right, area.bottom };
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
 
@@ -230,8 +302,11 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
     const float avgRight = inner.left + width * 0.73f;
     const float maxRight = inner.left + width * 0.84f;
     const float sparkLeft = inner.left + width * 0.85f;
-    // Справа оставляем жёлоб под полосу прокрутки, иначе она наезжает на «глаз».
-    const float sparkRight = inner.right - 46.0f;
+    // Справа жёлоб под полосу прокрутки: строки и подсветка заканчиваются до неё,
+    // поэтому полоса больше не ложится поверх текста и плашки наведения.
+    constexpr float kScrollGutter = 14.0f;
+    const float rowRight = inner.right - kScrollGutter;
+    const float sparkRight = rowRight - 36.0f;
 
     renderer.text(L"ДАТЧИК", Rect{ nameX, inner.top, inner.left + width * 0.3f, inner.top + 14.0f }, TextRole::Tiny,
         theme.textFaint);
@@ -244,7 +319,7 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
     }
     renderer.text(L"60 С", Rect{ sparkLeft, inner.top, sparkRight, inner.top + 14.0f }, TextRole::Tiny,
         theme.textFaint, TextAlign::Right);
-    renderer.drawLine(inner.left, inner.top + 20.0f, inner.right, inner.top + 20.0f, theme.line, 1.0f);
+    renderer.drawLine(inner.left, inner.top + 20.0f, rowRight, inner.top + 20.0f, theme.line, 1.0f);
 
     const std::vector<Group> groups = makeGroups(model.cpuCores);
     const std::wstring query = lowerCopy(wideText(model.sensorQuery));
@@ -282,7 +357,7 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
 
     // Высота содержимого: заголовок группы на каждую непустую группу.
     // Между группами нужен воздух: иначе подсветка строки липнет к следующему заголовку.
-    const float groupGap = 6.0f;
+    const float groupGap = 12.0f;
     const float contentHeight = static_cast<float>(entries.size()) * kRowHeight
         + static_cast<float>(groupStarts.size()) * (kGroupHeight + groupGap);
 
@@ -306,10 +381,23 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
             if (nextGroupStart > 0) {
                 top += groupGap;
             }
+            const Rect headerRect{ inner.left, top, rowRight, top + kGroupHeight - 4.0f };
             if (top + kGroupHeight > viewport.top) {
-                renderer.text(groups[groupIndexes[nextGroupStart]].title,
-                    Rect{ inner.left + 14.0f, top, inner.right, top + kGroupHeight - 4.0f }, TextRole::Small,
+                renderer.text(upperCopy(groups[groupIndexes[nextGroupStart]].title), headerRect, TextRole::Tiny,
                     theme.accent);
+            }
+            // Заголовок группы — кликабельный переключатель всего блока: включает
+            // или выключает сразу весь набор датчиков группы в оверлее.
+            {
+                const std::size_t groupIndex = groupIndexes[nextGroupStart];
+                int headerField = -1;
+                if (groupIndex == 0) headerField = static_cast<int>(LabelField::Fps);
+                else if (groupIndex == 1) headerField = static_cast<int>(LabelField::Cpu);
+                else if (groupIndex == 2) headerField = static_cast<int>(LabelField::Gpu);
+                else if (groupIndex == 3) headerField = static_cast<int>(LabelField::Ram);
+                if (headerField >= 0) {
+                    hits.push_back(UiHit{ headerRect, ActionKind::ToggleMetric, headerField });
+                }
             }
             top += kGroupHeight;
             ++nextGroupStart;
@@ -321,8 +409,13 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
         // Рисуем только целиком видимые строки: раньше внизу оставалась обрезанная
         // пополам строка, и таблица выглядела сломанной.
         if (rowTop + kRowHeight > viewport.top && rowTop + kRowHeight <= viewport.bottom + 0.5f) {
-            const Rect row{ inner.left, rowTop, inner.right, rowTop + kRowHeight };
+            const Rect row{ inner.left, rowTop, rowRight, rowTop + kRowHeight };
             const bool hover = isHovered(model, row);
+            // Тонкая линия под строкой: таблица читается построчно, как в демо.
+            if (!hover) {
+                renderer.drawLine(inner.left + 10.0f, rowTop + kRowHeight - 0.5f, rowRight - 10.0f,
+                    rowTop + kRowHeight - 0.5f, theme.line.withAlpha(0.45f), 1.0f);
+            }
             if (hover) {
                 // Подсветка строки была почти не виднее фона карточки — теперь это заметная плашка.
                 renderer.fillRoundRect(row, 6.0f, theme.accentSoft);
@@ -346,13 +439,13 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
             const std::wstring value = known ? wideText(formatValue(slot.stats.current, info.decimals))
                                              : L"нет данных";
             const std::wstring unit = known ? wideText(unitSuffix(info.unit)) : std::wstring();
-            const float unitWidth = unit.empty() ? 0.0f : renderer.measureText(unit, TextRole::Tiny) + 3.0f;
-            renderer.text(value, Rect{ valueRight - 104.0f - unitWidth, rowTop, valueRight - unitWidth,
+            const float unitWidth = unit.empty() ? 0.0f : renderer.measureText(unit, TextRole::Tiny) + 4.0f;
+            // Значение — главное в строке: крупнее подписи, как в демо.
+            renderer.text(value, Rect{ valueRight - 130.0f - unitWidth, rowTop, valueRight - unitWidth,
                                    rowTop + kRowHeight },
-                known ? TextRole::Small : TextRole::Tiny, known ? theme.text : theme.textFaint, TextAlign::Right);
+                known ? TextRole::Number : TextRole::Tiny, known ? theme.text : theme.textFaint, TextAlign::Right);
             if (!unit.empty()) {
-                renderer.text(unit, Rect{ valueRight - unitWidth, rowTop + kRowHeight * 0.5f, valueRight,
-                                       rowTop + kRowHeight },
+                renderer.text(unit, Rect{ valueRight - unitWidth, rowTop, valueRight, rowTop + kRowHeight },
                     TextRole::Tiny, theme.textFaint, TextAlign::Right);
             }
 
@@ -374,50 +467,67 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
                     maximum = std::max(maximum, history[sample]);
                 }
                 renderer.drawSeries(ChartSeries{ history.data() + (count - visible), visible,
-                                        pipColor(entries[index].group, theme), false },
-                    spark, 0.0f, maximum, 1.3f);
+                                        pipColor(entries[index].group, theme), true },
+                    spark, 0.0f, maximum, 1.4f);
             }
 
-            // «Глаз»: датчик показан в оверлее. Только у строк, которые туда попадают.
+            // «Глаз» есть у каждой строки, как в демо: серый — датчик не в оверлее,
+            // зелёный — показывается. Строки, которых нет в оверлее, рисуют неактивный глаз.
             const int field = overlayField(id);
-            if (field >= 0) {
-                const Rect eye{ inner.right - 40.0f, rowTop + 3.0f, inner.right - 14.0f, rowTop + kRowHeight - 3.0f };
-                const bool pinned = model.settings.overlay.visible[static_cast<std::size_t>(field)];
-                const bool eyeHover = isHovered(model, eye);
-                if (pinned || eyeHover) {
-                    renderer.fillRoundRect(eye, 7.0f, pinned ? theme.accentSoft : theme.panelSoft);
-                }
-                // Иконка глаза: овал и зрачок; у выключенного — перечёркнут.
-                const float centerX = eye.centerX();
-                const float centerY = eye.centerY();
-                renderer.strokeCircle(centerX, centerY, 4.5f, pinned ? theme.accent : theme.textFaint, 1.2f);
-                renderer.fillCircle(centerX, centerY, 1.8f, pinned ? theme.accent : theme.textFaint);
-                if (!pinned) {
-                    renderer.drawLine(centerX - 5.0f, centerY + 5.0f, centerX + 5.0f, centerY - 5.0f, theme.textFaint,
-                        1.1f);
-                }
-                hits.push_back(UiHit{ eye, ActionKind::ToggleMetric, field });
+            // Кликабельная область глаза — вся правая колонка строки: попасть в иконку
+            // 26×30 мышью было почти невозможно.
+            const Rect eyeHit{ rowRight - 40.0f, rowTop, rowRight - 2.0f, rowTop + kRowHeight };
+            const Rect eye{ rowRight - 34.0f, rowTop + 4.0f, rowRight - 6.0f, rowTop + kRowHeight - 4.0f };
+            const bool pinned = field >= 0
+                && model.settings.overlay.visible[static_cast<std::size_t>(field)];
+            const bool eyeHover = field >= 0 && isHovered(model, eyeHit);
+            // Как в демо: выключенный «глаз» — серый перечёркнутый контур, включённый — зелёный чип.
+            const Color eyeColor = pinned ? theme.accent : (eyeHover ? theme.textDim : theme.textFaint);
+            if (pinned || eyeHover) {
+                renderer.fillRoundRect(eye, 8.0f, pinned ? theme.accentSoft : theme.panelSoft);
+            }
+            if (pinned) {
+                renderer.strokeRoundRect(eye, 8.0f, theme.accentGlow, 1.0f);
+            }
+            // Настоящий «глаз»: веко-эллипс и зрачок; выключенный перечёркнут косой чертой.
+            const float centerX = eye.centerX();
+            const float centerY = eye.centerY();
+            renderer.strokeEllipse(centerX, centerY, 7.0f, 4.4f, eyeColor, 1.3f);
+            renderer.fillCircle(centerX, centerY, pinned ? 2.2f : 1.7f, eyeColor);
+            if (!pinned) {
+                renderer.drawLine(centerX - 6.6f, centerY + 4.4f, centerX + 6.6f, centerY - 4.4f, eyeColor, 1.3f);
             }
 
+            // Строка попадает в список хитов раньше глаза: обработчик берёт последний
+            // подходящий хит, поэтому раньше клик по глазу гасился пустым действием строки.
             hits.push_back(UiHit{ row, ActionKind::None, static_cast<int>(index) });
+            if (field >= 0) {
+                hits.push_back(UiHit{ eyeHit, ActionKind::ToggleMetric, field });
+            }
         }
 
         top += kRowHeight;
     }
     renderer.popClip();
 
-    // Полоса прокрутки: тонкая, только когда содержимое не помещается.
+    // Полоса прокрутки: бегунок тянется мышью, клик по дорожке листает на страницу.
+    model.sensorScrollMax = maxScroll;
+    model.sensorViewportHeight = viewport.height();
+    model.sensorScrollTrack = Rect{ inner.right - 9.0f, viewport.top, inner.right - 3.0f, viewport.bottom };
     if (contentHeight > viewport.height() && viewport.height() > 0.0f && maxScroll > 0.0f) {
         const float thumbHeight = std::max(24.0f, viewport.height() * (viewport.height() / contentHeight));
         const float thumbTop = viewport.top + (viewport.height() - thumbHeight) * (offset / maxScroll);
-        renderer.fillRoundRect(Rect{ inner.right - 9.0f, viewport.top, inner.right - 5.0f, viewport.bottom }, 2.0f,
-            theme.line.withAlpha(0.5f));
-        renderer.fillRoundRect(Rect{ inner.right - 9.0f, thumbTop, inner.right - 5.0f, thumbTop + thumbHeight }, 2.0f,
-            theme.textFaint.withAlpha(0.7f));
+        const Rect scrollTrack = model.sensorScrollTrack;
+        const Rect thumb{ scrollTrack.left, thumbTop, scrollTrack.right, thumbTop + thumbHeight };
+        const bool hovered = isHovered(model, scrollTrack);
+        renderer.fillRoundRect(scrollTrack, 3.0f, theme.line.withAlpha(hovered ? 0.55f : 0.3f));
+        renderer.fillRoundRect(thumb, 3.0f, theme.textFaint.withAlpha(hovered ? 1.0f : 0.8f));
+        hits.push_back(UiHit{ thumb, ActionKind::ScrollSensorsThumb, 0 });
+        hits.push_back(UiHit{ scrollTrack, ActionKind::ScrollSensorsTrack, 0 });
     }
 
-    renderer.text(L"ETW для кадров, PDH для счётчиков диспетчера задач, DXGI для видеопамяти, NVML для температур"
-                  L" NVIDIA, ACPI-термозона для процессора. «нет данных» — источник не отвечает на этом железе.",
+    renderer.text(L"ETW — кадры, PDH — счётчики диспетчера задач, NVML — NVIDIA, ACPI-термозона — процессор."
+                  L" Драйверов не требуется; «нет данных» — прошивка не отдаёт этот датчик.",
         Rect{ inner.left, inner.bottom - 18.0f, inner.right - 14.0f, inner.bottom }, TextRole::Tiny,
         theme.textFaint);
 }

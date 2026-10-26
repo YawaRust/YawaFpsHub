@@ -64,6 +64,11 @@ struct OverlaySwatch {
 
 OverlaySwatch overlaySwatch(OverlayStyle style);
 
+// Ручные цвета оверлея: одна палитра на редактор и на отрисовку. Индекс -1 означает
+// «как в пресете», 0…5 — конкретный цвет.
+constexpr int kOverlayColorCount = 6;
+std::array<Color, kOverlayColorCount> overlayColorPalette();
+
 // Рисует оверлей выбранного стиля внутри bounds и возвращает прямоугольник содержимого.
 // Один и тот же код рисует и настоящее окно поверх игры, и предпросмотр в настройках.
 Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, const Theme& theme,

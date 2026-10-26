@@ -1,11 +1,16 @@
 #include "platform/main_window.h"
 #include "platform/app_paths.h"
+#include "platform/display_info.h"
+#include "platform/hardware_info_win.h"
 #include "platform/win_util.h"
+#include "ui/bottleneck_view.h"
 #include "ui/chrome.h"
 #include "ui/overlay_view.h"
+#include "render/overlay_painter.h"
 #include "ui/dashboard_view.h"
 #include "ui/layout.h"
 #include "ui/sensors_view.h"
+#include "ui/system_view.h"
 #include "ui/settings_view.h"
 
 #include <windowsx.h>
@@ -14,6 +19,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cwctype>
+#include <iterator>
 #include <array>
 #include <chrono>
 
@@ -38,6 +45,7 @@ void removeDwmBorder(HWND window)
 constexpr int kHotkeyOverlay = 1;
 constexpr int kHotkeyPosition = 2;
 constexpr int kHotkeyWindow = 3;
+constexpr int kHotkeyClickThrough = 4;
 
 } // namespace
 
@@ -125,6 +133,18 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
         saveSettings();
     }
 
+    // Разрешение и герцовку приложение определяет само: они нужны в подписях и как
+    // цель кадра по умолчанию, чтобы бюджет кадра не был заведомо провальным.
+    const DisplayMode display = currentDisplayMode();
+    m_model.displayWidth = display.width;
+    m_model.displayHeight = display.height;
+    m_model.displayRefreshHz = display.refreshHz;
+    if (m_model.settings.capture.targetAuto && display.refreshHz > 0) {
+        m_model.settings.capture.targetHz = std::clamp(display.refreshHz, 30, 480);
+        log.info("монитор: " + std::to_string(display.width) + "x" + std::to_string(display.height) + ", "
+            + std::to_string(display.refreshHz) + " Гц — цель кадра из монитора");
+    }
+
     m_model.settingsPath = settingsPath();
     m_theme = makeTheme(m_model.settings.ui.accent);
 
@@ -133,6 +153,22 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
     }
 
     const GpuRegistry& registry = m_sensors.gpus();
+
+    // Паспорт машины нужен «Балансу» и «Системе». Сбор — реестр, CPUID, SMBIOS и
+    // EnumDisplaySettings: это десятки миллисекунд один раз при старте, а не работа в кадре.
+    {
+        std::string hardwareError;
+        if (collectHardwareInfo(m_model.hardware, registry, hardwareError)) {
+            const CpuIdentity& cpu = m_model.hardware.cpu;
+            log.info("железо: " + (cpu.name.empty() ? std::string("CPU не определён") : cpu.name) + ", ядер "
+                + std::to_string(cpu.physicalCores) + "/" + std::to_string(cpu.logicalProcessors) + ", модулей "
+                + std::to_string(m_model.hardware.memory.modules.size()) + ", мониторов "
+                + std::to_string(m_model.hardware.displays.size()));
+        } else {
+            log.warning("сведения о системе: " + hardwareError);
+        }
+    }
+
     for (std::size_t index = 0; index < registry.count(); ++index) {
         const GpuAdapter* adapter = registry.byIndex(index);
         if (adapter != nullptr) {
@@ -159,8 +195,10 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
         log.warning("оверлей: " + overlayError);
     } else {
         m_overlay.setAccent(m_model.settings.ui.accent);
+        // Правый клик по оверлею возвращает окно приложения.
+        m_overlay.setOwnerWindow(m_window);
         m_overlay.setSettings(m_model.settings.overlay);
-        // Ctrl + перетаскивание прямо по оверлею: сохраняем позицию только по отпускании,
+        // Перетаскивание прямо по оверлею: позицию сохраняем только по отпускании,
         // иначе ini переписывался бы сотни раз за одно движение.
         m_overlay.setMoveHandler([this](int offsetX, int offsetY, bool finished) {
             {
@@ -330,10 +368,11 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         return 0;
 
     case WM_GETMINMAXINFO: {
-        // Ниже этого размера карточки начинают наезжать друг на друга.
+        // Карточки больше не сжимаются под окно, а прокручиваются, поэтому минимум
+        // держим по шапке и рельсу: ниже окно становится нечитаемым.
         auto* info = reinterpret_cast<MINMAXINFO*>(lParam);
-        info->ptMinTrackSize.x = static_cast<LONG>(980.0f * m_dpiScale);
-        info->ptMinTrackSize.y = static_cast<LONG>(680.0f * m_dpiScale);
+        info->ptMinTrackSize.x = static_cast<LONG>(760.0f * m_dpiScale);
+        info->ptMinTrackSize.y = static_cast<LONG>(600.0f * m_dpiScale);
         return 0;
     }
 
@@ -440,6 +479,16 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     case WM_ERASEBKGND:
         return 1;
 
+    case kTickMessage:
+        // Тик сборщика: он приходит по таймеру, а не по движению мыши, поэтому
+        // и окно, и оверлей обновляются сами по себе.
+        onTick();
+        return 0;
+
+    case kExportMessage:
+        exportOverlayStyles();
+        return 0;
+
     case WM_APP + 10:
         m_dpiScale = static_cast<float>(GetDpiForWindow(m_window)) / 96.0f;
         if (m_renderer.isReady()) {
@@ -466,11 +515,44 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
                 SetCapture(m_window);
                 return 0;
             }
-            if (hit.action == ActionKind::SetScale || hit.action == ActionKind::SetOpacity) {
+            if (isSliderAction(hit.action)) {
                 m_dragAction = hit.action;
                 m_dragRect = hit.rect;
                 SetCapture(m_window);
                 applySlider(hit.action, hit.rect, x);
+                return 0;
+            }
+            if (hit.action == ActionKind::ScrollContentThumb) {
+                // Бегунок тянем: запоминаем, за какую точку его взяли.
+                m_draggingScroll = true;
+                m_scrollGrabDy = y - hit.rect.top;
+                SetCapture(m_window);
+                return 0;
+            }
+            if (hit.action == ActionKind::ScrollSensorsThumb) {
+                m_draggingSensors = true;
+                m_scrollGrabDy = y - hit.rect.top;
+                m_scrollTrack = m_model.sensorScrollTrack;
+                SetCapture(m_window);
+                return 0;
+            }
+            if (hit.action == ActionKind::ScrollSensorsTrack) {
+                const float maxScroll = m_model.sensorScrollMax;
+                const float step = std::max(m_model.sensorViewportHeight * 0.85f, 120.0f);
+                const float before = static_cast<float>(m_model.sensorScroll);
+                const bool forward = y > hit.rect.centerY();
+                const float next = std::clamp(before + (forward ? step : -step), 0.0f, maxScroll);
+                m_model.sensorScroll = static_cast<int>(next);
+                InvalidateRect(m_window, nullptr, FALSE);
+                return 0;
+            }
+            if (hit.action == ActionKind::ScrollContentTrack) {
+                // Клик по дорожке листает на страницу в сторону клика.
+                const float limit = std::max(contentDesignHeight() - contentArea().height(), 0.0f);
+                const float step = contentArea().height() * 0.85f;
+                const bool forward = y > hit.rect.centerY();
+                m_model.contentScroll = std::clamp(m_model.contentScroll + (forward ? step : -step), 0.0f, limit);
+                InvalidateRect(m_window, nullptr, FALSE);
                 return 0;
             }
         }
@@ -509,6 +591,30 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         m_hoverIndex = hovered;
         if (repaint) {
             InvalidateRect(m_window, nullptr, FALSE);
+        }
+
+        if (m_draggingScroll || m_draggingSensors) {
+            const float limit = m_draggingSensors ? m_model.sensorScrollMax
+                : std::max(contentDesignHeight() - contentArea().height(), 0.0f);
+            // Геометрия полосы берётся из сохранённой дорожки и текущего вылета бегунка.
+            const Rect& track = m_scrollTrack;
+            const float viewportHeight = m_draggingSensors ? m_model.sensorViewportHeight
+                : contentArea().height();
+            const float designHeight = m_draggingSensors ? std::max(viewportHeight + limit, 1.0f)
+                : contentDesignHeight();
+            const float trackHeight = track.height();
+            const float thumbHeight = std::max(m_draggingSensors ? 24.0f : 40.0f,
+                trackHeight * viewportHeight / designHeight);
+            const float travel = std::max(trackHeight - thumbHeight, 1.0f);
+            const float thumbTop = std::clamp(cursorY - m_scrollGrabDy, track.top, track.top + travel);
+            const float fraction = (thumbTop - track.top) / travel;
+            if (m_draggingSensors) {
+                m_model.sensorScroll = static_cast<int>(limit * fraction);
+            } else {
+                m_model.contentScroll = limit * fraction;
+            }
+            InvalidateRect(m_window, nullptr, FALSE);
+            return 0;
         }
 
         if (m_dragAction == ActionKind::DragOverlay) {
@@ -558,7 +664,8 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         // это привычнее, чем уезжающая страница.
         if (m_model.view == View::Sensors) {
             const int previous = m_model.sensorScroll;
-            m_model.sensorScroll = std::clamp(previous - static_cast<int>(steps) * 3, 0, 4096);
+            const int limit = static_cast<int>(m_model.sensorScrollMax);
+            m_model.sensorScroll = std::clamp(previous - static_cast<int>(steps) * 3, 0, limit);
             if (m_model.sensorScroll != previous) {
                 InvalidateRect(m_window, nullptr, FALSE);
                 return 0;
@@ -569,7 +676,13 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     }
 
     case WM_LBUTTONUP:
-        if (m_dragAction == ActionKind::SetScale || m_dragAction == ActionKind::SetOpacity) {
+        if (m_draggingScroll || m_draggingSensors) {
+            m_draggingScroll = false;
+            m_draggingSensors = false;
+            ReleaseCapture();
+            return 0;
+        }
+        if (isSliderAction(m_dragAction)) {
             m_dragAction = ActionKind::None;
             ReleaseCapture();
             saveSettings();
@@ -595,6 +708,8 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
                 slot = &m_model.settings.hotkeys.position;
             } else if (m_model.hotkeyEditing == 2) {
                 slot = &m_model.settings.hotkeys.window;
+            } else if (m_model.hotkeyEditing == 3) {
+                slot = &m_model.settings.hotkeys.clickThrough;
             }
 
             if (wParam == VK_ESCAPE || slot == nullptr) {
@@ -641,6 +756,11 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             InvalidateRect(m_window, nullptr, FALSE);
         } else if (wParam == static_cast<WPARAM>(kHotkeyWindow)) {
             toggleVisibilityFromTray();
+        } else if (wParam == static_cast<WPARAM>(kHotkeyClickThrough)) {
+            m_model.settings.overlay.clickThrough = !m_model.settings.overlay.clickThrough;
+            m_overlay.setSettings(m_model.settings.overlay);
+            saveSettings();
+            InvalidateRect(m_window, nullptr, FALSE);
         }
         return 0;
 
@@ -704,13 +824,18 @@ float MainWindow::contentDesignHeight() const
 {
     switch (m_model.view) {
     case View::Dashboard:
-        return kDashboardHeight;
+        // В узком окне карточки идут по одной — контент выше, и прокрутка должна доставать до конца.
+        return contentArea().width() < kDashboardNarrowWidth ? kDashboardNarrowHeight : kDashboardHeight;
     case View::Sensors:
         return contentArea().height();
     case View::Overlay:
-        return contentArea().height();
+        return kOverlayHeight;
     case View::Settings:
         return kSettingsHeight;
+    case View::Bottleneck:
+        return balanceHeight(m_model.balance.advice.size(), contentArea().width() < kDashboardNarrowWidth);
+    case View::System:
+        return systemHeight(contentArea().width() < kDashboardNarrowWidth);
     }
     return kDashboardHeight;
 }
@@ -727,7 +852,7 @@ void MainWindow::scrollContent(float delta)
     InvalidateRect(m_window, nullptr, FALSE);
 }
 
-void MainWindow::drawScrollBar(const Rect& viewport)
+void MainWindow::drawScrollBar(const Rect& viewport, std::vector<UiHit>& hits)
 {
     const float limit = contentDesignHeight() - viewport.height();
     if (limit <= 1.0f) {
@@ -739,9 +864,20 @@ void MainWindow::drawScrollBar(const Rect& viewport)
     const float thumbHeight = std::max(40.0f, trackHeight * viewport.height() / contentDesignHeight());
     const float travel = trackHeight - thumbHeight;
     const float fraction = std::clamp(m_model.contentScroll / limit, 0.0f, 1.0f);
-    const Rect thumb{ viewport.right + 6.0f, trackTop + travel * fraction, viewport.right + 9.0f,
-        trackTop + travel * fraction + thumbHeight };
-    m_renderer.fillRoundRect(thumb, 2.0f, m_theme.lineStrong.withAlpha(0.85f));
+    const float thumbTop = trackTop + travel * fraction;
+
+    // Дорожка и бегунок: по дорожке кликаем, бегунок тянем мышью.
+    const Rect track{ viewport.right + 4.0f, trackTop, viewport.right + 11.0f, trackBottom };
+    const Rect thumb{ track.left, thumbTop, track.right, thumbTop + thumbHeight };
+    const bool hovered = isHovered(m_model, track) || m_draggingScroll;
+    m_renderer.fillRoundRect(track, 3.0f, m_theme.line.withAlpha(hovered ? 0.55f : 0.28f));
+    m_renderer.fillRoundRect(thumb, 3.0f,
+        m_theme.lineStrong.withAlpha(hovered || m_draggingScroll ? 1.0f : 0.8f));
+
+    hits.push_back(UiHit{ Rect{ track.left - 2.0f, thumbTop, track.right + 2.0f, thumbTop + thumbHeight },
+        ActionKind::ScrollContentThumb, 0 });
+    hits.push_back(UiHit{ track, ActionKind::ScrollContentTrack, 0 });
+    m_scrollTrack = track;
 }
 
 std::vector<UiHit> MainWindow::buildHits()
@@ -776,13 +912,18 @@ std::vector<UiHit> MainWindow::buildHits()
     case View::Settings:
         drawSettings(m_renderer, m_model, m_theme, area, hits);
         break;
+    case View::Bottleneck:
+        drawBottleneckView(m_renderer, m_model, m_theme, area, hits);
+        break;
+    case View::System:
+        drawSystemView(m_renderer, m_model, m_theme, area, hits);
+        break;
     }
     if (scrolled) {
         m_renderer.popTranslate();
     }
     m_model.cursorY = cursorY;
     m_renderer.popClip();
-    drawScrollBar(viewport);
     return hits;
 }
 
@@ -811,6 +952,8 @@ void MainWindow::paint()
             hit.rect.bottom -= m_model.contentScroll;
         }
     }
+    // Полоса прокрутки живёт в координатах окна, поэтому её хиты добавляются после сдвига.
+    drawScrollBar(contentArea(), m_hits);
     drawRail(m_renderer, m_model, m_theme, m_hits);
     drawTitleBar(m_renderer, m_model, m_theme, m_hits);
     drawTopBar(m_renderer, m_model, m_theme, m_hits);
@@ -877,10 +1020,20 @@ void MainWindow::applySlider(ActionKind action, const Rect& rect, float x)
     UiHit hit{ rect, action, 0 };
 
     if (action == ActionKind::SetScale) {
-        // Шаг 5 %: значения остаются ровными и хорошо читаются в ini.
-        hit.value = 70 + static_cast<int>(std::lround(fraction * 90.0f / 5.0f)) * 5;
+        // Шаг 1 %: ползунок идёт за курсором без рывков.
+        hit.value = 70 + static_cast<int>(std::lround(fraction * 90.0f));
+    } else if (action == ActionKind::SetOverlayTextScale) {
+        hit.value = 85 + static_cast<int>(std::lround(fraction * 45.0f));
+    } else if (action == ActionKind::SetOverlayPadding) {
+        hit.value = static_cast<int>(std::lround(fraction * 28.0f));
+    } else if (action == ActionKind::SetOverlayRowGap) {
+        hit.value = static_cast<int>(std::lround(fraction * 14.0f));
     } else if (action == ActionKind::SetOverlayRadius) {
         hit.value = static_cast<int>(std::lround(fraction * 24.0f));
+    } else if (action == ActionKind::SetBorderWidth) {
+        hit.value = static_cast<int>(std::lround(fraction * 3.0f));
+    } else if (action == ActionKind::SetLetterSpacing) {
+        hit.value = static_cast<int>(std::lround(fraction * 200.0f));
     } else {
         hit.value = static_cast<int>(std::lround(fraction * 100.0f));
     }
@@ -963,7 +1116,15 @@ void MainWindow::applyAction(const UiHit& hit)
         break;
 
     case ActionKind::SetTargetHz:
-        m_model.settings.capture.targetHz = std::clamp(hit.value, 30, 480);
+        // Ноль — чип «Авто»: цель кадра берётся из герцовки монитора.
+        m_model.settings.capture.targetAuto = hit.value == 0;
+        if (hit.value == 0) {
+            m_model.settings.capture.targetHz = m_model.displayRefreshHz > 0
+                ? std::clamp(m_model.displayRefreshHz, 30, 480)
+                : m_model.settings.capture.targetHz;
+        } else {
+            m_model.settings.capture.targetHz = std::clamp(hit.value, 30, 480);
+        }
         saveSettings();
         break;
 
@@ -986,7 +1147,7 @@ void MainWindow::applyAction(const UiHit& hit)
         break;
 
     case ActionKind::CaptureHotkey:
-        m_model.hotkeyEditing = std::clamp(hit.value, 0, 2);
+        m_model.hotkeyEditing = std::clamp(hit.value, 0, 3);
         break;
 
     case ActionKind::ToggleOverlayBackground:
@@ -997,6 +1158,12 @@ void MainWindow::applyAction(const UiHit& hit)
 
     case ActionKind::ToggleOverlayBorder:
         m_model.settings.overlay.showBorder = !m_model.settings.overlay.showBorder;
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
+    case ActionKind::ToggleOverlayClickThrough:
+        m_model.settings.overlay.clickThrough = !m_model.settings.overlay.clickThrough;
         m_overlay.setSettings(m_model.settings.overlay);
         saveSettings();
         break;
@@ -1155,7 +1322,7 @@ void MainWindow::applyAction(const UiHit& hit)
         break;
 
     case ActionKind::OpenSettingsFolder:
-        revealInExplorer(executableDirectory());
+        revealInExplorer(dataDirectory());
         break;
 
     case ActionKind::ResetSettings:
@@ -1174,6 +1341,94 @@ void MainWindow::applyAction(const UiHit& hit)
     case ActionKind::SetOpacity:
         m_model.settings.overlay.opacityPercent = std::clamp(hit.value, 0, 100);
         m_overlay.setSettings(m_model.settings.overlay);
+        break;
+
+    case ActionKind::SetOverlayTextScale:
+        m_model.settings.overlay.textScalePercent = std::clamp(hit.value, 85, 130);
+        m_overlay.setSettings(m_model.settings.overlay);
+        break;
+
+    case ActionKind::SetOverlayBgOpacity:
+        m_model.settings.overlay.backgroundOpacityPercent = std::clamp(hit.value, 0, 100);
+        m_overlay.setSettings(m_model.settings.overlay);
+        break;
+
+    case ActionKind::SetOverlayPadding:
+        m_model.settings.overlay.paddingPx = std::clamp(hit.value, 0, 28);
+        m_overlay.setSettings(m_model.settings.overlay);
+        break;
+
+    case ActionKind::SetOverlayRowGap:
+        m_model.settings.overlay.rowGapPx = std::clamp(hit.value, 0, 14);
+        m_overlay.setSettings(m_model.settings.overlay);
+        break;
+
+    case ActionKind::SetValueColor:
+        m_model.settings.overlay.valueColor = std::clamp(hit.value, -1, kOverlayColorCount - 1);
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
+    case ActionKind::SetLabelColor:
+        m_model.settings.overlay.labelColor = std::clamp(hit.value, -1, kOverlayColorCount - 1);
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
+    case ActionKind::SetAccentColor:
+        m_model.settings.overlay.accentColor = std::clamp(hit.value, -1, kOverlayColorCount - 1);
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
+    case ActionKind::SetRowColor: {
+        const int field = hit.value / 8;
+        const int color = hit.value % 8 - 1;
+        if (field >= 0 && field < static_cast<int>(kLabelCount)) {
+            m_model.settings.overlay.rowColors[static_cast<std::size_t>(field)]
+                = std::clamp(color, -1, kOverlayColorCount - 1);
+            m_overlay.setSettings(m_model.settings.overlay);
+            saveSettings();
+        }
+        break;
+    }
+
+    case ActionKind::SetBorderWidth:
+        // Цвета, рамка, тень и типографика применяются без анимации:
+        // пользователь двигает ползунок и ждёт мгновенного отклика.
+        m_model.settings.overlay.borderWidth = std::clamp(hit.value, -1, 3);
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
+    case ActionKind::SetShadowStrength:
+        m_model.settings.overlay.shadowStrength = std::clamp(hit.value, 0, 100);
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
+    case ActionKind::SetLetterSpacing:
+        m_model.settings.overlay.letterSpacing = std::clamp(hit.value, 0, 200);
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
+    case ActionKind::SetUppercase:
+        m_model.settings.overlay.uppercaseMode = std::clamp(hit.value, -1, 1);
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
+    case ActionKind::SetSeparators:
+        m_model.settings.overlay.separatorsMode = std::clamp(hit.value, -1, 1);
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
+    case ActionKind::SetFpsDecimals:
+        m_model.settings.overlay.fpsDecimals = std::clamp(hit.value, -1, 2);
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
         break;
 
     case ActionKind::ToggleMetric:
@@ -1230,6 +1485,13 @@ void MainWindow::applyAction(const UiHit& hit)
         // Само перетаскивание обрабатывается в WM_MOUSEMOVE, сюда попадает только клик.
         break;
 
+    case ActionKind::ScrollContentThumb:
+    case ActionKind::ScrollContentTrack:
+    case ActionKind::ScrollSensorsThumb:
+    case ActionKind::ScrollSensorsTrack:
+        // Полосы прокрутки обрабатываются раньше, в WM_LBUTTONDOWN: клик до сюда не доходит.
+        break;
+
     case ActionKind::None:
         break;
     }
@@ -1271,6 +1533,54 @@ void MainWindow::restartSampling()
     startSampling();
 }
 
+bool MainWindow::isSystemProcessCached(std::uint32_t processId)
+{
+    for (const auto& [cachedId, isSystem] : m_systemProcessCache) {
+        if (cachedId == processId) {
+            return isSystem;
+        }
+    }
+
+    // Имя процесса: dwm.exe, explorer.exe и хосты оболочки подают кадры постоянно,
+    // но игрой они не являются.
+    static constexpr std::array<std::wstring_view, 14> kSystemNames{ L"dwm.exe", L"explorer.exe",
+        L"csrss.exe", L"winlogon.exe", L"wininit.exe", L"services.exe", L"lsass.exe", L"smss.exe",
+        L"searchhost.exe", L"startmenuexperiencehost.exe", L"textinputhost.exe",
+        L"shellexperiencehost.exe", L"applicationframehost.exe", L"lockapp.exe" };
+
+    bool system = true;
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId);
+    if (process != nullptr) {
+        wchar_t path[512]{};
+        DWORD size = static_cast<DWORD>(std::size(path));
+        if (QueryFullProcessImageNameW(process, 0, path, &size) != FALSE && size > 0) {
+            std::wstring name(path, size);
+            const std::size_t slash = name.find_last_of(L"\\/");
+            if (slash != std::wstring::npos) {
+                name.erase(0, slash + 1);
+            }
+            for (wchar_t& symbol : name) {
+                symbol = static_cast<wchar_t>(std::towlower(symbol));
+            }
+            system = false;
+            for (std::wstring_view known : kSystemNames) {
+                if (name == known) {
+                    system = true;
+                    break;
+                }
+            }
+        }
+        CloseHandle(process);
+    }
+
+    // Кэш короткий: pid переиспользуются, но за пару секунд состав игры не меняется.
+    if (m_systemProcessCache.size() > 32) {
+        m_systemProcessCache.clear();
+    }
+    m_systemProcessCache.emplace_back(processId, system);
+    return system;
+}
+
 void MainWindow::samplingLoop()
 {
     yawa::FrameTracker tracker(EtwFrameSession::qpcFrequency());
@@ -1304,6 +1614,28 @@ void MainWindow::samplingLoop()
 
             m_etw.drain(tracker);
 
+            // Игра — это процесс активного окна, как в RTSS. Без этого на мониторе 144 Гц
+            // композитор рабочего стола обгонял игру на 120 кадрах.
+            DWORD foregroundPid = 0;
+            if (GetForegroundWindow() != nullptr) {
+                GetWindowThreadProcessId(GetForegroundWindow(), &foregroundPid);
+            }
+            if (foregroundPid == GetCurrentProcessId()) {
+                foregroundPid = 0;
+            }
+            tracker.setForegroundProcess(static_cast<std::uint32_t>(foregroundPid));
+
+            std::array<std::uint32_t, yawa::FrameTracker::kMaxStreams> streamPids{};
+            const std::size_t streamCount = tracker.streamProcesses(streamPids.data(), streamPids.size());
+            std::array<std::uint32_t, yawa::FrameTracker::kMaxStreams> systemPids{};
+            std::size_t systemCount = 0;
+            for (std::size_t index = 0; index < streamCount; ++index) {
+                if (isSystemProcessCached(streamPids[index])) {
+                    systemPids[systemCount++] = streamPids[index];
+                }
+            }
+            tracker.setSystemProcesses(systemPids.data(), systemCount);
+
             yawa::SystemSnapshot snapshot;
             m_sensors.sample(snapshot);
 
@@ -1323,6 +1655,10 @@ void MainWindow::samplingLoop()
                 m_model.cpuCores = m_sensors.coreCount();
                 m_model.cpuThreads = m_sensors.cpuThreads();
                 m_model.cpuName = m_sensors.cpuName();
+                // Узкое место пересчитываем на том же снимке, что и экраны: отдельного
+                // опроса железа нет, и цифры на «Балансе» всегда совпадают с «Обзором».
+                m_model.balance = analyzeBottleneck(m_model.hardware,
+                    loadFromStore(m_model.store, static_cast<double>(m_model.settings.capture.targetHz)));
                 m_model.etwRunning = m_etw.isRunning();
                 if (!foreground.empty()) {
                     m_model.foregroundApp = foreground;
@@ -1445,6 +1781,7 @@ void MainWindow::registerHotkeys()
     bind(kHotkeyOverlay, m_model.settings.hotkeys.overlay);
     bind(kHotkeyPosition, m_model.settings.hotkeys.position);
     bind(kHotkeyWindow, m_model.settings.hotkeys.window);
+    bind(kHotkeyClickThrough, m_model.settings.hotkeys.clickThrough);
 }
 
 } // namespace yawa

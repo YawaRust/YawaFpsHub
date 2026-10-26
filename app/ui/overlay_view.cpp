@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <string>
 
 namespace yawa {
@@ -54,6 +55,110 @@ void drawSlider(Renderer& renderer, const Rect& row, int value, int minimum, int
     hits.push_back(UiHit{ Rect{ track.left, track.top - 8.0f, track.right, track.bottom + 8.0f }, action, 0 });
 }
 
+// Ползунок с готовой подписью значения: нужен там, где положение бегунка и число
+// не совпадают («из стиля» рисуется на месте значения пресета).
+void drawSliderAt(Renderer& renderer, const Rect& row, float fraction, std::wstring_view caption,
+    std::wstring_view valueText, const Theme& theme, std::vector<UiHit>& hits, ActionKind action)
+{
+    renderer.text(caption, Rect{ row.left, row.top, row.left + 160.0f, row.top + 16.0f }, TextRole::Small,
+        theme.textDim);
+    renderer.text(valueText, Rect{ row.right - 90.0f, row.top, row.right, row.top + 16.0f }, TextRole::Small,
+        theme.text, TextAlign::Right);
+
+    const Rect track{ row.left, row.top + 24.0f, row.right, row.top + 34.0f };
+    drawBar(renderer, track, std::clamp(fraction, 0.0f, 1.0f), theme.accent, theme);
+    renderer.fillCircle(track.left + track.width() * std::clamp(fraction, 0.0f, 1.0f), track.centerY(), 6.0f,
+        theme.accent);
+    hits.push_back(UiHit{ Rect{ track.left, track.top - 8.0f, track.right, track.bottom + 8.0f }, action, 0 });
+}
+
+// Палитра цветов оверлея: «авто» (из пресета) и шесть цветов.
+void drawColorRow(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& row,
+    std::wstring_view caption, int selected, ActionKind action, std::vector<UiHit>& hits)
+{
+    renderer.text(caption, Rect{ row.left, row.top, row.left + 150.0f, row.bottom }, TextRole::Small,
+        theme.textDim);
+
+    constexpr int kCount = kOverlayColorCount + 1;
+    const float chipWidth = 26.0f;
+    const float gap = 4.0f;
+    const float total = static_cast<float>(kCount) * chipWidth + static_cast<float>(kCount - 1) * gap;
+    float left = row.right - total;
+    const auto palette = overlayColorPalette();
+    for (int index = -1; index < kOverlayColorCount; ++index) {
+        const Rect chip{ left, row.top, left + chipWidth, row.top + 22.0f };
+        const bool active = index == selected;
+        const bool hover = isHovered(model, chip);
+        renderer.fillRoundRect(chip, 7.0f, active ? theme.accentSoft : theme.panelSoft.withAlpha(hover ? 0.95f : 0.6f));
+        if (active) {
+            renderer.strokeRoundRect(chip, 7.0f, theme.accentGlow, 1.0f);
+        }
+        if (index < 0) {
+            renderer.text(L"авто", chip, TextRole::Tiny, active ? theme.accent : theme.textFaint,
+                TextAlign::Center);
+        } else {
+            renderer.fillCircle(chip.centerX(), chip.centerY(), 6.0f,
+                palette[static_cast<std::size_t>(index)].withAlpha(active ? 1.0f : 0.85f));
+        }
+        hits.push_back(UiHit{ chip, action, index });
+        left += chipWidth + gap;
+    }
+}
+
+// Цвет одной строки оверлея: «авто» и шесть цветов палитры. Значение хита кодирует
+// и номер строки, и цвет, чтобы обойтись одним действием.
+void drawRowColorRow(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& row,
+    std::wstring_view caption, int selected, int field, std::vector<UiHit>& hits)
+{
+    renderer.text(caption, Rect{ row.left, row.top, row.left + 60.0f, row.bottom }, TextRole::Small,
+        theme.textDim);
+
+    constexpr int kCount = kOverlayColorCount + 1;
+    const float chipWidth = 22.0f;
+    const float gap = 4.0f;
+    const float total = static_cast<float>(kCount) * chipWidth + static_cast<float>(kCount - 1) * gap;
+    float left = row.right - total;
+    const auto palette = overlayColorPalette();
+    for (int index = -1; index < kOverlayColorCount; ++index) {
+        // Чипы той же высоты, что и строка: иначе подписи выглядели сдвинутыми вниз.
+        const Rect chip{ left, row.top, left + chipWidth, row.bottom };
+        const bool active = index == selected;
+        const bool hover = isHovered(model, chip);
+        renderer.fillRoundRect(chip, 7.0f, active ? theme.accentSoft : theme.panelSoft.withAlpha(hover ? 0.95f : 0.6f));
+        if (active) {
+            renderer.strokeRoundRect(chip, 7.0f, theme.accentGlow, 1.0f);
+        }
+        if (index < 0) {
+            renderer.text(L"а", chip, TextRole::Tiny, active ? theme.accent : theme.textFaint, TextAlign::Center);
+        } else {
+            renderer.fillCircle(chip.centerX(), chip.centerY(), 5.5f,
+                palette[static_cast<std::size_t>(index)].withAlpha(active ? 1.0f : 0.85f));
+        }
+        hits.push_back(UiHit{ chip, ActionKind::SetRowColor, field * 8 + index + 1 });
+        left += chipWidth + gap;
+    }
+}
+
+// Тройной выбор «как в стиле / включено / выключено» для необязательных переключателей.
+void drawTriState(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& row,
+    std::wstring_view caption, int mode, ActionKind action, std::vector<UiHit>& hits)
+{
+    renderer.text(caption, Rect{ row.left, row.top, row.right - 150.0f, row.bottom }, TextRole::Small,
+        theme.textDim);
+    const std::array<std::wstring_view, 3> names{ L"Стиль", L"Вкл", L"Выкл" };
+    const std::array<int, 3> values{ -1, 1, 0 };
+    const float chipWidth = 46.0f;
+    const float gap = 5.0f;
+    float left = row.right - (chipWidth * 3.0f + gap * 2.0f);
+    for (std::size_t index = 0; index < names.size(); ++index) {
+        const Rect chip{ left, row.top, left + chipWidth, row.top + 22.0f };
+        const bool active = mode == values[index];
+        drawChip(renderer, chip, names[index], active, theme, TextRole::Tiny, isHovered(model, chip));
+        hits.push_back(UiHit{ chip, action, values[index] });
+        left += chipWidth + gap;
+    }
+}
+
 void drawToggleRow(Renderer& renderer, const Rect& row, std::wstring_view label, bool on, const Theme& theme,
     std::vector<UiHit>& hits, ActionKind action, int value)
 {
@@ -72,6 +177,137 @@ void drawToggleRow(Renderer& renderer, const Rect& row, std::wstring_view label,
 void drawStyleGallery(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area,
     std::vector<UiHit>& hits);
 
+// Скруглённые углы для сцены: Renderer рисует клипом по прямоугольнику, поэтому
+// «съедаем» уголки фоном карточки — по строкам дуги, как маска.
+void maskCorners(Renderer& renderer, const Rect& rect, float radius, const Color& color)
+{
+    const int steps = static_cast<int>(radius);
+    for (int row = 0; row < steps; ++row) {
+        const float y = static_cast<float>(row);
+        const float dy = radius - y;
+        const float bite = radius - std::sqrt(std::max(radius * radius - dy * dy, 0.0f));
+        if (bite <= 0.05f) {
+            continue;
+        }
+        const float top = rect.top + y;
+        renderer.fillRect(Rect{ rect.left, top, rect.left + bite, top + 1.0f }, color);
+        renderer.fillRect(Rect{ rect.right - bite, top, rect.right, top + 1.0f }, color);
+        const float bottom = rect.bottom - y - 1.0f;
+        renderer.fillRect(Rect{ rect.left, bottom, rect.left + bite, bottom + 1.0f }, color);
+        renderer.fillRect(Rect{ rect.right - bite, bottom, rect.right, bottom + 1.0f }, color);
+    }
+}
+
+Color mixColor(const Color& from, const Color& to, float t)
+{
+    const float k = std::clamp(t, 0.0f, 1.0f);
+    return Color{ from.r + (to.r - from.r) * k, from.g + (to.g - from.g) * k, from.b + (to.b - from.b) * k,
+        from.a + (to.a - from.a) * k };
+}
+
+// Макет игровой сцены как в прототипе: вечернее небо, солнце за хребтом, сетка пола
+// и полоса задания. На нём сразу видно, читается ли оверлей на живом фоне.
+void drawSceneBackdrop(Renderer& renderer, const Rect& scene, const Theme& theme)
+{
+    const Color skyTop = fromRgba(0xFF0B1020);
+    const Color skyMid = fromRgba(0xFF3A2B4A);
+    const Color skyLow = fromRgba(0xFF8A4A32);
+    const Color horizon = fromRgba(0xFFFF8A3D);
+    const Color ground = fromRgba(0xFF05070B);
+
+    renderer.fillRoundRect(scene, 14.0f, skyTop);
+    const float skyBottom = scene.top + scene.height() * 0.62f;
+    const int bands = 48;
+    const float bandHeight = (skyBottom - scene.top) / static_cast<float>(bands);
+    for (int band = 0; band < bands; ++band) {
+        const float t = static_cast<float>(band) / static_cast<float>(bands - 1);
+        const Color color = t < 0.55f ? mixColor(skyTop, skyMid, t / 0.55f)
+                                      : mixColor(skyMid, t < 0.88f ? skyLow : horizon,
+                                            (t - 0.55f) / 0.45f);
+        const float top = scene.top + static_cast<float>(band) * bandHeight;
+        renderer.fillRect(Rect{ scene.left, top, scene.right, top + bandHeight + 0.6f }, color);
+    }
+
+    // Солнце: мягкое свечение и сам диск у линии хребта.
+    const float sunX = scene.left + scene.width() * 0.66f;
+    const float sunY = skyBottom - 22.0f;
+    renderer.fillRadialGlow(sunX, sunY, scene.height() * 0.36f, fromRgba(0xFFFF9A4D).withAlpha(0.26f));
+    renderer.fillCircle(sunX, sunY, 21.0f, fromRgba(0xFFFFC46B).withAlpha(0.62f));
+    renderer.fillCircle(sunX, sunY, 13.0f, fromRgba(0xFFFFE7BC).withAlpha(0.45f));
+
+    // Земля и перспективная сетка: горизонтали сгущаются к горизонту.
+    renderer.fillRect(Rect{ scene.left, skyBottom, scene.right, scene.bottom }, ground.withAlpha(0.92f));
+    const int rows = 9;
+    for (int row = 1; row <= rows; ++row) {
+        const float t = static_cast<float>(row) / static_cast<float>(rows);
+        const float y = skyBottom + (scene.bottom - skyBottom) * t * t;
+        renderer.drawLine(scene.left, y, scene.right, y, fromRgba(0xFFFFB27A).withAlpha(0.10f), 1.0f);
+    }
+    const float centerX = scene.centerX();
+    for (int column = -5; column <= 5; ++column) {
+        if (column == 0) {
+            continue;
+        }
+        const float bottomX = centerX + static_cast<float>(column) * (scene.width() / 6.0f);
+        renderer.drawLine(centerX + static_cast<float>(column) * 12.0f, skyBottom, bottomX, scene.bottom,
+            fromRgba(0xFFFFB27A).withAlpha(0.08f), 1.0f);
+    }
+
+    // Хребет: плосковерхие скалы со скосами, как в сцене прототипа. Скосы — два
+    // более низких столбца по краям: силуэт получается ступенчатым, а не «кирпичным».
+    constexpr int kPeaks = 13;
+    const Color rock = fromRgba(0xFF0A0C12).withAlpha(0.95f);
+    for (int peak = 0; peak < kPeaks; ++peak) {
+        const float step = scene.width() / static_cast<float>(kPeaks);
+        const float left = scene.left + step * static_cast<float>(peak);
+        const float slim = step * 0.52f;
+        const float height = 14.0f + static_cast<float>((peak * 53) % 34);
+        const float center = left + step * 0.44f;
+        renderer.fillRoundRect(Rect{ center, skyBottom - height - 4.0f, center + slim, skyBottom + 2.0f }, 2.0f,
+            rock);
+        renderer.fillRoundRect(Rect{ center - step * 0.10f, skyBottom - height * 0.62f,
+                                   center + step * 0.05f, skyBottom + 2.0f },
+            2.0f, rock);
+        renderer.fillRoundRect(Rect{ center + slim - step * 0.05f, skyBottom - height * 0.66f,
+                                   center + slim + step * 0.10f, skyBottom + 2.0f },
+            2.0f, rock);
+    }
+    renderer.fillRect(Rect{ scene.left, skyBottom - 1.0f, scene.right, skyBottom + 2.0f },
+        fromRgba(0xFFFFA45C).withAlpha(0.16f));
+
+    // Миникарта в правом верхнем углу: кольцо и зелёный сектор, как в прототипе.
+    const float mapRadius = std::max(scene.height() * 0.085f, 14.0f);
+    const float mapX = scene.right - scene.width() * 0.045f - mapRadius;
+    const float mapY = scene.top + scene.height() * 0.06f + mapRadius;
+    renderer.fillCircle(mapX, mapY, mapRadius, fromRgba(0xFF0C1018).withAlpha(0.55f));
+    renderer.strokeCircle(mapX, mapY, mapRadius, fromRgba(0xFFFFFFFF).withAlpha(0.22f), 1.0f);
+    renderer.drawArc(mapX, mapY, mapRadius - 1.5f, 3.0f, 0.24f, theme.accent.withAlpha(0.6f));
+
+    // Прицел в центре и карточка задания снизу.
+    const float crossY = scene.top + scene.height() * 0.46f;
+    renderer.drawLine(scene.centerX() - 7.0f, crossY, scene.centerX() + 7.0f, crossY,
+        fromRgba(0xFFFFFFFF).withAlpha(0.55f), 1.2f);
+    renderer.drawLine(scene.centerX(), crossY - 7.0f, scene.centerX(), crossY + 7.0f,
+        fromRgba(0xFFFFFFFF).withAlpha(0.55f), 1.2f);
+
+    const float taskTop = scene.bottom - 44.0f;
+    renderer.text(L"Задание · Погоня в Найт-Сити",
+        Rect{ scene.left + 20.0f, taskTop, scene.left + 260.0f, taskTop + 16.0f }, TextRole::Tiny,
+        fromRgba(0xFFFFFFFF).withAlpha(0.72f));
+    const Rect progress{ scene.left + 20.0f, taskTop + 22.0f, scene.left + scene.width() * 0.36f,
+        taskTop + 26.0f };
+    renderer.fillRoundRect(progress, 2.0f, fromRgba(0xFFFFFFFF).withAlpha(0.14f));
+    renderer.fillRoundRect(Rect{ progress.left, progress.top, progress.left + progress.width() * 0.25f,
+                               progress.bottom },
+        2.0f, fromRgba(0xFFFFFFFF).withAlpha(0.8f));
+    renderer.text(L"24", Rect{ scene.right - 92.0f, taskTop + 6.0f, scene.right - 46.0f, taskTop + 34.0f },
+        TextRole::Value, fromRgba(0xFFFFFFFF).withAlpha(0.92f), TextAlign::Right);
+    renderer.text(L"/ 96", Rect{ scene.right - 46.0f, taskTop + 12.0f, scene.right - 18.0f, taskTop + 32.0f },
+        TextRole::Small, fromRgba(0xFFFFFFFF).withAlpha(0.55f));
+
+    maskCorners(renderer, scene, 14.0f, theme.panel);
+}
+
 void drawPreviewCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card,
     std::vector<UiHit>& hits)
 {
@@ -80,7 +316,8 @@ void drawPreviewCard(Renderer& renderer, const AppModel& model, const Theme& the
 
     renderer.text(L"Оверлей поверх игры", Rect{ inner.left, inner.top, inner.right, inner.top + 22.0f },
         TextRole::Heading, theme.text);
-    renderer.text(L"Ctrl + мышь по оверлею — перетащить; здесь — предпросмотр на макете сцены",
+    // Подпись карточки — как в прототипе; про перетаскивание говорит подсказка внизу.
+    renderer.text(L"Предпросмотр. В приложении — отдельное topmost-окно",
         Rect{ inner.left, inner.top + 20.0f, inner.right - 60.0f, inner.top + 38.0f }, TextRole::Tiny, theme.textFaint);
 
     const Rect tag{ inner.right - 72.0f, inner.top, inner.right, inner.top + 20.0f };
@@ -88,21 +325,12 @@ void drawPreviewCard(Renderer& renderer, const AppModel& model, const Theme& the
     renderer.text(hotkeyName(model.settings.hotkeys.overlay), tag, TextRole::Tiny, theme.textFaint,
         TextAlign::Center);
 
-    const float galleryTop = inner.bottom - 104.0f;
-    const Rect scene{ inner.left, inner.top + 46.0f, inner.right, std::max(inner.top + 76.0f, galleryTop - 10.0f) };
+    const Rect scene{ inner.left, inner.top + 46.0f, inner.right, inner.bottom };
 
-    // Макет игровой сцены: небо, земля и пара силуэтов — на нём видно, как читается оверлей.
-    renderer.fillRoundRect(scene, kCardRadius, theme.panelSoft);
-    renderer.fillRect(Rect{ scene.left + 1.0f, scene.centerY() + 14.0f, scene.right - 1.0f, scene.bottom - 1.0f },
-        theme.background.withAlpha(0.55f));
-    renderer.fillCircle(scene.right - 74.0f, scene.top + 56.0f, 22.0f, theme.warn.withAlpha(0.16f));
-    for (int index = 0; index < 5; ++index) {
-        const float width = 26.0f + static_cast<float>(index % 3) * 12.0f;
-        const float left = scene.left + 26.0f + static_cast<float>(index) * 58.0f;
-        const float height = 40.0f + static_cast<float>(index % 4) * 22.0f;
-        renderer.fillRoundRect(
-            Rect{ left, scene.bottom - height, left + width, scene.bottom }, 3.0f, theme.line.withAlpha(0.8f));
-    }
+    // Сцена: на ней сразу видно, читается ли оверлей поверх живого фона.
+    renderer.pushClip(scene);
+    drawSceneBackdrop(renderer, scene, theme);
+    renderer.popClip();
 
     const OverlayFormats formats{ renderer.dwrite(), renderer.textFormat(TextRole::Heading),
         renderer.textFormat(TextRole::Value), renderer.textFormat(TextRole::Small),
@@ -111,10 +339,8 @@ void drawPreviewCard(Renderer& renderer, const AppModel& model, const Theme& the
     const float scale = static_cast<float>(model.settings.overlay.scalePercent) / 100.0f * 0.9f;
     paintOverlay(renderer.target(), model.settings.overlay, theme, text, scene, scale, formats);
 
-    renderer.strokeRoundRect(scene, kCardRadius, theme.line, 1.0f);
+    renderer.strokeRoundRect(scene, 14.0f, theme.line, 1.0f);
     hits.push_back(UiHit{ scene, ActionKind::DragOverlay, 0 });
-
-    drawStyleGallery(renderer, model, theme, Rect{ inner.left, galleryTop, inner.right, inner.bottom }, hits);
 }
 
 void drawStyleGallery(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area,
@@ -208,23 +434,37 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
     top += 30.0f;
 
     drawSlider(renderer, Rect{ inner.left, top, inner.right, top + 34.0f }, overlay.scalePercent, 70, 160,
-        L"Масштаб", theme, hits, ActionKind::SetScale, L" %");
+        L"Масштаб плашки", theme, hits, ActionKind::SetScale, L" %");
+    top += 44.0f;
+    // Размер текста — отдельно от масштаба: цифры можно укрупнить, не раздувая плашку.
+    drawSlider(renderer, Rect{ inner.left, top, inner.right, top + 34.0f }, overlay.textScalePercent, 85, 130,
+        L"Размер текста", theme, hits, ActionKind::SetOverlayTextScale, L" %");
     top += 44.0f;
     drawSlider(renderer, Rect{ inner.left, top, inner.right, top + 34.0f }, overlay.opacityPercent, 0, 100,
-        L"Прозрачность", theme, hits, ActionKind::SetOpacity, L" %");
-    top += 42.0f;
+        L"Прозрачность окна", theme, hits, ActionKind::SetOpacity, L" %");
+    top += 44.0f;
+
+    // Прозрачность самой подложки: «Фон» и прозрачность окна — разные вещи.
+    const int backgroundOpacity = overlay.backgroundOpacityPercent;
+    drawSliderAt(renderer, Rect{ inner.left, top, inner.right, top + 34.0f },
+        backgroundOpacity < 0 ? 1.0f : static_cast<float>(backgroundOpacity) / 100.0f, L"Фон подложки",
+        backgroundOpacity < 0 ? L"из стиля" : std::to_wstring(backgroundOpacity) + L" %", theme, hits,
+        ActionKind::SetOverlayBgOpacity);
+    top += 44.0f;
 
     // Оформление: то, что нельзя выразить пресетом, но нужно для своей картинки.
     renderer.text(L"Оформление", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
     top += 18.0f;
-    const std::array<std::pair<std::wstring_view, bool>, 3> switches{
+    const std::array<std::pair<std::wstring_view, bool>, 4> switches{
         std::pair<std::wstring_view, bool>{ L"Фон", overlay.showBackground },
         std::pair<std::wstring_view, bool>{ L"Рамка", overlay.showBorder },
-        std::pair<std::wstring_view, bool>{ L"Тень", overlay.showShadow }
+        std::pair<std::wstring_view, bool>{ L"Тень", overlay.showShadow },
+        std::pair<std::wstring_view, bool>{ L"Сквозной клик", overlay.clickThrough }
     };
-    const std::array<ActionKind, 3> switchActions{ ActionKind::ToggleOverlayBackground,
-        ActionKind::ToggleOverlayBorder, ActionKind::ToggleOverlayShadow };
-    const float switchWidth = (inner.width() - 2.0f * 6.0f) / 3.0f;
+    const std::array<ActionKind, 4> switchActions{ ActionKind::ToggleOverlayBackground,
+        ActionKind::ToggleOverlayBorder, ActionKind::ToggleOverlayShadow,
+        ActionKind::ToggleOverlayClickThrough };
+    const float switchWidth = (inner.width() - 3.0f * 6.0f) / 4.0f;
     for (std::size_t index = 0; index < switches.size(); ++index) {
         const Rect chip{ inner.left + static_cast<float>(index) * (switchWidth + 6.0f), top,
             inner.left + static_cast<float>(index) * (switchWidth + 6.0f) + switchWidth, top + 24.0f };
@@ -237,7 +477,20 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
     const int radiusValue = overlay.cornerRadius >= 0 ? overlay.cornerRadius : 8;
     drawSlider(renderer, Rect{ inner.left, top, inner.right, top + 34.0f }, radiusValue, 0, 24, L"Углы", theme, hits,
         ActionKind::SetOverlayRadius, L" px");
-    top += 36.0f;
+    top += 40.0f;
+
+    // Отступы и межстрочный интервал: плотный RTSS и воздушный «Неон» настраиваются вручную.
+    const int padding = overlay.paddingPx;
+    drawSliderAt(renderer, Rect{ inner.left, top, inner.right, top + 34.0f },
+        padding < 0 ? 0.36f : static_cast<float>(padding) / 28.0f, L"Отступы внутри",
+        padding < 0 ? L"из стиля" : std::to_wstring(padding) + L" px", theme, hits, ActionKind::SetOverlayPadding);
+    top += 44.0f;
+
+    const int rowGap = overlay.rowGapPx;
+    drawSliderAt(renderer, Rect{ inner.left, top, inner.right, top + 34.0f },
+        rowGap < 0 ? 0.18f : static_cast<float>(rowGap) / 14.0f, L"Интервал строк",
+        rowGap < 0 ? L"из стиля" : std::to_wstring(rowGap) + L" px", theme, hits, ActionKind::SetOverlayRowGap);
+    top += 44.0f;
 
     // Редактор текста: шрифт, начертание и обводка — как в RivaTuner и FPS Monitor.
     renderer.text(L"Шрифт", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
@@ -270,7 +523,72 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
         TextAlign::Center);
     hits.push_back(UiHit{ outlineMinus, ActionKind::ChangeOverlayOutline, -1 });
     hits.push_back(UiHit{ outlinePlus, ActionKind::ChangeOverlayOutline, 1 });
+    top += 32.0f;
+
+    // Цвета по элементам: значения и подписи настраиваются отдельно.
+    drawColorRow(renderer, model, theme, Rect{ inner.left, top, inner.right, top + 22.0f }, L"Цвет значений",
+        overlay.valueColor, ActionKind::SetValueColor, hits);
+    top += 26.0f;
+    drawColorRow(renderer, model, theme, Rect{ inner.left, top, inner.right, top + 22.0f }, L"Цвет подписей",
+        overlay.labelColor, ActionKind::SetLabelColor, hits);
+    top += 26.0f;
+    drawColorRow(renderer, model, theme, Rect{ inner.left, top, inner.right, top + 22.0f }, L"Цвет акцента",
+        overlay.accentColor, ActionKind::SetAccentColor, hits);
+    top += 26.0f;
+
+    // Каждая строка оверлея красится отдельно: так собираются свои наборы в духе Fpsmon.
+    renderer.text(L"Цвет строк", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small,
+        theme.textDim);
+    top += 18.0f;
+    // Короткие имена строк: длинные подписи наезжали на палитры справа.
+    const std::array<std::wstring_view, kLabelCount> rowNames{ L"FPS", L"CPU", L"GPU", L"RAM", L"VRAM" };
+    for (std::size_t index = 0; index < kLabelCount; ++index) {
+        if (top + 20.0f > inner.bottom) {
+            break;
+        }
+        drawRowColorRow(renderer, model, theme, Rect{ inner.left, top, inner.right, top + 22.0f },
+            rowNames[index], overlay.rowColors[index], static_cast<int>(index), hits);
+        top += 24.0f;
+    }
+    top += 6.0f;
+
+    // Рамка: толщина от 0 до 3 px, «из стиля» — у каждого пресета своя.
+    const int borderValue = overlay.borderWidth;
+    drawSliderAt(renderer, Rect{ inner.left, top, inner.right, top + 34.0f },
+        borderValue < 0 ? 1.0f / 3.0f : static_cast<float>(borderValue) / 3.0f, L"Толщина рамки",
+        borderValue < 0 ? L"из стиля" : std::to_wstring(borderValue) + L" px", theme, hits,
+        ActionKind::SetBorderWidth);
+    top += 44.0f;
+
+    drawSlider(renderer, Rect{ inner.left, top, inner.right, top + 34.0f }, overlay.shadowStrength, 0, 100,
+        L"Сила тени", theme, hits, ActionKind::SetShadowStrength, L" %");
+    top += 44.0f;
+
+    // Межбуквенный интервал: 100 % — как в пресете, 200 % — разрядка для неоновых стилей.
+    drawSlider(renderer, Rect{ inner.left, top, inner.right, top + 34.0f }, overlay.letterSpacing, 0, 200,
+        L"Интервал букв", theme, hits, ActionKind::SetLetterSpacing, L" %");
+    top += 44.0f;
+
+    drawTriState(renderer, model, theme, Rect{ inner.left, top, inner.right, top + 22.0f }, L"Заглавные подписи",
+        overlay.uppercaseMode, ActionKind::SetUppercase, hits);
     top += 28.0f;
+    drawTriState(renderer, model, theme, Rect{ inner.left, top, inner.right, top + 22.0f }, L"Разделители строк",
+        overlay.separatorsMode, ActionKind::SetSeparators, hits);
+    top += 28.0f;
+
+    // Знаки после запятой у кадров: «Стиль» — как в пресете, 0…2 — жёстко.
+    renderer.text(L"Знаки у FPS", Rect{ inner.left, top, inner.right - 200.0f, top + 22.0f }, TextRole::Small,
+        theme.textDim);
+    const std::array<std::wstring_view, 4> decimalNames{ L"Стиль", L"0", L"1", L"2" };
+    const std::array<int, 4> decimalValues{ -1, 0, 1, 2 };
+    for (std::size_t index = 0; index < decimalNames.size(); ++index) {
+        const Rect chip{ inner.right - 194.0f + static_cast<float>(index) * 50.0f, top,
+            inner.right - 194.0f + static_cast<float>(index) * 50.0f + 44.0f, top + 22.0f };
+        drawChip(renderer, chip, decimalNames[index], overlay.fpsDecimals == decimalValues[index], theme,
+            TextRole::Tiny, isHovered(model, chip));
+        hits.push_back(UiHit{ chip, ActionKind::SetFpsDecimals, decimalValues[index] });
+    }
+    top += 30.0f;
 
     renderer.text(L"Смещение", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
     top += 20.0f;
@@ -359,16 +677,32 @@ void drawLabelsCard(Renderer& renderer, const AppModel& model, const Theme& them
 void drawOverlayView(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area,
     std::vector<UiHit>& hits)
 {
-    const float previewWidth = area.width() * 0.58f;
-    const float previewHeight = std::max(220.0f, (area.height() - kGap) * 0.58f);
+    // Как в демо: одна колонка карточек фиксированной высоты. Экран получает
+    // демо-высоту целиком, поэтому при сжатии окна карточки не наезжают друг на друга,
+    // а прокручиваются.
+    const auto drawClipped = [&](const Rect& card, const auto& draw) {
+        renderer.pushClip(card);
+        draw(card);
+        renderer.popClip();
+    };
 
-    const Rect preview{ area.left, area.top, area.left + previewWidth, area.top + previewHeight };
-    const Rect labels{ area.left, preview.bottom + kGap, preview.right, area.bottom };
-    const Rect controls{ preview.right + kGap, area.top, area.right, area.bottom };
+    float top = area.top;
+    const auto place = [&](float height) {
+        const Rect card{ area.left, top, area.right, top + height };
+        top += height + kGap;
+        return card;
+    };
 
-    drawPreviewCard(renderer, model, theme, preview, hits);
-    drawLabelsCard(renderer, model, theme, labels, hits);
-    drawControlsCard(renderer, model, theme, controls, hits);
+    drawClipped(place(430.0f),
+        [&](const Rect& card) { drawPreviewCard(renderer, model, theme, card, hits); });
+    drawClipped(place(1450.0f),
+        [&](const Rect& card) { drawControlsCard(renderer, model, theme, card, hits); });
+    drawClipped(place(232.0f),
+        [&](const Rect& card) { drawLabelsCard(renderer, model, theme, card, hits); });
+    drawClipped(place(268.0f), [&](const Rect& card) {
+        drawCard(renderer, card, theme);
+        drawStyleGallery(renderer, model, theme, card.inset(kCardPadding), hits);
+    });
 }
 
 } // namespace yawa

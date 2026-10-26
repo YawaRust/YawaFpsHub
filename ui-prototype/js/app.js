@@ -11,6 +11,8 @@
   const VIEWS = {
     dashboard: { eyebrow: "Мониторинг", title: "Обзор" },
     sensors: { eyebrow: "Показатели", title: "Все датчики" },
+    bottleneck: { eyebrow: "Узкое место", title: "Баланс системы" },
+    system: { eyebrow: "Оборудование", title: "Сведения о системе" },
     overlay: { eyebrow: "Поверх игры", title: "Оверлей" },
     settings: { eyebrow: "Настройки", title: "Поведение и вид" }
   };
@@ -111,8 +113,36 @@
     bold: false,
     italic: false,
     outline: 0,
+    // null — значение из пресета, как -1 в приложении.
+    textScale: 100,
+    bgOpacity: null,
+    padding: null,
+    rowGap: null,
+    valueColor: null,
+    labelColor: null,
+    accentColor: null,
+    // Цвет каждой строки оверлея: null — как в стиле.
+    rowColors: { fps: null, cpu: null, gpu: null, ram: null, vram: null },
+    borderWidth: null,
+    shadowStrength: 100,
+    tracking: 100,
+    uppercase: null,
+    separators: null,
+    fpsDecimals: null,
+    clickThrough: false,
     labels: { ...DEFAULT_LABELS }
   };
+
+  // Палитра оверлея: индекс соответствует Color в приложении.
+  const OSD_PALETTE = [null, "#ffffff", "#5ef29b", "#6aa8ff", "#b47bff", "#ffb347", "#ff6f6f"];
+  const osdColor = (index) => (index === null ? null : OSD_PALETTE[index + 1] || null);
+  const OSD_ROWS = [
+    { key: "fps", title: "Кадры" },
+    { key: "cpu", title: "Процессор" },
+    { key: "gpu", title: "Видеокарта" },
+    { key: "ram", title: "Память" },
+    { key: "vram", title: "Видеопамять" }
+  ];
 
   const perfState = { cpu: true, gpu: true, ram: true };
 
@@ -135,7 +165,11 @@
         continue;
       }
 
-      const text = metricText(id, snap);
+      // Знаки после запятой у кадров задаются настройкой оверлея.
+      const isFps = id === "fps" || id === "fpsLow1";
+      const text = isFps && overlayState.fpsDecimals !== null && node.closest("#osdPreview")
+        ? fmt(snap.sensors.get(id).value, overlayState.fpsDecimals)
+        : metricText(id, snap);
       if (text === null) continue;
 
       if (node.firstElementChild) {
@@ -240,6 +274,16 @@
   const sensorRows = new Map();
   const sensorFilter = { group: "all", query: "", pinnedOnly: false };
 
+  // Какой строке оверлея соответствует датчик: та же привязка, что в приложении.
+  function osdFieldFor(id) {
+    if (id.startsWith("fps") || id === "frameMs" || id === "framesDropped") return "fps";
+    if (id.startsWith("cpu") || id.startsWith("core")) return "cpu";
+    if (id === "vramUsed" || id === "vramTotal") return "vram";
+    if (id.startsWith("ram") || id.startsWith("pageFile")) return "ram";
+    if (id.startsWith("gpu") || id === "pcieLoad") return "gpu";
+    return null;
+  }
+
   function buildSensorTable() {
     const host = $("#sensorRows");
     const snapshot = window.Sim.snapshot();
@@ -278,6 +322,14 @@
       eye.addEventListener("click", () => {
         sensor.pinned = !sensor.pinned;
         eye.classList.toggle("is-on", sensor.pinned);
+        // Как в приложении: «глаз» включает и выключает строку в оверлее.
+        const field = osdFieldFor(sensor.id);
+        if (field) {
+          const fieldRow = $(`[data-osd-item="${field}"]`);
+          if (fieldRow) fieldRow.classList.toggle("is-hidden", !sensor.pinned);
+          const toggle = $(`[data-osd-toggle="${field}"]`);
+          if (toggle) toggle.checked = sensor.pinned;
+        }
         applySensorFilter();
       });
 
@@ -367,7 +419,226 @@
     $("#railLive").classList.toggle("is-paused", snap.paused);
   }
 
+
+  // ── «Баланс» и «Сведения о системе» ────────────────────────────────────────
+  // Цвет verdict-блока зависит от того, в чем узкое место: ровно как в приложении,
+  // где его подбирает severityColor() по проценту помех.
+  function balanceColor(percent) {
+    if (percent >= 35) return "var(--danger)";
+    if (percent >= 12) return "var(--warn)";
+    return "var(--accent)";
+  }
+
+  function plural(count, one, few, many) {
+    const tail = count % 100;
+    const last = count % 10;
+    if (tail > 10 && tail < 20) return many;
+    if (last === 1) return one;
+    if (last > 1 && last < 5) return few;
+    return many;
+  }
+
+  function setText(selector, text) {
+    const node = $(selector);
+    if (node) node.textContent = text;
+  }
+
+  function renderBalance(snap) {
+    const balance = snap.balance;
+    const machine = snap.machine;
+    if (!balance || !machine) return;
+
+    const card = $("#balanceCard");
+    const tone = balanceColor(balance.percent);
+    if (card) card.style.setProperty("--balance-color", tone);
+    const gauge = $("#balanceGauge");
+    if (gauge) gauge.style.setProperty("--accent", tone);
+    if (gauge) gauge.style.setProperty("--p", balance.percent.toFixed(1));
+
+    const gpu = machine.gpus.find((item) => item.discrete) || machine.gpus[0];
+    const display = machine.displays.find((item) => item.primary) || machine.displays[0];
+    const subtitle = [machine.cpu.name, gpu && gpu.name, display && window.Sim.describeDisplay(display)]
+      .filter(Boolean).join(" · ");
+    setText("#balanceSubtitle", subtitle || "оборудование не определено");
+
+    const tag = $("#balanceMode");
+    if (tag) {
+      tag.classList.toggle("tag--live", balance.measured);
+      tag.querySelector("span").textContent = balance.measured ? "ЖИВЫЕ ЗАМЕРЫ" : "ОЦЕНКА ±15 %";
+    }
+
+    const quiet = balance.kind === "idle" || balance.kind === "no-data";
+    setText("#balancePercent", quiet ? "—" : `${balance.percent}%`);
+    setText("#balanceHeadline", balance.headline);
+    setText("#balanceDetail", balance.detail);
+
+    const caps = (selector, text) => {
+      const node = $(selector);
+      if (node) node.innerHTML = text;
+    };
+    caps("#balanceCpuCap", `CPU <b>~${Math.round(balance.cpuCapacity)} к/с</b>`);
+    caps("#balanceGpuCap", `GPU <b>~${Math.round(balance.gpuCapacity)} к/с</b>`);
+    caps("#balanceExpected", balance.expected > 0
+      ? `ожидание: <b>${Math.round(balance.expected)} к/с</b>` : "ожидание: —");
+
+    const cpuIndex = window.Sim.cpuPerfIndex(machine.cpu.name, machine.cpu.cores, machine.cpu.threads);
+    const gpuIndex = gpu ? window.Sim.gpuPerfIndex(gpu.name, gpu.dedicatedMb) : 0;
+    const pair = [
+      { label: "Процессор", value: cpuIndex > 0 ? Math.round(cpuIndex) : "—",
+        note: machine.cpu.name || "нет данных", color: "var(--cpu)",
+        fraction: Math.min(1, cpuIndex / 120) },
+      { label: "Видеокарта", value: gpuIndex > 0 ? Math.round(gpuIndex) : "—",
+        note: gpu ? gpu.name : "нет данных", color: "var(--gpu)",
+        fraction: Math.min(1, gpuIndex / 150) },
+      { label: "Память", value: window.Sim.describeMemory(machine.memory),
+        note: machine.memory.profile ? "профиль памяти активен" : "XMP/EXPO не включён",
+        color: "var(--ram)", fraction: Math.min(1, machine.memory.totalGb / 64) },
+      { label: "Экран", value: display ? `${display.width}×${display.height}` : "—",
+        note: display ? `${display.hz} Гц` : "нет данных", color: "var(--accent)", fraction: 1 }
+    ];
+    const pairHost = $("#balancePair");
+    if (pairHost) {
+      pairHost.innerHTML = pair.map((row) => `
+        <li>
+          <div class="row"><span>${row.label}</span><b>${row.value}</b></div>
+          <div class="bar" style="--c:${row.color}"><i style="width:${(row.fraction * 100).toFixed(1)}%"></i></div>
+          <p class="note">${row.note}</p>
+        </li>`).join("");
+    }
+
+    const sensorValue = (id) => {
+      const sensor = snap.sensors.get(id);
+      return sensor ? sensor : null;
+    };
+    const corePeak = Math.max(...Array.from({ length: 8 }, (_, index) => {
+      const sensor = sensorValue(`core${index}`);
+      return sensor ? sensor.value : 0;
+    }));
+    const vramTotal = gpu ? gpu.memoryGb : 0;
+    const load = [
+      { label: "Процессор", id: "cpu", unit: "%", decimals: 0, color: "var(--cpu)", total: 100 },
+      { label: "Пик по ядрам", value: corePeak, unit: "%", decimals: 0, color: "var(--cpu)", total: 100 },
+      { label: "Видеокарта", id: "gpu", unit: "%", decimals: 0, color: "var(--gpu)", total: 100 },
+      { label: "Видеопамять", id: "vramUsed", unit: "ГБ", decimals: 1, color: "var(--ram)", total: vramTotal }
+    ];
+    const loadHost = $("#balanceLoad");
+    if (loadHost) {
+      loadHost.innerHTML = load.map((row) => {
+        const sensor = row.id ? sensorValue(row.id) : null;
+        const known = row.value !== undefined || sensor;
+        const value = row.value !== undefined ? row.value : (sensor ? sensor.value : 0);
+        const share = row.total > 0 ? Math.max(0, Math.min(100, (value / row.total) * 100)) : 0;
+        return `
+          <li>
+            <div class="row">
+              <span>${row.label}</span>
+              <b class="${known ? "" : "is-muted"}">${known ? `${fmt(value, row.decimals)} ${row.unit}` : "нет данных"}</b>
+            </div>
+            <div class="bar" style="--c:${row.color}"><i style="width:${known ? share.toFixed(1) : 0}%"></i></div>
+          </li>`;
+      }).join("");
+    }
+
+    const advice = balance.advice || [];
+    setText("#balanceAdviceCount", advice.length
+      ? `${advice.length} ${plural(advice.length, "рекомендация", "рекомендации", "рекомендаций")}`
+      : "рекомендаций нет — нагрузка или данные отсутствуют");
+    const adviceHost = $("#balanceAdvice");
+    if (adviceHost) {
+      adviceHost.innerHTML = advice.map((item) => `<li><b>${item.title}</b>${item.text}</li>`).join("");
+    }
+  }
+
+  function specRows(selector, rows) {
+    const host = $(selector);
+    if (!host) return;
+    host.innerHTML = rows.map((row) => `<li><span>${row[0]}</span><b>${row[1] || "нет данных"}</b></li>`).join("");
+  }
+
+  function renderSystem(snap) {
+    const machine = snap.machine;
+    if (!machine) return;
+
+    specRows("#osCard", [
+      ["Система", machine.os.product],
+      ["Сборка", `${machine.os.feature} · ${machine.os.build}`],
+      ["Издание", machine.os.edition],
+      ["Архитектура", machine.os.arch]
+    ]);
+
+    setText("#cpuName", machine.cpu.name || "нет данных");
+    const cpuIndex = window.Sim.cpuPerfIndex(machine.cpu.name, machine.cpu.cores, machine.cpu.threads);
+    specRows("#cpuCard", [
+      ["Ядра", `${machine.cpu.cores} ядер / ${machine.cpu.threads} потоков`],
+      ["Базовая частота", `${fmt(machine.cpu.baseMhz, 0)} МГц`],
+      ["Кэш L3", machine.cpu.l3Mb ? `${machine.cpu.l3Mb} МБ` : ""],
+      ["Вендор", machine.cpu.vendor],
+      ["Индекс", cpuIndex > 0 ? fmt(cpuIndex, 0) : ""]
+    ]);
+
+    const gpuHost = $("#gpuCard");
+    if (gpuHost) {
+      const primary = machine.gpus.find((item) => item.discrete) || machine.gpus[0];
+      gpuHost.innerHTML = machine.gpus.map((gpu) => {
+        const index = window.Sim.gpuPerfIndex(gpu.name, gpu.dedicatedMb);
+        const isActive = gpu === primary;
+        return `
+          <li>
+            <b class="${isActive ? "is-active" : ""}">${gpu.name}${isActive ? " · основная" : ""}</b>
+            <span>${[gpu.vendor, gpu.dedicatedMb ? `${fmt(gpu.dedicatedMb / 1024, 1)} ГБ выделено` : "",
+              gpu.driver ? `драйвер ${gpu.driver}` : "", index > 0 ? `индекс ${Math.round(index)}` : ""]
+              .filter(Boolean).join(" · ")}</span>
+          </li>`;
+      }).join("");
+    }
+
+    const memory = machine.memory;
+    setText("#memSummary", window.Sim.describeMemory(memory));
+    const tck = memory.configuredMt > 0 ? 2000 / memory.configuredMt : 0;
+    const filled = memory.modules.filter((module) => module.populated).length;
+    specRows("#memCard", [
+      ["Частота", memory.ratedMt > memory.configuredMt + 1
+        ? `${fmt(memory.configuredMt, 0)} МТ/с из ${fmt(memory.ratedMt, 0)}`
+        : `${fmt(memory.configuredMt, 0)} МТ/с`],
+      ["Такт tCK", tck > 0 ? `${fmt(tck, 3)} нс` : ""],
+      ["XMP/EXPO", memory.profile ? "включён" : "не включён"],
+      ["Слоты", memory.slots ? `${filled} из ${memory.slots}` : ""]
+    ]);
+
+    const modulesHost = $("#memModules");
+    if (modulesHost) {
+      modulesHost.innerHTML = memory.modules.filter((module) => module.populated).map((module) => `
+        <li>
+          <b>${module.slot} · ${module.sizeGb} ГБ ${module.type}-${Math.round(module.configuredMt)}</b>
+          <code>${[module.vendor, module.part, module.voltage ? `${fmt(module.voltage, 2)} В` : ""]
+            .filter(Boolean).join(" · ")}</code>
+        </li>`).join("");
+    }
+
+    const monitorHost = $("#monitorCard");
+    if (monitorHost) {
+      monitorHost.innerHTML = machine.displays.map((display) => `
+        <li>
+          <b>${display.name}${display.primary ? " · основной" : ""}</b>
+          <span>${display.width}×${display.height}${display.hz ? `, ${display.hz} Гц` : ""}${
+            display.scale > 1 ? `, масштаб ${Math.round(display.scale * 100)} %` : ""}</span>
+        </li>`).join("");
+    }
+
+    const diskHost = $("#diskCard");
+    if (diskHost) {
+      const disks = machine.disks || [];
+      diskHost.innerHTML = disks.map((disk) => `
+        <li>
+          <b>${disk.name}${disk.driveLetter ? ` · ${disk.driveLetter}` : ""}</b>
+          <span>${[disk.interfaceType, disk.mediaType, disk.totalGb ? `${Math.round(disk.totalGb)} ГБ` : \"\",
+            disk.freeGb ? `свободно ${Math.round(disk.freeGb)} ГБ` : \"\", disk.fileSystem].filter(Boolean).join(\" · \")}</span>
+        </li>`).join(\"\") || '<li><span>нет данных</span></li>';
+    }
+  }
+
   let lastSnapshot = null;
+  let systemRendered = false;
 
   function onData(snap) {
     lastSnapshot = snap;
@@ -377,6 +648,12 @@
     updateProcesses(snap);
     drawCharts(snap);
     updateSensorTable(snap);
+    renderBalance(snap);
+    if (!systemRendered) {
+      // Паспорт машины статический: его достаточно отрисовать один раз за сессию.
+      systemRendered = true;
+      renderSystem(snap);
+    }
     updateStatus(snap);
 
     const free = TARGET_FRAME_MS - snap.frameMs;
@@ -412,7 +689,7 @@
 
     document.addEventListener("keydown", (event) => {
       if (event.target.closest("input, textarea")) return;
-      const order = ["dashboard", "sensors", "overlay", "settings"];
+      const order = ["dashboard", "sensors", "bottleneck", "system", "overlay", "settings"];
       const index = Number(event.key) - 1;
       if (index >= 0 && index < order.length) switchView(order[index]);
     });
@@ -462,6 +739,21 @@
 
     overlayState.layout = preset.layout;
     overlayState.scale = preset.scale;
+    // Как в приложении: ручные подстройки относятся к конкретному пресету.
+    overlayState.bgOpacity = null;
+    overlayState.padding = null;
+    overlayState.rowGap = null;
+    overlayState.valueColor = null;
+    overlayState.labelColor = null;
+    overlayState.accentColor = null;
+    overlayState.rowColors = { fps: null, cpu: null, gpu: null, ram: null, vram: null };
+    overlayState.borderWidth = null;
+    overlayState.shadowStrength = 100;
+    overlayState.tracking = 100;
+    overlayState.uppercase = null;
+    overlayState.separators = null;
+    overlayState.fpsDecimals = null;
+    $$(".swatch").forEach((node) => node.classList.toggle("is-active", node.dataset.color === "-1"));
     $$("#osdLayout button").forEach((node) => node.classList.toggle("is-active", node.dataset.layout === preset.layout));
 
     for (const [key, isOn] of Object.entries(preset.items)) {
@@ -487,6 +779,7 @@
     });
 
     applyOverlay();
+    syncOsdControls();
     toast(`Пресет «${name === "minimal" ? "Минимум" : name === "diagnostics" ? "Диагностика" : "Стандарт"}» применён`);
   }
 
@@ -506,7 +799,52 @@
     osd.dataset.layout = overlayState.layout;
     osd.dataset.style = overlayState.style;
     osd.style.setProperty("--osd-scale", (overlayState.scale / 100).toFixed(2));
-    osd.style.setProperty("--osd-bg", (overlayState.opacity / 100).toFixed(2));
+    // Прозрачность окна и прозрачность подложки — разные настройки.
+    const bgFactor = overlayState.bgOpacity === null ? 1 : overlayState.bgOpacity / 100;
+    osd.style.setProperty("--osd-bg", ((overlayState.opacity / 100) * bgFactor).toFixed(3));
+    osd.style.setProperty("--osd-text", (overlayState.textScale / 100).toFixed(2));
+    // Отступы и интервал строк: null — как в пресете.
+    osd.style.padding = overlayState.padding === null
+      ? ""
+      : `${overlayState.padding}px ${overlayState.padding + 2}px`;
+    osd.style.rowGap = overlayState.rowGap === null ? "" : `${overlayState.rowGap}px`;
+
+    // Цвета по элементам: значения и подписи независимо от пресета.
+    const colorFor = osdColor;
+    const valueColor = colorFor(overlayState.valueColor);
+    for (const node of osd.querySelectorAll(".osd__val")) {
+      if (valueColor) node.style.setProperty("color", valueColor, "important");
+      else node.style.removeProperty("color");
+    }
+    const labelColor = colorFor(overlayState.labelColor);
+    for (const node of osd.querySelectorAll(".osd__key, .osd__unit")) {
+      if (labelColor) node.style.setProperty("color", labelColor, "important");
+      else node.style.removeProperty("color");
+    }
+    // Цвет каждой строки: строка оверлея ссылается на свой показатель.
+    for (const row of OSD_ROWS) {
+      const color = colorFor(overlayState.rowColors[row.key]);
+      const value = osd.querySelector(`[data-osd-item="${row.key}"] .osd__val`);
+      if (!value) continue;
+      if (color) value.style.setProperty("color", color, "important");
+      else if (!valueColor) value.style.removeProperty("color");
+    }
+
+    // Акцент — рамка и декоративные линии стиля.
+    const accent = colorFor(overlayState.accentColor);
+    if (accent) osd.style.setProperty("border-color", accent, "important");
+    else osd.style.removeProperty("border-color");
+
+    // Толщина рамки, сила тени и разрядка подписей.
+    osd.style.setProperty("--osd-border", `${overlayState.borderWidth === null ? 1 : overlayState.borderWidth}px`);
+    osd.style.setProperty("--osd-shadow", (overlayState.shadowStrength / 100).toFixed(2));
+    osd.classList.toggle("osd--shadow", overlayState.shadowStrength < 100);
+    osd.style.setProperty("--osd-tracking", (overlayState.tracking / 100).toFixed(2));
+
+    // Регистр и разделители: null — как в пресете.
+    osd.classList.toggle("osd--upper", overlayState.uppercase === 1);
+    osd.classList.toggle("osd--separators", overlayState.separators === 1);
+
     // -1/null — радиус берётся из пресета; число — как в приложении.
     osd.classList.toggle("osd--radius", overlayState.radius !== null);
     if (overlayState.radius === null) osd.style.removeProperty("--osd-radius");
@@ -521,6 +859,8 @@
       ? `0 0 ${overlayState.outline}px #000, 0 0 ${overlayState.outline * 2}px #000`
       : "none");
 
+    // Сквозной клик: предпросмотр перестаёт ловить мышь, как настоящее окно поверх игры.
+    osd.classList.toggle("osd--click-through", overlayState.clickThrough);
     osd.classList.toggle("no-background", !overlayState.background);
     osd.classList.toggle("no-border", !overlayState.border);
     osd.classList.toggle("no-shadow", !overlayState.shadow);
@@ -535,6 +875,59 @@
       radius.value = String(shown);
       radius.style.setProperty("--fill", `${(shown / 24) * 100}%`);
     }
+  }
+
+  // Все органы управления оверлеем показывают значения из overlayState:
+  // нужны после сброса пресета и после любой внешней правки состояния.
+  function syncOsdControls() {
+    const markColors = (id, value) => {
+      const host = $(`#${id}`);
+      if (!host) return;
+      host.querySelectorAll(".swatch").forEach((node) => {
+        const index = Number(node.dataset.color);
+        node.classList.toggle("is-active", (index < 0 ? null : index) === value);
+      });
+    };
+    markColors("osdValueColor", overlayState.valueColor);
+    markColors("osdLabelColor", overlayState.labelColor);
+    markColors("osdAccentColor", overlayState.accentColor);
+
+    const rowHost = $("#osdRowColors");
+    if (rowHost) {
+      OSD_ROWS.forEach((row, index) => {
+        const line = rowHost.children[index];
+        if (!line) return;
+        line.querySelectorAll(".swatch").forEach((node) => {
+          const value = Number(node.dataset.color);
+          node.classList.toggle("is-active", (value < 0 ? null : value) === overlayState.rowColors[row.key]);
+        });
+      });
+    }
+
+    const setRange = (id, valueId, value, max, text) => {
+      const range = $(`#${id}`);
+      const label = $(`#${valueId}`);
+      if (range) {
+        range.value = String(value);
+        range.style.setProperty("--fill", `${(value / max) * 100}%`);
+      }
+      if (label) label.textContent = text;
+    };
+    const borderWidth = overlayState.borderWidth;
+    setRange("osdBorder", "osdBorderValue", borderWidth === null ? 1 : borderWidth, 3,
+      borderWidth === null ? "из стиля" : `${borderWidth} px`);
+    setRange("osdShadow", "osdShadowValue", overlayState.shadowStrength, 100, `${overlayState.shadowStrength} %`);
+    setRange("osdTracking", "osdTrackingValue", overlayState.tracking, 200, `${overlayState.tracking} %`);
+
+    const markModes = (id, attribute, value) => {
+      $$(`#${id} button`).forEach((node) => {
+        const candidate = Number(node.dataset[attribute]);
+        node.classList.toggle("is-active", (candidate < 0 ? null : candidate) === value);
+      });
+    };
+    markModes("osdUppercase", "mode", overlayState.uppercase);
+    markModes("osdSeparators", "mode", overlayState.separators);
+    markModes("osdDecimals", "decimals", overlayState.fpsDecimals);
   }
 
   function bindOsdText() {
@@ -636,7 +1029,7 @@
     Space: "Space", Insert: "Insert", Delete: "Delete", Home: "Home", End: "End",
     PageUp: "PgUp", PageDown: "PgDn", PrintScreen: "PrtScr", Pause: "Pause", ScrollLock: "ScrollLock"
   };
-  const hotkeys = { overlay: "F10", position: "F11", window: "F12" };
+  const hotkeys = { overlay: "F10", position: "F11", window: "F12", clickThrough: "F9" };
   let hotkeyEditing = null;
 
   function bindHotkeys() {
@@ -802,6 +1195,136 @@
       applyOverlay();
     });
 
+    const textScale = $("#osdTextScale");
+    textScale.addEventListener("input", () => {
+      overlayState.textScale = Number(textScale.value);
+      $("#osdTextScaleValue").textContent = `${overlayState.textScale}%`;
+      textScale.style.setProperty("--fill", `${((overlayState.textScale - 85) / 45) * 100}%`);
+      applyOverlay();
+    });
+
+    // Ползунки «как в стиле»: первое касание включает ручное значение.
+    const bindAutoRange = (id, valueId, key, max, suffix) => {
+      const range = $(`#${id}`);
+      const label = $(`#${valueId}`);
+      const render = () => {
+        const value = overlayState[key];
+        range.value = String(value === null ? 0 : value);
+        range.style.setProperty("--fill", value === null ? "0%" : `${(value / max) * 100}%`);
+        label.textContent = value === null ? "из стиля" : `${value}${suffix}`;
+      };
+      range.addEventListener("input", () => {
+        overlayState[key] = Number(range.value);
+        render();
+        applyOverlay();
+      });
+      render();
+    };
+    bindAutoRange("osdBg", "osdBgValue", "bgOpacity", 100, " %");
+    bindAutoRange("osdPad", "osdPadValue", "padding", 28, " px");
+    bindAutoRange("osdGap", "osdGapValue", "rowGap", 14, " px");
+
+    const bindColors = (id, key) => {
+      const container = $(`#${id}`);
+      const chips = [...container.querySelectorAll(".swatch")];
+      chips.forEach((chip) => {
+        if (chip.dataset.hex) chip.style.background = chip.dataset.hex;
+        chip.addEventListener("click", () => {
+          const value = Number(chip.dataset.color);
+          overlayState[key] = value < 0 ? null : value;
+          chips.forEach((node) => node.classList.toggle("is-active", node === chip));
+          applyOverlay();
+        });
+      });
+    };
+    const bindRange = (id, valueId, key, max, suffix) => {
+      const range = $(`#${id}`);
+      const label = $(`#${valueId}`);
+      if (!range || !label) return;
+      const render = () => {
+        const value = overlayState[key];
+        range.value = String(value);
+        range.style.setProperty("--fill", `${(value / max) * 100}%`);
+        label.textContent = `${value}${suffix}`;
+      };
+      range.addEventListener("input", () => {
+        overlayState[key] = Number(range.value);
+        render();
+        applyOverlay();
+      });
+      render();
+    };
+    bindColors("osdValueColor", "valueColor");
+    bindColors("osdLabelColor", "labelColor");
+    bindColors("osdAccentColor", "accentColor");
+
+    // Цвета строк: пять компактных палитр, как в приложении.
+    const rowHost = $("#osdRowColors");
+    if (rowHost) {
+      for (const row of OSD_ROWS) {
+        const line = document.createElement("div");
+        line.className = "swatch-row";
+        line.innerHTML = `<span>${row.title}</span><div class="swatches"></div>`;
+        const host = line.querySelector(".swatches");
+        for (let index = -1; index < OSD_PALETTE.length - 1; index += 1) {
+          const chip = document.createElement("button");
+          chip.type = "button";
+          chip.className = `swatch${index === -1 ? " is-active" : ""}`;
+          chip.dataset.color = String(index);
+          if (index < 0) {
+            chip.textContent = "а";
+            chip.setAttribute("aria-label", "Как в стиле");
+          } else {
+            chip.dataset.hex = OSD_PALETTE[index + 1];
+            chip.style.background = OSD_PALETTE[index + 1];
+            chip.setAttribute("aria-label", `Цвет ${index + 1}`);
+          }
+          chip.addEventListener("click", () => {
+            overlayState.rowColors[row.key] = index < 0 ? null : index;
+            host.querySelectorAll(".swatch").forEach((node) => node.classList.toggle("is-active", node === chip));
+            applyOverlay();
+          });
+          host.appendChild(chip);
+        }
+        rowHost.appendChild(line);
+      }
+    }
+
+    // Толщина рамки: «из стиля» — как в пресете, иначе 0…3 px.
+    const borderRange = $("#osdBorder");
+    const borderLabel = $("#osdBorderValue");
+    const renderBorder = () => {
+      const value = overlayState.borderWidth;
+      borderRange.value = String(value === null ? 1 : value);
+      borderRange.style.setProperty("--fill", `${((value === null ? 1 : value) / 3) * 100}%`);
+      borderLabel.textContent = value === null ? "из стиля" : `${value} px`;
+    };
+    borderRange.addEventListener("input", () => {
+      overlayState.borderWidth = Number(borderRange.value);
+      renderBorder();
+      applyOverlay();
+    });
+    renderBorder();
+
+    bindRange("osdShadow", "osdShadowValue", "shadowStrength", 100, " %");
+    bindRange("osdTracking", "osdTrackingValue", "tracking", 200, " %");
+
+    // Тройной выбор и знаки после запятой — те же чипы, что в приложении.
+    const bindMode = (id, key, attribute) => {
+      const chips = [...$$(`#${id} button`)];
+      chips.forEach((chip) => {
+        chip.addEventListener("click", () => {
+          const value = Number(chip.dataset[attribute]);
+          overlayState[key] = value < 0 ? null : value;
+          chips.forEach((node) => node.classList.toggle("is-active", node === chip));
+          applyOverlay();
+        });
+      });
+    };
+    bindMode("osdUppercase", "uppercase", "mode");
+    bindMode("osdSeparators", "separators", "mode");
+    bindMode("osdDecimals", "fpsDecimals", "decimals");
+
     $$("[data-osd-toggle]").forEach((toggle) => {
       toggle.addEventListener("change", () => {
         const row = $(`[data-osd-item="${toggle.dataset.osdToggle}"]`);
@@ -816,6 +1339,7 @@
     scale.style.setProperty("--fill", `${((overlayState.scale - 70) / 90) * 100}%`);
     opacity.style.setProperty("--fill", `${overlayState.opacity}%`);
     applyOverlay();
+    syncOsdControls();
   }
 
   function applyInterval(ms) {
@@ -938,6 +1462,20 @@
   buildSensorTable();
   applySensorFilter();
   bindNavigation();
+
+  // Прямые ссылки для скриншотов: ?view=sensors открывает нужный экран,
+  // ?nofx=1 выключает анимации. Это делается сразу после навигации: если
+  // дальше что-то не поднимется (например, canvas в headless-браузере),
+  // снимок всё равно попадёт на нужный экран, а не на «Обзор».
+  const params = new URLSearchParams(window.location.search);
+  const deepView = params.get("view");
+  if (deepView && VIEWS[deepView]) {
+    switchView(deepView);
+  }
+  if (params.get("nofx") === "1") {
+    document.body.classList.add("no-fx");
+  }
+
   bindPause();
   bindAccents();
   bindOverlay();
@@ -959,18 +1497,9 @@
 
   window.Sim.subscribe(onData);
 
-  // Прямые ссылки для скриншотов: ?view=sensors открывает нужный экран,
-  // ?nofx=1 выключает анимации, чтобы снимки были детерминированными.
-  const params = new URLSearchParams(window.location.search);
-  const deepView = params.get("view");
-  if (deepView && VIEWS[deepView]) {
-    switchView(deepView);
-  }
-  if (params.get("nofx") === "1") {
-    document.body.classList.add("no-fx");
-  }
   if (params.get("shot") === "1") {
     // Один статичный кадр: таймер симулятора останавливаем, CSS-переходы уже выключены.
     window.Sim.stop();
   }
+
 })();

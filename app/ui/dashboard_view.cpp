@@ -42,29 +42,7 @@ std::wstring historyWindowLabel(int intervalMs)
     return L"Последние " + wideText(std::to_string(seconds) + " секунд");
 }
 
-// Заголовок карточки: крупное название и строка-пояснение под ним.
-float drawCardHeader(Renderer& renderer, const Rect& card, std::wstring_view title, std::wstring_view subtitle,
-    const Theme& theme)
-{
-    const Rect inner = card.inset(kCardPadding);
-    renderer.text(title, Rect{ inner.left, inner.top, inner.right, inner.top + 20.0f }, TextRole::Heading, theme.text);
-    if (!subtitle.empty()) {
-        renderer.text(subtitle, Rect{ inner.left, inner.top + 18.0f, inner.right - 76.0f, inner.top + 34.0f },
-            TextRole::Tiny, theme.textFaint);
-    }
-    return inner.top + 36.0f;
-}
-
-void drawTag(Renderer& renderer, const Rect& card, std::wstring_view label, bool live, const Theme& theme)
-{
-    const float width = renderer.measureText(label, TextRole::Tiny) + 30.0f;
-    const Rect tag{ card.right - kCardPadding - width, card.top + kCardPadding - 2.0f, card.right - kCardPadding,
-        card.top + kCardPadding + 20.0f };
-    renderer.fillRoundRect(tag, 11.0f, live ? theme.accentSoft : theme.panelSoft);
-    renderer.fillCircle(tag.left + 11.0f, tag.centerY(), 3.0f, live ? theme.accent : theme.textFaint);
-    renderer.text(label, Rect{ tag.left + 20.0f, tag.top, tag.right - 6.0f, tag.bottom }, TextRole::Tiny,
-        live ? theme.accent : theme.textFaint);
-}
+// Заголовок и метка карточки переехали в layout.cpp: их используют и обзор, и «Баланс».
 
 void drawStatBlock(Renderer& renderer, const Rect& rect, std::wstring_view label, std::wstring_view value,
     const Theme& theme)
@@ -80,14 +58,22 @@ void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
     const Rect inner = card.inset(kCardPadding);
 
     const std::wstring game = model.foregroundApp.empty() ? L"игр не запущено" : model.foregroundApp;
-    const std::wstring subtitle
-        = game + L" · цель " + wideText(std::to_string(model.settings.capture.targetHz) + " Гц");
+    // Разрешение и герцовка монитора рядом с игрой: приложение определяет их само.
+    std::wstring subtitle = game;
+    if (model.displayWidth > 0 && model.displayHeight > 0) {
+        subtitle += L" · " + std::to_wstring(model.displayWidth) + L"×" + std::to_wstring(model.displayHeight);
+    }
+    const int shownHz = model.displayRefreshHz > 0 ? model.displayRefreshHz : model.settings.capture.targetHz;
+    subtitle += L" · " + wideText(std::to_string(shownHz) + " Гц");
     drawCardHeader(renderer, card, L"Кадры в секунду", subtitle, theme);
     drawTag(renderer, card, model.etwRunning ? L"LIVE" : L"НЕТ ДАННЫХ", model.etwRunning, theme);
 
     // Заголовок карточки занимает 36 px: крупное число начинается ниже, иначе
     // подзаголовок «игра · цель 60 Гц» проступал сквозь цифры.
     const float numberTop = inner.top + 54.0f;
+    // Число показываем всегда: прочерк крупным кеглем читался как сломанный шрифт.
+    // Что кадров ещё нет, объясняет подпись под числом.
+    const bool hasFrames = model.etwRunning && model.fps.currentFps > 0.0;
     const std::wstring value = wideNumber(model.fps.currentFps, MetricUnit::Count, 0);
     const float valueWidth = renderer.measureText(value, TextRole::Display);
     renderer.text(value, Rect{ inner.left - 2.0f, numberTop, inner.left + valueWidth + 8.0f, numberTop + 84.0f },
@@ -96,6 +82,11 @@ void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
                             numberTop + 76.0f },
         TextRole::Small, theme.textFaint);
 
+    if (!hasFrames) {
+        renderer.text(L"кадров пока нет — запустите игру", Rect{ inner.left, numberTop + 76.0f, inner.left + 260.0f,
+                                                       numberTop + 94.0f },
+            TextRole::Tiny, theme.textFaint);
+    }
     if (model.fps.averageFps > 0.1) {
         const double delta = (model.fps.currentFps - model.fps.averageFps) / model.fps.averageFps * 100.0;
         const std::wstring text = signedPercent(delta);
@@ -171,7 +162,7 @@ void drawSessionCard(Renderer& renderer, const AppModel& model, const Theme& the
     const Rect inner = card.inset(kCardPadding);
     drawCardHeader(renderer, card, L"Сессия", L"профиль включается по запуску игры", theme);
     // В демо строки начинаются ниже подзаголовка: 73 px от внутреннего края карточки.
-    float rowTop = inner.top + 73.0f;
+    float rowTop = inner.top + 62.0f;
 
     // Чип с временем сессии в правом верхнем углу карточки.
     {
@@ -203,7 +194,7 @@ void drawSessionCard(Renderer& renderer, const AppModel& model, const Theme& the
             return;
         }
         drawLabelValue(renderer, Rect{ inner.left, rowTop, inner.right, rowTop + 16.0f }, label, value, theme);
-        rowTop += 33.0f;
+        rowTop += 28.0f;
     }
 }
 
@@ -269,10 +260,9 @@ void drawCpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
         { L"Температура",
             model.availability.cpuTemperature ? wideMetric(MetricId::CpuTemp, model.store.value(MetricId::CpuTemp))
                                               : L"нет данных" },
-        { L"Питание",
-            model.store.value(MetricId::CpuPower) > 0.0
-                ? wideMetric(MetricId::CpuPower, model.store.value(MetricId::CpuPower))
-                : L"нет данных" },
+        // «Питание» без драйвера не читается, поэтому показываем пик по ядрам:
+        // он сразу говорит, упирается ли игра в одно ядро.
+        { L"Пик по ядрам", wideMetric(MetricId::CpuPeakLoad, model.store.value(MetricId::CpuPeakLoad)) },
         { L"Поток игры",
             model.store.value(MetricId::GameThreadLoad) > 0.0
                 ? wideMetric(MetricId::GameThreadLoad, model.store.value(MetricId::GameThreadLoad))
@@ -365,6 +355,20 @@ void drawGpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
 
         if (model.gpuMenuOpen) {
             const float listTop = inner.top + 34.0f;
+            // Список — отдельная непрозрачная панель: иначе строки адаптеров ложились
+            // поверх значений карточки и читались как наложение.
+            float drawnHeight = 0.0f;
+            for (std::size_t index = 0; index < model.gpuNames.size(); ++index) {
+                if (listTop + static_cast<float>(index) * 26.0f + 24.0f > inner.bottom - 30.0f) {
+                    break;
+                }
+                drawnHeight += 26.0f;
+            }
+            const Rect panel{ inner.left - 4.0f, listTop - 6.0f, inner.right + 4.0f,
+                listTop + std::max(drawnHeight, 26.0f) + 2.0f };
+            renderer.fillRoundRect(panel, 10.0f, theme.panel);
+            renderer.strokeRoundRect(panel, 10.0f, theme.lineStrong, 1.0f);
+
             for (std::size_t index = 0; index < model.gpuNames.size(); ++index) {
                 const float optionTop = listTop + static_cast<float>(index) * 26.0f;
                 if (optionTop + 24.0f > inner.bottom - 30.0f) {
@@ -625,8 +629,8 @@ void drawAlertsCard(Renderer& renderer, const AppModel& model, const Theme& them
 void drawDashboard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area,
     std::vector<UiHit>& hits)
 {
-    // Раскладка как в прототипе: карточки идут одной колонкой, высоты сняты с демо.
-    // Экран получает демо-высоту целиком, а окно показывает его часть и прокручивает.
+    // Раскладка как в прототипе: сетка 12 колонок, высоты карточек компактные.
+    // Экран получает расчётную высоту целиком, а окно показывает его часть и прокручивает.
     const Columns columns{ area };
 
     const auto drawClipped = [&](const Rect& card, const auto& draw) {
@@ -635,23 +639,60 @@ void drawDashboard(Renderer& renderer, const AppModel& model, const Theme& theme
         renderer.popClip();
     };
 
-    float top = area.top;
-    const auto place = [&](float height) {
-        const Rect card{ area.left, top, area.right, top + height };
-        top += height + kGap;
-        return card;
+    // Сетка 12 колонок как в демо: кадры + сессия, затем три карточки в ряд,
+    // производительность + диски, температуры + уведомления. Так «Обзор» заметно
+    // компактнее, чем одна колонка во всю ширину. В узком окне сетка не читается,
+    // поэтому там карточки идут по одной.
+    if (area.width() < kDashboardNarrowWidth) {
+        float narrowTop = area.top;
+        const auto one = [&](float height) {
+            const Rect card{ area.left, narrowTop, area.right, narrowTop + height };
+            narrowTop += height + kGap;
+            return card;
+        };
+        drawClipped(one(300.0f), [&](const Rect& card) { drawFpsCard(renderer, model, theme, card); });
+        drawClipped(one(300.0f), [&](const Rect& card) { drawSessionCard(renderer, model, theme, card); });
+        drawClipped(one(250.0f), [&](const Rect& card) { drawCpuCard(renderer, model, theme, card); });
+        drawClipped(one(250.0f), [&](const Rect& card) { drawGpuCard(renderer, model, theme, card, hits); });
+        drawClipped(one(250.0f), [&](const Rect& card) { drawMemoryCard(renderer, model, theme, card); });
+        drawClipped(one(300.0f), [&](const Rect& card) { drawPerformanceCard(renderer, model, theme, card); });
+        drawClipped(one(300.0f), [&](const Rect& card) { drawDiskNetCard(renderer, model, theme, card); });
+        drawClipped(one(250.0f), [&](const Rect& card) { drawTemperaturesCard(renderer, model, theme, card); });
+        drawClipped(one(250.0f), [&](const Rect& card) { drawAlertsCard(renderer, model, theme, card); });
+        return;
+    }
+
+    float rowTop = area.top;
+    const auto nextRow = [&](float height) {
+        const float current = rowTop;
+        rowTop += height + kGap;
+        return current;
     };
 
-    drawClipped(place(344.0f), [&](const Rect& card) { drawFpsCard(renderer, model, theme, card); });
-    drawClipped(place(350.0f), [&](const Rect& card) { drawSessionCard(renderer, model, theme, card); });
-    drawClipped(place(280.0f), [&](const Rect& card) { drawCpuCard(renderer, model, theme, card); });
-    drawClipped(place(246.0f), [&](const Rect& card) { drawGpuCard(renderer, model, theme, card, hits); });
-    drawClipped(place(286.0f), [&](const Rect& card) { drawMemoryCard(renderer, model, theme, card); });
-    drawClipped(place(288.0f), [&](const Rect& card) { drawPerformanceCard(renderer, model, theme, card); });
-    drawClipped(place(347.0f), [&](const Rect& card) { drawDiskNetCard(renderer, model, theme, card); });
-    drawClipped(columns.span(0.0f, 6.0f, top, 286.0f),
+    const float firstTop = nextRow(300.0f);
+    drawClipped(columns.span(0.0f, 8.0f, firstTop, 300.0f),
+        [&](const Rect& card) { drawFpsCard(renderer, model, theme, card); });
+    drawClipped(columns.span(8.0f, 4.0f, firstTop, 300.0f),
+        [&](const Rect& card) { drawSessionCard(renderer, model, theme, card); });
+
+    const float gaugesTop = nextRow(250.0f);
+    drawClipped(columns.span(0.0f, 4.0f, gaugesTop, 250.0f),
+        [&](const Rect& card) { drawCpuCard(renderer, model, theme, card); });
+    drawClipped(columns.span(4.0f, 4.0f, gaugesTop, 250.0f),
+        [&](const Rect& card) { drawGpuCard(renderer, model, theme, card, hits); });
+    drawClipped(columns.span(8.0f, 4.0f, gaugesTop, 250.0f),
+        [&](const Rect& card) { drawMemoryCard(renderer, model, theme, card); });
+
+    const float chartsTop = nextRow(300.0f);
+    drawClipped(columns.span(0.0f, 8.0f, chartsTop, 300.0f),
+        [&](const Rect& card) { drawPerformanceCard(renderer, model, theme, card); });
+    drawClipped(columns.span(8.0f, 4.0f, chartsTop, 300.0f),
+        [&](const Rect& card) { drawDiskNetCard(renderer, model, theme, card); });
+
+    const float listsTop = nextRow(250.0f);
+    drawClipped(columns.span(0.0f, 6.0f, listsTop, 250.0f),
         [&](const Rect& card) { drawTemperaturesCard(renderer, model, theme, card); });
-    drawClipped(columns.span(6.0f, 6.0f, top, 286.0f),
+    drawClipped(columns.span(6.0f, 6.0f, listsTop, 250.0f),
         [&](const Rect& card) { drawAlertsCard(renderer, model, theme, card); });
 }
 

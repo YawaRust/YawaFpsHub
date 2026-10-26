@@ -137,7 +137,12 @@ jobs:
             }
           }
 
-          $logPath = Join-Path $outDir "YawaFpsHub.log"
+          # Каталог данных — %LOCALAPPDATA%\\YawaFpsHub: туда приложение пишет лог и ini.
+          $dataDir = Join-Path $env:LOCALAPPDATA "YawaFpsHub"
+          $diagnostics.Add("каталог данных: " + $dataDir + " (есть: " + (Test-Path $dataDir) + ")")
+
+          $logPath = Join-Path $dataDir "YawaFpsHub.log"
+          if (-not (Test-Path $logPath)) { $logPath = Join-Path $outDir "YawaFpsHub.log" }
           if (Test-Path $logPath) {
             foreach ($line in (Get-Content $logPath)) {
               if ($line.Trim().Length -eq 0) { continue }
@@ -147,7 +152,8 @@ jobs:
             $diagnostics.Add("log: нет файла")
           }
 
-          $ini = Join-Path $outDir "YawaFpsHub.ini"
+          $ini = Join-Path $dataDir "YawaFpsHub.ini"
+          if (-not (Test-Path $ini)) { $ini = Join-Path $outDir "YawaFpsHub.ini" }
           if (-not (Test-Path $ini) -and -not $fail) { $fail = "не создан YawaFpsHub.ini" }
           $diagnostics.Add("ini: " + (Test-Path $ini))
 
@@ -177,7 +183,14 @@ jobs:
           $shots = @(
             @{ view = "dashboard"; extra = ""; name = "dashboard" },
             @{ view = "dashboard"; extra = "--scroll=640"; name = "dashboard-scrolled" },
+            @{ view = "dashboard"; extra = "--size=800x620"; name = "dashboard-compact" },
+            @{ view = "sensors"; extra = "--size=800x620"; name = "sensors-compact" },
+            @{ view = "overlay"; extra = "--size=800x620"; name = "overlay-compact" },
+            @{ view = "overlay"; extra = "--scroll=760"; name = "overlay-controls" },
+            @{ view = "settings"; extra = "--size=800x620"; name = "settings-compact" },
             @{ view = "sensors"; extra = ""; name = "sensors" },
+            @{ view = "bottleneck"; extra = ""; name = "bottleneck" },
+            @{ view = "system"; extra = ""; name = "system" },
             @{ view = "overlay"; extra = ""; name = "overlay" },
             @{ view = "settings"; extra = ""; name = "settings" }
           )
@@ -292,13 +305,16 @@ jobs:
           Start-Sleep -Seconds 2
           $edge = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
           if (-not (Test-Path $edge)) { $edge = "C:\Program Files\Microsoft\Edge\Application\msedge.exe" }
-          foreach ($view in @("dashboard", "sensors", "overlay", "settings")) {
+          foreach ($view in @("dashboard", "sensors", "bottleneck", "system", "overlay", "settings")) {
             $url = "http://127.0.0.1:8765/index.html?view=$view&nofx=1&shot=1"
             $shot = "demo-$view.png"
+            # Свой профиль Edge на каждый экран: с общим профилем запуск уходил
+            # в уже работающий процесс, и все снимки выходили одинаковыми — с обзора.
+            $profile = Join-Path $env:TEMP "yawa-edge-$view"
             # Первый запуск Edge бывает медленным: даём две попытки, иначе часть
             # эталонов теряется и сравнивать не с чем.
             for ($attempt = 0; $attempt -lt 2 -and -not (Test-Path $shot); $attempt++) {
-              Start-Process -FilePath $edge -ArgumentList "--headless=new","--disable-gpu","--hide-scrollbars","--no-first-run","--window-size=$demoWidth,$demoHeight","--virtual-time-budget=6000","--screenshot=$PWD\$shot",$url -Wait
+              Start-Process -FilePath $edge -ArgumentList "--headless=new","--disable-gpu","--hide-scrollbars","--no-first-run","--user-data-dir=$profile","--window-size=$demoWidth,$demoHeight","--virtual-time-budget=6000","--screenshot=$PWD\$shot",$url -Wait
             }
             if (Test-Path $shot) {
               Write-Output "::notice title=YawaFpsHub::демо $view снято"
@@ -308,14 +324,29 @@ jobs:
             # Высокий снимок: по нему снимаем настоящие высоты карточек демо,
             # чтобы приложение повторяло их и прокручивало содержимое, а не сжимало.
             $tall = "demo-$view-tall.png"
-            Start-Process -FilePath $edge -ArgumentList "--headless=new","--disable-gpu","--hide-scrollbars","--no-first-run","--window-size=$demoWidth,2400","--virtual-time-budget=6000","--screenshot=$PWD\$tall",$url -Wait
+            $tallProfile = Join-Path $env:TEMP "yawa-edge-$view-tall"
+            Start-Process -FilePath $edge -ArgumentList "--headless=new","--disable-gpu","--hide-scrollbars","--no-first-run","--user-data-dir=$tallProfile","--window-size=$demoWidth,2400","--virtual-time-budget=6000","--screenshot=$PWD\$tall",$url -Wait
           }
           Stop-Process -Id $server.Id -Force
+
+      - name: Лог приложения (диагностика)
+        # Лог лежит рядом с exe. Кладём его в ci-logs рядом со скриншотами: из песочницы
+        # иначе не видно, поднялась ли ETW-сессия и что с оверлеем на этой машине.
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $log = Get-ChildItem -Path .\build -Recurse -Filter YawaFpsHub.log | Select-Object -First 1
+          if ($log) {
+            Copy-Item $log.FullName "$PWD\app-log.txt" -Force
+            Write-Output "::notice title=YawaFpsHub::лог приложения: $($log.FullName)"
+          } else {
+            Write-Output "::warning title=YawaFpsHub::лог приложения не найден"
+          }
 
       - name: Опубликовать скриншоты
         # Два прогона на один коммит (push и pull_request) соревнуются за ветку ci-logs,
         # поэтому публикует только push-прогон: второй попытке push не хватает fast-forward.
-        if: github.event_name == 'push' && hashFiles('screenshot-*.png') != ''
+        if: github.event_name == 'push' && hashFiles('screenshot-*.png', 'demo-*.png') != ''
         shell: bash
         run: |
           # Сначала убираем свежие PNG из рабочего дерева: в ветке ci-logs они уже есть,
@@ -329,7 +360,9 @@ jobs:
           git config user.name "ci"
           git checkout -B ci-logs
           cp /tmp/shots/*.png .
+          if [ -f app-log.txt ]; then cp app-log.txt /tmp/shots/ ; fi
           git add -f ./*.png
+          if [ -f app-log.txt ]; then git add -f app-log.txt ; fi
           git commit -m "screenshots" || true
           git push -f origin ci-logs
 
@@ -349,5 +382,4 @@ jobs:
           name: YawaFpsHub-win64
           path: |
             build/**/YawaFpsHub.exe
-            build/**/YawaFpsHub.ini
             build/tools/probe/Release/yawa-probe.exe

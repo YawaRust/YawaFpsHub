@@ -11,6 +11,7 @@ void runSystemSamplerTests();
 void runGpuRegistryTests();
 void runFrameTrackerTests();
 void runSettingsTests();
+void runBottleneckTests();
 
 } // namespace yawa::test
 
@@ -23,6 +24,7 @@ int main()
     yawa::test::runGpuRegistryTests();
     yawa::test::runFrameTrackerTests();
     yawa::test::runSettingsTests();
+    yawa::test::runBottleneckTests();
 
     if (yawa::test::failureCount() == 0) {
         std::printf("все тесты пройдены\n");

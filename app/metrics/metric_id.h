@@ -33,6 +33,9 @@ enum class MetricId : std::uint8_t {
     CpuClock,
     CpuPower,
     GameThreadLoad,
+    // Самый загруженный поток: считается по тем же данным, что и загрузка ядер,
+    // и работает всегда, в отличие от питания без драйвера.
+    CpuPeakLoad,
 
     GpuLoad,
     GpuTemp,
@@ -41,6 +44,11 @@ enum class MetricId : std::uint8_t {
     GpuMemClock,
     GpuPower,
     GpuFan,
+    // Медиа-движки GPU и шина: кодирование/декодирование видео считаются по тем же
+    // счётчикам GPU Engine, что и 3D, поэтому работают у NVIDIA, AMD и Intel.
+    GpuEncode,
+    GpuDecode,
+    PcieLoad,
     VramUsed,
     VramTotal,
 
@@ -48,6 +56,9 @@ enum class MetricId : std::uint8_t {
     RamCache,
     RamFree,
     PageFile,
+    PageFileTotal,
+    RamLoad,
+    PageFileLoad,
 
     DiskRead,
     DiskWrite,
@@ -87,7 +98,7 @@ struct MetricInfo {
     std::uint8_t decimals;
 };
 
-constexpr std::size_t kMetricCount = 49;
+constexpr std::size_t kMetricCount = 56;
 
 inline constexpr std::array<MetricInfo, kMetricCount> kMetricTable{{
     { MetricId::Fps, "fps", "FPS", MetricUnit::Count, 0 },
@@ -95,13 +106,14 @@ inline constexpr std::array<MetricInfo, kMetricCount> kMetricTable{{
     { MetricId::Low1Fps, "low_1", "1% low", MetricUnit::Count, 0 },
     { MetricId::Low01Fps, "low_0_1", "0.1% low", MetricUnit::Count, 0 },
     { MetricId::AvgFps, "fps_avg", "Средний FPS", MetricUnit::Count, 1 },
-    { MetricId::DroppedFrames, "dropped", "Пропущено, доля", MetricUnit::Percent, 1 },
+    { MetricId::DroppedFrames, "dropped", "Пропущено за секунду", MetricUnit::Percent, 1 },
 
     { MetricId::CpuLoad, "cpu_load", "Загрузка процессора", MetricUnit::Percent, 0 },
     { MetricId::CpuTemp, "cpu_temp", "Температура CPU", MetricUnit::Celsius, 0 },
     { MetricId::CpuClock, "cpu_clock", "Частота CPU", MetricUnit::Megahertz, 0 },
     { MetricId::CpuPower, "cpu_power", "Питание CPU", MetricUnit::Watts, 0 },
     { MetricId::GameThreadLoad, "game_thread", "Поток игры", MetricUnit::Percent, 0 },
+    { MetricId::CpuPeakLoad, "cpu_peak", "Пик по ядрам", MetricUnit::Percent, 0 },
 
     { MetricId::GpuLoad, "gpu_load", "Загрузка видеокарты", MetricUnit::Percent, 0 },
     { MetricId::GpuTemp, "gpu_temp", "Температура GPU", MetricUnit::Celsius, 0 },
@@ -110,13 +122,19 @@ inline constexpr std::array<MetricInfo, kMetricCount> kMetricTable{{
     { MetricId::GpuMemClock, "gpu_mem_clock", "Частота памяти", MetricUnit::Megahertz, 0 },
     { MetricId::GpuPower, "gpu_power", "Питание GPU", MetricUnit::Watts, 0 },
     { MetricId::GpuFan, "gpu_fan", "Вентилятор GPU", MetricUnit::Rpm, 0 },
+    { MetricId::GpuEncode, "gpu_encode", "Кодирование видео", MetricUnit::Percent, 0 },
+    { MetricId::GpuDecode, "gpu_decode", "Декодирование видео", MetricUnit::Percent, 0 },
+    { MetricId::PcieLoad, "pcie_load", "Нагрузка PCI-e", MetricUnit::Percent, 0 },
     { MetricId::VramUsed, "vram_used", "Видеопамять занято", MetricUnit::Gigabytes, 1 },
     { MetricId::VramTotal, "vram_total", "Видеопамять всего", MetricUnit::Gigabytes, 1 },
 
     { MetricId::RamUsed, "ram_used", "Память занято", MetricUnit::Gigabytes, 1 },
     { MetricId::RamCache, "ram_cache", "Память в кэше", MetricUnit::Gigabytes, 1 },
     { MetricId::RamFree, "ram_free", "Память свободно", MetricUnit::Gigabytes, 1 },
-    { MetricId::PageFile, "page_file", "Своп-файл", MetricUnit::Gigabytes, 1 },
+    { MetricId::PageFile, "page_file", "Своп-файл занято", MetricUnit::Gigabytes, 1 },
+    { MetricId::PageFileTotal, "page_file_total", "Файл подкачки всего", MetricUnit::Gigabytes, 1 },
+    { MetricId::RamLoad, "ram_load", "Загрузка ОЗУ", MetricUnit::Percent, 0 },
+    { MetricId::PageFileLoad, "page_file_load", "Загрузка файла подкачки", MetricUnit::Percent, 0 },
 
     { MetricId::DiskRead, "disk_read", "Диск: чтение", MetricUnit::MegabytesPerSecond, 0 },
     { MetricId::DiskWrite, "disk_write", "Диск: запись", MetricUnit::MegabytesPerSecond, 0 },

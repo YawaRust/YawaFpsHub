@@ -1,5 +1,6 @@
 #pragma once
 
+#include "metrics/bottleneck.h"
 #include "metrics/metric_store.h"
 #include "metrics/statistics.h"
 #include "platform/sensors_win.h"
@@ -12,7 +13,7 @@
 
 namespace yawa {
 
-enum class View : std::uint8_t { Dashboard, Sensors, Overlay, Settings };
+enum class View : std::uint8_t { Dashboard, Sensors, Overlay, Settings, Bottleneck, System };
 
 // Что именно нажали в интерфейсе. Окно разбирает эти события и меняет состояние,
 // сами экраны остаются «только рисующими».
@@ -64,6 +65,28 @@ enum class ActionKind : std::uint8_t {
     SelectGpu,
     ToggleGpuMenu,
     CaptureHotkey,
+    // Расширенные настройки оформления оверлея.
+    SetOverlayTextScale,
+    SetOverlayBgOpacity,
+    SetOverlayPadding,
+    SetOverlayRowGap,
+    SetValueColor,
+    SetLabelColor,
+    SetAccentColor,
+    // Цвет конкретной строки: value = поле * 8 + (цвет + 1), 0 — «как в стиле».
+    SetRowColor,
+    SetBorderWidth,
+    SetShadowStrength,
+    SetLetterSpacing,
+    SetUppercase,
+    SetSeparators,
+    SetFpsDecimals,
+    ToggleOverlayClickThrough,
+    // Полосы прокрутки: бегунок тянется мышью, дорожка листает на страницу.
+    ScrollContentTrack,
+    ScrollContentThumb,
+    ScrollSensorsTrack,
+    ScrollSensorsThumb,
 };
 
 struct UiHit {
@@ -113,17 +136,46 @@ struct AppModel {
     // Выпадающий список выбора GPU на обзоре.
     bool gpuMenuOpen = false;
     int sensorScroll = 0;
+    // Предел прокрутки таблицы датчиков: нужен, чтобы бегунок работал мышью.
+    float sensorScrollMax = 0.0f;
+    float sensorViewportHeight = 0.0f;
+    Rect sensorScrollTrack{};
     // Прокрутка содержимого: экран рисуется в «демо-высоте», окно показывает его часть.
     float contentScroll = 0.0f;
+    // Режим монитора, определённый при запуске: показываем его и берём из него цель кадра.
+    int displayWidth = 0;
+    int displayHeight = 0;
+    int displayRefreshHz = 0;
     float contentHeight = 0.0f;
     // Состояние окна для своего заголовка: перетаскивание и кнопки рисуются вручную.
     bool maximized = false;
+    // Паспорт машины собирается один раз при старте, узкое место пересчитывается
+    // из последних показаний: экраны только рисуют то, что лежит в модели.
+    HardwareIdentity hardware;
+    BottleneckResult balance;
     float cursorX = -100.0f;
     float cursorY = -100.0f;
     bool cursorInside = false;
 };
 
 constexpr std::size_t kFavoriteHistoryPoints = 240;
+
+// Ползунки тянутся мышью: обработчик нажатия должен знать их полный список.
+inline bool isSliderAction(ActionKind action)
+{
+    switch (action) {
+    case ActionKind::SetScale:
+    case ActionKind::SetOpacity:
+    case ActionKind::SetOverlayRadius:
+    case ActionKind::SetOverlayTextScale:
+    case ActionKind::SetOverlayBgOpacity:
+    case ActionKind::SetOverlayPadding:
+    case ActionKind::SetOverlayRowGap:
+        return true;
+    default:
+        return false;
+    }
+}
 
 // Наведение считается по координатам курсора, которые окно обновляет на WM_MOUSEMOVE.
 // Так экран остаётся «только рисующим» и не заводит собственного состояния.
