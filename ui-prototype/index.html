@@ -542,10 +542,26 @@
 
             <div class="field">
               <div class="field__label-row">
-                <span class="field__label">Прозрачность фона</span>
+                <span class="field__label">Размер текста</span>
+                <b id="osdTextScaleValue">100%</b>
+              </div>
+              <input class="range" type="range" id="osdTextScale" min="85" max="130" step="5" value="100">
+            </div>
+
+            <div class="field">
+              <div class="field__label-row">
+                <span class="field__label">Прозрачность окна</span>
                 <b id="osdOpacityValue">72%</b>
               </div>
               <input class="range" type="range" id="osdOpacity" min="0" max="100" step="1" value="72">
+            </div>
+
+            <div class="field">
+              <div class="field__label-row">
+                <span class="field__label">Фон подложки</span>
+                <b id="osdBgValue">из стиля</b>
+              </div>
+              <input class="range" type="range" id="osdBg" min="0" max="100" step="1" value="100">
             </div>
 
             <div class="field">
@@ -563,6 +579,22 @@
                 <b id="osdRadiusValue">8 px</b>
               </div>
               <input class="range" type="range" id="osdRadius" min="0" max="24" step="1" value="8">
+            </div>
+
+            <div class="field">
+              <div class="field__label-row">
+                <span class="field__label">Отступы внутри</span>
+                <b id="osdPadValue">из стиля</b>
+              </div>
+              <input class="range" type="range" id="osdPad" min="0" max="28" step="1" value="11">
+            </div>
+
+            <div class="field">
+              <div class="field__label-row">
+                <span class="field__label">Интервал строк</span>
+                <b id="osdGapValue">из стиля</b>
+              </div>
+              <input class="range" type="range" id="osdGap" min="0" max="14" step="1" value="3">
             </div>
 
             <div class="field">
@@ -585,6 +617,32 @@
                 <button data-outline="1" type="button">1 px</button>
                 <button data-outline="2" type="button">2 px</button>
                 <button data-outline="3" type="button">3 px</button>
+              </div>
+            </div>
+
+            <div class="field">
+              <span class="field__label">Цвет значений</span>
+              <div class="swatches" id="osdValueColor">
+                <button class="swatch is-active" data-color="-1" type="button">авто</button>
+                <button class="swatch" data-color="0" data-hex="#ffffff" type="button" aria-label="Белый"></button>
+                <button class="swatch" data-color="1" data-hex="#5ef29b" type="button" aria-label="Мятный"></button>
+                <button class="swatch" data-color="2" data-hex="#6aa8ff" type="button" aria-label="Ледяной"></button>
+                <button class="swatch" data-color="3" data-hex="#b47bff" type="button" aria-label="Фиалковый"></button>
+                <button class="swatch" data-color="4" data-hex="#ffb347" type="button" aria-label="Янтарный"></button>
+                <button class="swatch" data-color="5" data-hex="#ff6f6f" type="button" aria-label="Коралл"></button>
+              </div>
+            </div>
+
+            <div class="field">
+              <span class="field__label">Цвет подписей</span>
+              <div class="swatches" id="osdLabelColor">
+                <button class="swatch is-active" data-color="-1" type="button">авто</button>
+                <button class="swatch" data-color="0" data-hex="#ffffff" type="button" aria-label="Белый"></button>
+                <button class="swatch" data-color="1" data-hex="#5ef29b" type="button" aria-label="Мятный"></button>
+                <button class="swatch" data-color="2" data-hex="#6aa8ff" type="button" aria-label="Ледяной"></button>
+                <button class="swatch" data-color="3" data-hex="#b47bff" type="button" aria-label="Фиалковый"></button>
+                <button class="swatch" data-color="4" data-hex="#ffb347" type="button" aria-label="Янтарный"></button>
+                <button class="swatch" data-color="5" data-hex="#ff6f6f" type="button" aria-label="Коралл"></button>
               </div>
             </div>
 

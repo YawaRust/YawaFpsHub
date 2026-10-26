@@ -90,13 +90,17 @@ RTSS, а не по одному последнему кадру: иначе зн
 
 - **PDH** `\Processor Information(_Total)\% Processor Performance` × номинальная частота из
   `HKLM\HARDWARE\...\~MHz` — текущая частота CPU.
+- **`CallNtPowerInformation(ProcessorInformation)`** из `powrprof.dll` — резервный источник
+  частоты: работает без счётчиков PDH и без драйверов. Если молчит и он, показывается
+  номинал из реестра, чтобы строка не оставалась пустой.
 - **PDH** `\PhysicalDisk(_Total)\Disk Read Bytes/sec` и `\Network Interface(*)\Bytes Received/sec` —
   уже готовые скорости; повторно брать дельту нельзя, иначе значения уезжают в миллиарды
   (эта ошибка была поймана прогоном `yawa-probe` в CI).
 - **`GetSystemTimes`**, `GlobalMemoryStatusEx`, `GetPerformanceInfo` — загрузка CPU, память, кэш, своп.
-- **PDH** `\Processor Information(0,N)\% Processor Time` для каждого ядра — те же счётчики, что
-  у диспетчера задач, поэтому загрузка по ядрам совпадает с ним. Число ядер и полоски на
-  «Обзоре» появляются только для реально существующих ядер.
+- **`NtQuerySystemInformation(SystemProcessorPerformanceInformation)`** — загрузка по ядрам:
+  время простоя и полное время каждого логического процессора, проценты считаются по дельте
+  между опросами, как в диспетчере задач. PDH-счётчики `\Processor Information(0,N)\...` здесь
+  не используются: на части машин экземпляры не открываются, и датчики оставались пустыми.
 - **`GetForegroundWindow`**, `GetWindowThreadProcessId`, `OpenThread`, `GetThreadTimes` + QPC —
   «Поток игры»: загрузка главного потока активной игры. Без запущенной игры датчик честно
   показывает «нет данных», а не ноль.

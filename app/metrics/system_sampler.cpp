@@ -95,10 +95,15 @@ void applySnapshot(MetricStore& store, const SystemSnapshot& snapshot, const Der
     store.set(MetricId::GameThreadLoad, snapshot.gameThreadLoad, smoothingPercent);
 
     const std::size_t cores = std::min<std::size_t>(snapshot.coreCount, snapshot.coreLoadPercent.size());
+    double peak = 0.0;
     for (std::size_t index = 0; index < cores; ++index) {
+        peak = std::max(peak, snapshot.coreLoadPercent[index]);
         store.set(static_cast<MetricId>(static_cast<std::size_t>(MetricId::Core0Load) + index),
             snapshot.coreLoadPercent[index], smoothingPercent);
     }
+    // Пик берём без сглаживания: смысл строки — показать, что ядро действительно
+    // упирается в 100 %, а усреднение это скрывает.
+    store.set(MetricId::CpuPeakLoad, cores > 0 ? peak : 0.0);
 
     store.set(MetricId::GpuLoad, snapshot.gpuLoadPercent, smoothingPercent);
     store.set(MetricId::GpuTemp, snapshot.gpuTemperature);

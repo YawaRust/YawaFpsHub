@@ -64,6 +64,18 @@ enum class ActionKind : std::uint8_t {
     SelectGpu,
     ToggleGpuMenu,
     CaptureHotkey,
+    // Расширенные настройки оформления оверлея.
+    SetOverlayTextScale,
+    SetOverlayBgOpacity,
+    SetOverlayPadding,
+    SetOverlayRowGap,
+    SetValueColor,
+    SetLabelColor,
+    // Полосы прокрутки: бегунок тянется мышью, дорожка листает на страницу.
+    ScrollContentTrack,
+    ScrollContentThumb,
+    ScrollSensorsTrack,
+    ScrollSensorsThumb,
 };
 
 struct UiHit {
@@ -113,6 +125,10 @@ struct AppModel {
     // Выпадающий список выбора GPU на обзоре.
     bool gpuMenuOpen = false;
     int sensorScroll = 0;
+    // Предел прокрутки таблицы датчиков: нужен, чтобы бегунок работал мышью.
+    float sensorScrollMax = 0.0f;
+    float sensorViewportHeight = 0.0f;
+    Rect sensorScrollTrack{};
     // Прокрутка содержимого: экран рисуется в «демо-высоте», окно показывает его часть.
     float contentScroll = 0.0f;
     float contentHeight = 0.0f;
@@ -124,6 +140,23 @@ struct AppModel {
 };
 
 constexpr std::size_t kFavoriteHistoryPoints = 240;
+
+// Ползунки тянутся мышью: обработчик нажатия должен знать их полный список.
+inline bool isSliderAction(ActionKind action)
+{
+    switch (action) {
+    case ActionKind::SetScale:
+    case ActionKind::SetOpacity:
+    case ActionKind::SetOverlayRadius:
+    case ActionKind::SetOverlayTextScale:
+    case ActionKind::SetOverlayBgOpacity:
+    case ActionKind::SetOverlayPadding:
+    case ActionKind::SetOverlayRowGap:
+        return true;
+    default:
+        return false;
+    }
+}
 
 // Наведение считается по координатам курсора, которые окно обновляет на WM_MOUSEMOVE.
 // Так экран остаётся «только рисующим» и не заводит собственного состояния.

@@ -51,6 +51,16 @@ struct OverlaySettings {
     bool fontItalic = false;
     // 0 — без обводки, 1…3 — толщина в пикселях.
     int textOutline = 0;
+    // Размер именно шрифта: плашка может остаться компактной, а цифры — крупнее.
+    int textScalePercent = 100;
+    // -1 — значение из пресета. Иначе подложка получает свою прозрачность (0 — без фона).
+    int backgroundOpacityPercent = -1;
+    // -1 — отступы и межстрочный интервал из пресета, иначе ручные (px).
+    int paddingPx = -1;
+    int rowGapPx = -1;
+    // -1 — цвет из пресета, 0…5 — цвет палитры для значений и для подписей.
+    int valueColor = -1;
+    int labelColor = -1;
     // Состав: какие строки вообще показывать (fps, cpu, gpu, ram, vram).
     std::array<bool, kLabelCount> visible{ true, true, true, true, true };
     std::array<std::string, kLabelCount> labels{ "FPS", "CPU", "GPU", "RAM", "VRAM" };

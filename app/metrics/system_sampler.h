@@ -31,6 +31,9 @@ struct SystemSnapshot {
     std::uint64_t selfWorkingSetBytes = 0;
     std::uint32_t selfThreads = 0;
 
+    // Самый занятый логический процессор: сразу видно, упирается игра в одно ядро или нет.
+    double cpuPeakCoreLoad = 0.0;
+
     // Загрузка по физическим ядрам: заполняются первые coreCount элементов.
     std::array<double, 16> coreLoadPercent{};
     std::uint32_t coreCount = 0;

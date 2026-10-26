@@ -8,7 +8,7 @@
 
 namespace yawa {
 
-void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area,
+void drawSensors(Renderer& renderer, AppModel& model, const Theme& theme, const Rect& area,
     std::vector<UiHit>& hits);
 
 } // namespace yawa

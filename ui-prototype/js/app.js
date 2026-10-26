@@ -111,6 +111,13 @@
     bold: false,
     italic: false,
     outline: 0,
+    // null — значение из пресета, как -1 в приложении.
+    textScale: 100,
+    bgOpacity: null,
+    padding: null,
+    rowGap: null,
+    valueColor: null,
+    labelColor: null,
     labels: { ...DEFAULT_LABELS }
   };
 
@@ -462,6 +469,14 @@
 
     overlayState.layout = preset.layout;
     overlayState.scale = preset.scale;
+    // Как в приложении: ручные подстройки относятся к конкретному пресету.
+    overlayState.bgOpacity = null;
+    overlayState.padding = null;
+    overlayState.rowGap = null;
+    overlayState.valueColor = null;
+    overlayState.labelColor = null;
+    overlayState.textScale = 100;
+    $$(".swatch").forEach((node) => node.classList.toggle("is-active", node.dataset.color === "-1"));
     $$("#osdLayout button").forEach((node) => node.classList.toggle("is-active", node.dataset.layout === preset.layout));
 
     for (const [key, isOn] of Object.entries(preset.items)) {
@@ -506,7 +521,31 @@
     osd.dataset.layout = overlayState.layout;
     osd.dataset.style = overlayState.style;
     osd.style.setProperty("--osd-scale", (overlayState.scale / 100).toFixed(2));
-    osd.style.setProperty("--osd-bg", (overlayState.opacity / 100).toFixed(2));
+    // Прозрачность окна и прозрачность подложки — разные настройки.
+    const bgFactor = overlayState.bgOpacity === null ? 1 : overlayState.bgOpacity / 100;
+    osd.style.setProperty("--osd-bg", ((overlayState.opacity / 100) * bgFactor).toFixed(3));
+    osd.style.setProperty("--osd-text", (overlayState.textScale / 100).toFixed(2));
+    // Отступы и интервал строк: null — как в пресете.
+    osd.style.padding = overlayState.padding === null
+      ? ""
+      : `${overlayState.padding}px ${overlayState.padding + 2}px`;
+    osd.style.rowGap = overlayState.rowGap === null ? "" : `${overlayState.rowGap}px`;
+
+    // Цвета по элементам: значения и подписи независимо от пресета.
+    const colorFor = (index) => {
+      const palette = [null, "#ffffff", "#5ef29b", "#6aa8ff", "#b47bff", "#ffb347", "#ff6f6f"];
+      return index === null ? null : palette[index + 1] || null;
+    };
+    const valueColor = colorFor(overlayState.valueColor);
+    for (const node of osd.querySelectorAll(".osd__val")) {
+      if (valueColor) node.style.setProperty("color", valueColor, "important");
+      else node.style.removeProperty("color");
+    }
+    const labelColor = colorFor(overlayState.labelColor);
+    for (const node of osd.querySelectorAll(".osd__key, .osd__unit")) {
+      if (labelColor) node.style.setProperty("color", labelColor, "important");
+      else node.style.removeProperty("color");
+    }
     // -1/null — радиус берётся из пресета; число — как в приложении.
     osd.classList.toggle("osd--radius", overlayState.radius !== null);
     if (overlayState.radius === null) osd.style.removeProperty("--osd-radius");
@@ -801,6 +840,51 @@
       opacity.style.setProperty("--fill", `${overlayState.opacity}%`);
       applyOverlay();
     });
+
+    const textScale = $("#osdTextScale");
+    textScale.addEventListener("input", () => {
+      overlayState.textScale = Number(textScale.value);
+      $("#osdTextScaleValue").textContent = `${overlayState.textScale}%`;
+      textScale.style.setProperty("--fill", `${((overlayState.textScale - 85) / 45) * 100}%`);
+      applyOverlay();
+    });
+
+    // Ползунки «как в стиле»: первое касание включает ручное значение.
+    const bindAutoRange = (id, valueId, key, max, suffix) => {
+      const range = $(`#${id}`);
+      const label = $(`#${valueId}`);
+      const render = () => {
+        const value = overlayState[key];
+        range.value = String(value === null ? 0 : value);
+        range.style.setProperty("--fill", value === null ? "0%" : `${(value / max) * 100}%`);
+        label.textContent = value === null ? "из стиля" : `${value}${suffix}`;
+      };
+      range.addEventListener("input", () => {
+        overlayState[key] = Number(range.value);
+        render();
+        applyOverlay();
+      });
+      render();
+    };
+    bindAutoRange("osdBg", "osdBgValue", "bgOpacity", 100, " %");
+    bindAutoRange("osdPad", "osdPadValue", "padding", 28, " px");
+    bindAutoRange("osdGap", "osdGapValue", "rowGap", 14, " px");
+
+    const bindColors = (id, key) => {
+      const container = $(`#${id}`);
+      const chips = [...container.querySelectorAll(".swatch")];
+      chips.forEach((chip) => {
+        if (chip.dataset.hex) chip.style.background = chip.dataset.hex;
+        chip.addEventListener("click", () => {
+          const value = Number(chip.dataset.color);
+          overlayState[key] = value < 0 ? null : value;
+          chips.forEach((node) => node.classList.toggle("is-active", node === chip));
+          applyOverlay();
+        });
+      });
+    };
+    bindColors("osdValueColor", "valueColor");
+    bindColors("osdLabelColor", "labelColor");
 
     $$("[data-osd-toggle]").forEach((toggle) => {
       toggle.addEventListener("change", () => {

@@ -88,7 +88,9 @@ void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
     // Заголовок карточки занимает 36 px: крупное число начинается ниже, иначе
     // подзаголовок «игра · цель 60 Гц» проступал сквозь цифры.
     const float numberTop = inner.top + 54.0f;
-    const std::wstring value = wideNumber(model.fps.currentFps, MetricUnit::Count, 0);
+    // Без запущенной игры честнее прочерк: «0 fps» читалось как реальный ноль кадров.
+    const bool hasFrames = model.etwRunning && model.fps.currentFps > 0.0;
+    const std::wstring value = hasFrames ? wideNumber(model.fps.currentFps, MetricUnit::Count, 0) : L"—";
     const float valueWidth = renderer.measureText(value, TextRole::Display);
     renderer.text(value, Rect{ inner.left - 2.0f, numberTop, inner.left + valueWidth + 8.0f, numberTop + 84.0f },
         TextRole::Display, model.etwRunning ? theme.accent : theme.textFaint);
@@ -96,6 +98,11 @@ void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
                             numberTop + 76.0f },
         TextRole::Small, theme.textFaint);
 
+    if (!hasFrames) {
+        renderer.text(L"кадров пока нет — запустите игру", Rect{ inner.left, numberTop + 76.0f, inner.left + 260.0f,
+                                                       numberTop + 94.0f },
+            TextRole::Tiny, theme.textFaint);
+    }
     if (model.fps.averageFps > 0.1) {
         const double delta = (model.fps.currentFps - model.fps.averageFps) / model.fps.averageFps * 100.0;
         const std::wstring text = signedPercent(delta);
@@ -269,10 +276,9 @@ void drawCpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
         { L"Температура",
             model.availability.cpuTemperature ? wideMetric(MetricId::CpuTemp, model.store.value(MetricId::CpuTemp))
                                               : L"нет данных" },
-        { L"Питание",
-            model.store.value(MetricId::CpuPower) > 0.0
-                ? wideMetric(MetricId::CpuPower, model.store.value(MetricId::CpuPower))
-                : L"нет данных" },
+        // «Питание» без драйвера не читается, поэтому показываем пик по ядрам:
+        // он сразу говорит, упирается ли игра в одно ядро.
+        { L"Пик по ядрам", wideMetric(MetricId::CpuPeakLoad, model.store.value(MetricId::CpuPeakLoad)) },
         { L"Поток игры",
             model.store.value(MetricId::GameThreadLoad) > 0.0
                 ? wideMetric(MetricId::GameThreadLoad, model.store.value(MetricId::GameThreadLoad))

@@ -3,6 +3,7 @@
 #include "platform/win_util.h"
 #include "ui/chrome.h"
 #include "ui/overlay_view.h"
+#include "render/overlay_painter.h"
 #include "ui/dashboard_view.h"
 #include "ui/layout.h"
 #include "ui/sensors_view.h"
@@ -481,11 +482,44 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
                 SetCapture(m_window);
                 return 0;
             }
-            if (hit.action == ActionKind::SetScale || hit.action == ActionKind::SetOpacity) {
+            if (isSliderAction(hit.action)) {
                 m_dragAction = hit.action;
                 m_dragRect = hit.rect;
                 SetCapture(m_window);
                 applySlider(hit.action, hit.rect, x);
+                return 0;
+            }
+            if (hit.action == ActionKind::ScrollContentThumb) {
+                // Бегунок тянем: запоминаем, за какую точку его взяли.
+                m_draggingScroll = true;
+                m_scrollGrabDy = y - hit.rect.top;
+                SetCapture(m_window);
+                return 0;
+            }
+            if (hit.action == ActionKind::ScrollSensorsThumb) {
+                m_draggingSensors = true;
+                m_scrollGrabDy = y - hit.rect.top;
+                m_scrollTrack = m_model.sensorScrollTrack;
+                SetCapture(m_window);
+                return 0;
+            }
+            if (hit.action == ActionKind::ScrollSensorsTrack) {
+                const float maxScroll = m_model.sensorScrollMax;
+                const float step = std::max(m_model.sensorViewportHeight * 0.85f, 120.0f);
+                const float before = static_cast<float>(m_model.sensorScroll);
+                const bool forward = y > hit.rect.centerY();
+                const float next = std::clamp(before + (forward ? step : -step), 0.0f, maxScroll);
+                m_model.sensorScroll = static_cast<int>(next);
+                InvalidateRect(m_window, nullptr, FALSE);
+                return 0;
+            }
+            if (hit.action == ActionKind::ScrollContentTrack) {
+                // Клик по дорожке листает на страницу в сторону клика.
+                const float limit = std::max(contentDesignHeight() - contentArea().height(), 0.0f);
+                const float step = contentArea().height() * 0.85f;
+                const bool forward = y > hit.rect.centerY();
+                m_model.contentScroll = std::clamp(m_model.contentScroll + (forward ? step : -step), 0.0f, limit);
+                InvalidateRect(m_window, nullptr, FALSE);
                 return 0;
             }
         }
@@ -524,6 +558,30 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         m_hoverIndex = hovered;
         if (repaint) {
             InvalidateRect(m_window, nullptr, FALSE);
+        }
+
+        if (m_draggingScroll || m_draggingSensors) {
+            const float limit = m_draggingSensors ? m_model.sensorScrollMax
+                : std::max(contentDesignHeight() - contentArea().height(), 0.0f);
+            // Геометрия полосы берётся из сохранённой дорожки и текущего вылета бегунка.
+            const Rect& track = m_scrollTrack;
+            const float viewportHeight = m_draggingSensors ? m_model.sensorViewportHeight
+                : contentArea().height();
+            const float designHeight = m_draggingSensors ? std::max(viewportHeight + limit, 1.0f)
+                : contentDesignHeight();
+            const float trackHeight = track.height();
+            const float thumbHeight = std::max(m_draggingSensors ? 24.0f : 40.0f,
+                trackHeight * viewportHeight / designHeight);
+            const float travel = std::max(trackHeight - thumbHeight, 1.0f);
+            const float thumbTop = std::clamp(cursorY - m_scrollGrabDy, track.top, track.top + travel);
+            const float fraction = (thumbTop - track.top) / travel;
+            if (m_draggingSensors) {
+                m_model.sensorScroll = static_cast<int>(limit * fraction);
+            } else {
+                m_model.contentScroll = limit * fraction;
+            }
+            InvalidateRect(m_window, nullptr, FALSE);
+            return 0;
         }
 
         if (m_dragAction == ActionKind::DragOverlay) {
@@ -573,7 +631,8 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         // это привычнее, чем уезжающая страница.
         if (m_model.view == View::Sensors) {
             const int previous = m_model.sensorScroll;
-            m_model.sensorScroll = std::clamp(previous - static_cast<int>(steps) * 3, 0, 4096);
+            const int limit = static_cast<int>(m_model.sensorScrollMax);
+            m_model.sensorScroll = std::clamp(previous - static_cast<int>(steps) * 3, 0, limit);
             if (m_model.sensorScroll != previous) {
                 InvalidateRect(m_window, nullptr, FALSE);
                 return 0;
@@ -584,7 +643,13 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     }
 
     case WM_LBUTTONUP:
-        if (m_dragAction == ActionKind::SetScale || m_dragAction == ActionKind::SetOpacity) {
+        if (m_draggingScroll || m_draggingSensors) {
+            m_draggingScroll = false;
+            m_draggingSensors = false;
+            ReleaseCapture();
+            return 0;
+        }
+        if (isSliderAction(m_dragAction)) {
             m_dragAction = ActionKind::None;
             ReleaseCapture();
             saveSettings();
@@ -742,7 +807,7 @@ void MainWindow::scrollContent(float delta)
     InvalidateRect(m_window, nullptr, FALSE);
 }
 
-void MainWindow::drawScrollBar(const Rect& viewport)
+void MainWindow::drawScrollBar(const Rect& viewport, std::vector<UiHit>& hits)
 {
     const float limit = contentDesignHeight() - viewport.height();
     if (limit <= 1.0f) {
@@ -754,9 +819,20 @@ void MainWindow::drawScrollBar(const Rect& viewport)
     const float thumbHeight = std::max(40.0f, trackHeight * viewport.height() / contentDesignHeight());
     const float travel = trackHeight - thumbHeight;
     const float fraction = std::clamp(m_model.contentScroll / limit, 0.0f, 1.0f);
-    const Rect thumb{ viewport.right + 6.0f, trackTop + travel * fraction, viewport.right + 9.0f,
-        trackTop + travel * fraction + thumbHeight };
-    m_renderer.fillRoundRect(thumb, 2.0f, m_theme.lineStrong.withAlpha(0.85f));
+    const float thumbTop = trackTop + travel * fraction;
+
+    // Дорожка и бегунок: по дорожке кликаем, бегунок тянем мышью.
+    const Rect track{ viewport.right + 4.0f, trackTop, viewport.right + 11.0f, trackBottom };
+    const Rect thumb{ track.left, thumbTop, track.right, thumbTop + thumbHeight };
+    const bool hovered = isHovered(m_model, track) || m_draggingScroll;
+    m_renderer.fillRoundRect(track, 3.0f, m_theme.line.withAlpha(hovered ? 0.55f : 0.28f));
+    m_renderer.fillRoundRect(thumb, 3.0f,
+        m_theme.lineStrong.withAlpha(hovered || m_draggingScroll ? 1.0f : 0.8f));
+
+    hits.push_back(UiHit{ Rect{ track.left - 2.0f, thumbTop, track.right + 2.0f, thumbTop + thumbHeight },
+        ActionKind::ScrollContentThumb, 0 });
+    hits.push_back(UiHit{ track, ActionKind::ScrollContentTrack, 0 });
+    m_scrollTrack = track;
 }
 
 std::vector<UiHit> MainWindow::buildHits()
@@ -797,7 +873,6 @@ std::vector<UiHit> MainWindow::buildHits()
     }
     m_model.cursorY = cursorY;
     m_renderer.popClip();
-    drawScrollBar(viewport);
     return hits;
 }
 
@@ -826,6 +901,8 @@ void MainWindow::paint()
             hit.rect.bottom -= m_model.contentScroll;
         }
     }
+    // Полоса прокрутки живёт в координатах окна, поэтому её хиты добавляются после сдвига.
+    drawScrollBar(contentArea(), m_hits);
     drawRail(m_renderer, m_model, m_theme, m_hits);
     drawTitleBar(m_renderer, m_model, m_theme, m_hits);
     drawTopBar(m_renderer, m_model, m_theme, m_hits);
@@ -894,6 +971,12 @@ void MainWindow::applySlider(ActionKind action, const Rect& rect, float x)
     if (action == ActionKind::SetScale) {
         // Шаг 5 %: значения остаются ровными и хорошо читаются в ini.
         hit.value = 70 + static_cast<int>(std::lround(fraction * 90.0f / 5.0f)) * 5;
+    } else if (action == ActionKind::SetOverlayTextScale) {
+        hit.value = 85 + static_cast<int>(std::lround(fraction * 45.0f / 5.0f)) * 5;
+    } else if (action == ActionKind::SetOverlayPadding) {
+        hit.value = static_cast<int>(std::lround(fraction * 28.0f));
+    } else if (action == ActionKind::SetOverlayRowGap) {
+        hit.value = static_cast<int>(std::lround(fraction * 14.0f));
     } else if (action == ActionKind::SetOverlayRadius) {
         hit.value = static_cast<int>(std::lround(fraction * 24.0f));
     } else {
@@ -1191,6 +1274,38 @@ void MainWindow::applyAction(const UiHit& hit)
         m_overlay.setSettings(m_model.settings.overlay);
         break;
 
+    case ActionKind::SetOverlayTextScale:
+        m_model.settings.overlay.textScalePercent = std::clamp(hit.value, 85, 130);
+        m_overlay.setSettings(m_model.settings.overlay);
+        break;
+
+    case ActionKind::SetOverlayBgOpacity:
+        m_model.settings.overlay.backgroundOpacityPercent = std::clamp(hit.value, 0, 100);
+        m_overlay.setSettings(m_model.settings.overlay);
+        break;
+
+    case ActionKind::SetOverlayPadding:
+        m_model.settings.overlay.paddingPx = std::clamp(hit.value, 0, 28);
+        m_overlay.setSettings(m_model.settings.overlay);
+        break;
+
+    case ActionKind::SetOverlayRowGap:
+        m_model.settings.overlay.rowGapPx = std::clamp(hit.value, 0, 14);
+        m_overlay.setSettings(m_model.settings.overlay);
+        break;
+
+    case ActionKind::SetValueColor:
+        m_model.settings.overlay.valueColor = std::clamp(hit.value, -1, kOverlayColorCount - 1);
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
+    case ActionKind::SetLabelColor:
+        m_model.settings.overlay.labelColor = std::clamp(hit.value, -1, kOverlayColorCount - 1);
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
     case ActionKind::ToggleMetric:
         if (hit.value >= 0 && hit.value < static_cast<int>(kLabelCount)) {
             auto& visible = m_model.settings.overlay.visible[static_cast<std::size_t>(hit.value)];
@@ -1243,6 +1358,13 @@ void MainWindow::applyAction(const UiHit& hit)
 
     case ActionKind::DragOverlay:
         // Само перетаскивание обрабатывается в WM_MOUSEMOVE, сюда попадает только клик.
+        break;
+
+    case ActionKind::ScrollContentThumb:
+    case ActionKind::ScrollContentTrack:
+    case ActionKind::ScrollSensorsThumb:
+    case ActionKind::ScrollSensorsTrack:
+        // Полосы прокрутки обрабатываются раньше, в WM_LBUTTONDOWN: клик до сюда не доходит.
         break;
 
     case ActionKind::None:

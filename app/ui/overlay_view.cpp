@@ -55,6 +55,56 @@ void drawSlider(Renderer& renderer, const Rect& row, int value, int minimum, int
     hits.push_back(UiHit{ Rect{ track.left, track.top - 8.0f, track.right, track.bottom + 8.0f }, action, 0 });
 }
 
+// Ползунок с готовой подписью значения: нужен там, где положение бегунка и число
+// не совпадают («из стиля» рисуется на месте значения пресета).
+void drawSliderAt(Renderer& renderer, const Rect& row, float fraction, std::wstring_view caption,
+    std::wstring_view valueText, const Theme& theme, std::vector<UiHit>& hits, ActionKind action)
+{
+    renderer.text(caption, Rect{ row.left, row.top, row.left + 160.0f, row.top + 16.0f }, TextRole::Small,
+        theme.textDim);
+    renderer.text(valueText, Rect{ row.right - 90.0f, row.top, row.right, row.top + 16.0f }, TextRole::Small,
+        theme.text, TextAlign::Right);
+
+    const Rect track{ row.left, row.top + 24.0f, row.right, row.top + 34.0f };
+    drawBar(renderer, track, std::clamp(fraction, 0.0f, 1.0f), theme.accent, theme);
+    renderer.fillCircle(track.left + track.width() * std::clamp(fraction, 0.0f, 1.0f), track.centerY(), 6.0f,
+        theme.accent);
+    hits.push_back(UiHit{ Rect{ track.left, track.top - 8.0f, track.right, track.bottom + 8.0f }, action, 0 });
+}
+
+// Палитра цветов оверлея: «авто» (из пресета) и шесть цветов.
+void drawColorRow(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& row,
+    std::wstring_view caption, int selected, ActionKind action, std::vector<UiHit>& hits)
+{
+    renderer.text(caption, Rect{ row.left, row.top, row.left + 150.0f, row.bottom }, TextRole::Small,
+        theme.textDim);
+
+    constexpr int kCount = kOverlayColorCount + 1;
+    const float chipWidth = 26.0f;
+    const float gap = 4.0f;
+    const float total = static_cast<float>(kCount) * chipWidth + static_cast<float>(kCount - 1) * gap;
+    float left = row.right - total;
+    const auto palette = overlayColorPalette();
+    for (int index = -1; index < kOverlayColorCount; ++index) {
+        const Rect chip{ left, row.top, left + chipWidth, row.top + 22.0f };
+        const bool active = index == selected;
+        const bool hover = isHovered(model, chip);
+        renderer.fillRoundRect(chip, 7.0f, active ? theme.accentSoft : theme.panelSoft.withAlpha(hover ? 0.95f : 0.6f));
+        if (active) {
+            renderer.strokeRoundRect(chip, 7.0f, theme.accentGlow, 1.0f);
+        }
+        if (index < 0) {
+            renderer.text(L"авто", chip, TextRole::Tiny, active ? theme.accent : theme.textFaint,
+                TextAlign::Center);
+        } else {
+            renderer.fillCircle(chip.centerX(), chip.centerY(), 6.0f,
+                palette[static_cast<std::size_t>(index)].withAlpha(active ? 1.0f : 0.85f));
+        }
+        hits.push_back(UiHit{ chip, action, index });
+        left += chipWidth + gap;
+    }
+}
+
 void drawToggleRow(Renderer& renderer, const Rect& row, std::wstring_view label, bool on, const Theme& theme,
     std::vector<UiHit>& hits, ActionKind action, int value)
 {
@@ -321,11 +371,23 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
     top += 30.0f;
 
     drawSlider(renderer, Rect{ inner.left, top, inner.right, top + 34.0f }, overlay.scalePercent, 70, 160,
-        L"Масштаб", theme, hits, ActionKind::SetScale, L" %");
+        L"Масштаб плашки", theme, hits, ActionKind::SetScale, L" %");
+    top += 44.0f;
+    // Размер текста — отдельно от масштаба: цифры можно укрупнить, не раздувая плашку.
+    drawSlider(renderer, Rect{ inner.left, top, inner.right, top + 34.0f }, overlay.textScalePercent, 85, 130,
+        L"Размер текста", theme, hits, ActionKind::SetOverlayTextScale, L" %");
     top += 44.0f;
     drawSlider(renderer, Rect{ inner.left, top, inner.right, top + 34.0f }, overlay.opacityPercent, 0, 100,
-        L"Прозрачность", theme, hits, ActionKind::SetOpacity, L" %");
-    top += 42.0f;
+        L"Прозрачность окна", theme, hits, ActionKind::SetOpacity, L" %");
+    top += 44.0f;
+
+    // Прозрачность самой подложки: «Фон» и прозрачность окна — разные вещи.
+    const int backgroundOpacity = overlay.backgroundOpacityPercent;
+    drawSliderAt(renderer, Rect{ inner.left, top, inner.right, top + 34.0f },
+        backgroundOpacity < 0 ? 1.0f : static_cast<float>(backgroundOpacity) / 100.0f, L"Фон подложки",
+        backgroundOpacity < 0 ? L"из стиля" : std::to_wstring(backgroundOpacity) + L" %", theme, hits,
+        ActionKind::SetOverlayBgOpacity);
+    top += 44.0f;
 
     // Оформление: то, что нельзя выразить пресетом, но нужно для своей картинки.
     renderer.text(L"Оформление", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
@@ -350,7 +412,20 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
     const int radiusValue = overlay.cornerRadius >= 0 ? overlay.cornerRadius : 8;
     drawSlider(renderer, Rect{ inner.left, top, inner.right, top + 34.0f }, radiusValue, 0, 24, L"Углы", theme, hits,
         ActionKind::SetOverlayRadius, L" px");
-    top += 36.0f;
+    top += 40.0f;
+
+    // Отступы и межстрочный интервал: плотный RTSS и воздушный «Неон» настраиваются вручную.
+    const int padding = overlay.paddingPx;
+    drawSliderAt(renderer, Rect{ inner.left, top, inner.right, top + 34.0f },
+        padding < 0 ? 0.36f : static_cast<float>(padding) / 28.0f, L"Отступы внутри",
+        padding < 0 ? L"из стиля" : std::to_wstring(padding) + L" px", theme, hits, ActionKind::SetOverlayPadding);
+    top += 44.0f;
+
+    const int rowGap = overlay.rowGapPx;
+    drawSliderAt(renderer, Rect{ inner.left, top, inner.right, top + 34.0f },
+        rowGap < 0 ? 0.18f : static_cast<float>(rowGap) / 14.0f, L"Интервал строк",
+        rowGap < 0 ? L"из стиля" : std::to_wstring(rowGap) + L" px", theme, hits, ActionKind::SetOverlayRowGap);
+    top += 44.0f;
 
     // Редактор текста: шрифт, начертание и обводка — как в RivaTuner и FPS Monitor.
     renderer.text(L"Шрифт", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
@@ -383,6 +458,14 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
         TextAlign::Center);
     hits.push_back(UiHit{ outlineMinus, ActionKind::ChangeOverlayOutline, -1 });
     hits.push_back(UiHit{ outlinePlus, ActionKind::ChangeOverlayOutline, 1 });
+    top += 32.0f;
+
+    // Цвета по элементам: значения и подписи настраиваются отдельно.
+    drawColorRow(renderer, model, theme, Rect{ inner.left, top, inner.right, top + 22.0f }, L"Цвет значений",
+        overlay.valueColor, ActionKind::SetValueColor, hits);
+    top += 26.0f;
+    drawColorRow(renderer, model, theme, Rect{ inner.left, top, inner.right, top + 22.0f }, L"Цвет подписей",
+        overlay.labelColor, ActionKind::SetLabelColor, hits);
     top += 28.0f;
 
     renderer.text(L"Смещение", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
@@ -490,7 +573,7 @@ void drawOverlayView(Renderer& renderer, const AppModel& model, const Theme& the
 
     drawClipped(place(430.0f),
         [&](const Rect& card) { drawPreviewCard(renderer, model, theme, card, hits); });
-    drawClipped(place(624.0f),
+    drawClipped(place(880.0f),
         [&](const Rect& card) { drawControlsCard(renderer, model, theme, card, hits); });
     drawClipped(place(232.0f),
         [&](const Rect& card) { drawLabelsCard(renderer, model, theme, card, hits); });

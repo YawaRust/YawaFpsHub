@@ -33,6 +33,9 @@ enum class MetricId : std::uint8_t {
     CpuClock,
     CpuPower,
     GameThreadLoad,
+    // Самый загруженный поток: считается по тем же данным, что и загрузка ядер,
+    // и работает всегда, в отличие от питания без драйвера.
+    CpuPeakLoad,
 
     GpuLoad,
     GpuTemp,
@@ -87,7 +90,7 @@ struct MetricInfo {
     std::uint8_t decimals;
 };
 
-constexpr std::size_t kMetricCount = 49;
+constexpr std::size_t kMetricCount = 50;
 
 inline constexpr std::array<MetricInfo, kMetricCount> kMetricTable{{
     { MetricId::Fps, "fps", "FPS", MetricUnit::Count, 0 },
@@ -102,6 +105,7 @@ inline constexpr std::array<MetricInfo, kMetricCount> kMetricTable{{
     { MetricId::CpuClock, "cpu_clock", "Частота CPU", MetricUnit::Megahertz, 0 },
     { MetricId::CpuPower, "cpu_power", "Питание CPU", MetricUnit::Watts, 0 },
     { MetricId::GameThreadLoad, "game_thread", "Поток игры", MetricUnit::Percent, 0 },
+    { MetricId::CpuPeakLoad, "cpu_peak", "Пик по ядрам", MetricUnit::Percent, 0 },
 
     { MetricId::GpuLoad, "gpu_load", "Загрузка видеокарты", MetricUnit::Percent, 0 },
     { MetricId::GpuTemp, "gpu_temp", "Температура GPU", MetricUnit::Celsius, 0 },

@@ -99,6 +99,117 @@ std::uint32_t countProcessThreads()
 
 } // namespace
 
+namespace {
+
+// Те же данные, что у диспетчера задач: ядро отдаёт время простоя и полное время
+// по каждому логическому процессору. Доступно без прав администратора и без драйверов.
+struct ProcessorPerformance {
+    long long idleTime;
+    long long kernelTime;
+    long long userTime;
+    long long dpcTime;
+    long long interruptTime;
+    unsigned long interruptCount;
+    unsigned long long reserved[2];
+};
+
+using NtQuerySystemInformationFn = long(__stdcall*)(int, void*, unsigned long, unsigned long*);
+
+constexpr int kSystemProcessorPerformanceInformation = 8;
+
+// Частота процессора без PDH: powrprof.dll отдаёт текущие МГц по каждому потоку.
+// Это тот же источник, что был у диспетчера задач, и он работает без драйверов.
+struct ProcessorPowerInformation {
+    unsigned long number;
+    unsigned long maxMhz;
+    unsigned long currentMhz;
+    unsigned long mhzLimit;
+    unsigned long maxIdleState;
+    unsigned long currentIdleState;
+};
+
+using CallNtPowerInformationFn = long(__stdcall*)(int, void*, unsigned long, void*, unsigned long);
+
+constexpr int kProcessorInformation = 11;
+
+CallNtPowerInformationFn resolveCallNtPowerInformation()
+{
+    static CallNtPowerInformationFn function = [] {
+        HMODULE module = LoadLibraryW(L"powrprof.dll");
+        if (module == nullptr) {
+            return static_cast<CallNtPowerInformationFn>(nullptr);
+        }
+        return reinterpret_cast<CallNtPowerInformationFn>(
+            GetProcAddress(module, "CallNtPowerInformation"));
+    }();
+    return function;
+}
+
+double currentClockFromPowerInformation()
+{
+    const CallNtPowerInformationFn query = resolveCallNtPowerInformation();
+    if (query == nullptr) {
+        return 0.0;
+    }
+
+    std::array<ProcessorPowerInformation, 64> buffer{};
+    const long status = query(kProcessorInformation, nullptr, 0, buffer.data(),
+        static_cast<unsigned long>(buffer.size() * sizeof(ProcessorPowerInformation)));
+    if (status < 0) {
+        return 0.0;
+    }
+
+    // Максимум по потокам: у спящих ядер частоты нулевые, среднее занижало бы значение.
+    unsigned long clock = 0;
+    for (const ProcessorPowerInformation& info : buffer) {
+        clock = std::max(clock, info.currentMhz);
+    }
+    return static_cast<double>(clock);
+}
+
+NtQuerySystemInformationFn resolveNtQuerySystemInformation()
+{
+    static NtQuerySystemInformationFn function = [] {
+        HMODULE module = GetModuleHandleW(L"ntdll.dll");
+        if (module == nullptr) {
+            module = LoadLibraryW(L"ntdll.dll");
+        }
+        if (module == nullptr) {
+            return static_cast<NtQuerySystemInformationFn>(nullptr);
+        }
+        return reinterpret_cast<NtQuerySystemInformationFn>(
+            GetProcAddress(module, "NtQuerySystemInformation"));
+    }();
+    return function;
+}
+
+} // namespace
+
+bool SystemSensors::sampleCoreTimes()
+{
+    const NtQuerySystemInformationFn query = resolveNtQuerySystemInformation();
+    if (query == nullptr) {
+        return false;
+    }
+
+    std::array<ProcessorPerformance, 64> buffer{};
+    unsigned long written = 0;
+    const long status = query(kSystemProcessorPerformanceInformation, buffer.data(),
+        static_cast<unsigned long>(buffer.size() * sizeof(ProcessorPerformance)), &written);
+    if (status < 0 || written == 0) {
+        return false;
+    }
+
+    const std::size_t count = std::min<std::size_t>(written / sizeof(ProcessorPerformance), buffer.size());
+    m_coreTimeCount = static_cast<std::uint32_t>(count);
+    for (std::size_t index = 0; index < count; ++index) {
+        m_coreIdleTicks[index] = static_cast<std::uint64_t>(buffer[index].idleTime);
+        m_coreTotalTicks[index] = static_cast<std::uint64_t>(buffer[index].kernelTime)
+            + static_cast<std::uint64_t>(buffer[index].userTime);
+    }
+    return count > 0;
+}
+
 bool SystemSensors::initialize(Log& log, std::string& error)
 {
     error.clear();
@@ -133,27 +244,20 @@ void SystemSensors::initializeCpu(Log& log)
         && m_cpuPerformance.open(L"\\Processor Information(_Total)\\% Processor Performance");
     m_availability.cpu = true;
 
-    if (!m_availability.cpuClock) {
-        log.warning("CPU: частота недоступна, нет счётчика % Processor Performance");
-    }
+    // Даже без PDH частоту отдаст powrprof или номинал из реестра — строка не останется пустой.
+    log.info(m_availability.cpuClock ? "CPU: частота через PDH % Processor Performance"
+                                     : "CPU: PDH-частоты нет, используем powrprof/номинал");
 
-    // Загрузка по ядрам: \Processor Information(0,N)\% Processor Time. Диспетчер задач
-    // берёт те же счётчики, поэтому цифры совпадают.
-    const DWORD coreCount = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
-    for (std::size_t index = 0; index < m_coreLoad.size(); ++index) {
-        if (index >= coreCount) {
-            break;
-        }
-        const std::wstring path
-            = L"\\Processor Information(0," + std::to_wstring(index) + L")\\% Processor Time";
-        auto counter = std::make_unique<PdhCounter>();
-        if (counter->open(path.c_str())) {
-            m_coreLoad[index] = std::move(counter);
-            ++m_coreCount;
-        }
-    }
-    if (!m_coreLoad[0]) {
-        log.warning("CPU: счётчики по ядрам недоступны");
+    // Загрузка по ядрам не требует PDH: берём её из системного вызова, который
+    // отдаёт время простоя и полное время каждого логического процессора.
+    if (sampleCoreTimes()) {
+        m_coreCount = m_coreTimeCount;
+        m_hasCoreTimes = true;
+        m_previousCoreIdle = m_coreIdleTicks;
+        m_previousCoreTotal = m_coreTotalTicks;
+        log.info("CPU: загрузка ядер через NtQuerySystemInformation, потоков " + std::to_string(m_coreCount));
+    } else {
+        log.warning("CPU: время по ядрам недоступно");
     }
 
     // Температура: ACPI-термозона читается через PDH, драйвер не нужен.
@@ -256,22 +360,49 @@ void SystemSensors::sampleCpu(SystemSnapshot& snapshot)
     snapshot.cpuIdleTicks = fileTimeToTicks(idle);
     snapshot.cpuTotalTicks = fileTimeToTicks(kernel) + fileTimeToTicks(user);
 
-    if (m_availability.cpuClock && m_cpuPerformance.collect()) {
+    if (m_cpuPerformance.collect()) {
         const double percent = std::clamp(m_cpuPerformance.value(), 0.0, 300.0);
         snapshot.cpuClockMhz = static_cast<double>(m_nominalCpuMhz) * percent / 100.0;
+        if (snapshot.cpuClockMhz > 0.0) {
+            m_availability.cpuClock = true;
+        }
+    }
+    // PDH-счётчик частоты есть не на каждой машине: тогда берём powrprof.
+    if (snapshot.cpuClockMhz <= 0.0) {
+        const double mhz = currentClockFromPowerInformation();
+        if (mhz > 0.0) {
+            snapshot.cpuClockMhz = mhz;
+            m_availability.cpuClock = true;
+        } else if (m_nominalCpuMhz != 0) {
+            // Последний резерв — номинал из реестра: лучше номинал, чем пустая строка.
+            snapshot.cpuClockMhz = static_cast<double>(m_nominalCpuMhz);
+            m_availability.cpuClock = true;
+        }
     }
 
     sampleGameThread(snapshot);
 
-    std::uint32_t cores = 0;
-    for (std::size_t index = 0; index < m_coreLoad.size(); ++index) {
-        if (m_coreLoad[index] == nullptr || !m_coreLoad[index]->collect()) {
-            continue;
+    // Загрузка ядер: разница времён между двумя опросами, как считает диспетчер задач.
+    if (m_hasCoreTimes && sampleCoreTimes()) {
+        const std::size_t cores = std::min<std::size_t>(m_coreTimeCount, snapshot.coreLoadPercent.size());
+        for (std::size_t index = 0; index < cores; ++index) {
+            const std::uint64_t idle = m_coreIdleTicks[index] >= m_previousCoreIdle[index]
+                ? m_coreIdleTicks[index] - m_previousCoreIdle[index]
+                : 0;
+            const std::uint64_t total = m_coreTotalTicks[index] >= m_previousCoreTotal[index]
+                ? m_coreTotalTicks[index] - m_previousCoreTotal[index]
+                : 0;
+            snapshot.coreLoadPercent[index]
+                = total > 0 ? std::clamp(100.0 * (1.0 - static_cast<double>(idle) / static_cast<double>(total)),
+                    0.0, 100.0)
+                            : 0.0;
         }
-        snapshot.coreLoadPercent[index] = std::clamp(m_coreLoad[index]->value(), 0.0, 100.0);
-        ++cores;
+        snapshot.coreCount = static_cast<std::uint32_t>(cores);
+        m_previousCoreIdle = m_coreIdleTicks;
+        m_previousCoreTotal = m_coreTotalTicks;
+        // Суммарные тики остаются накопительными (GetSystemTimes): сборщик считает
+        // загрузку по их разнице, а не по готовым процентам.
     }
-    snapshot.coreCount = cores;
 
     if (m_thermalZone.collect()) {
         double hottest = -1000.0;

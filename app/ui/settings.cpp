@@ -158,6 +158,14 @@ void applyStyleDefaults(OverlaySettings& overlay, OverlayStyle style)
         break;
     }
     overlay.cornerRadius = -1;
+    // Ручные подстройки оформления относятся к конкретному стилю: при смене пресета
+    // возвращаем их к значениям стиля, иначе «свой» цвет тянулся бы во все пресеты.
+    overlay.backgroundOpacityPercent = -1;
+    overlay.paddingPx = -1;
+    overlay.rowGapPx = -1;
+    overlay.valueColor = -1;
+    overlay.labelColor = -1;
+    overlay.textScalePercent = 100;
 }
 
 std::string_view overlayStyleKey(OverlayStyle style)
@@ -363,6 +371,20 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                 target.overlay.textOutline = std::clamp(parseInt(value, target.overlay.textOutline), 0, 3);
             } else if (key == "corner") {
                 target.overlay.cornerRadius = std::clamp(parseInt(value, target.overlay.cornerRadius), -1, 24);
+            } else if (key == "text_scale") {
+                target.overlay.textScalePercent = std::clamp(
+                    parseInt(value, target.overlay.textScalePercent), 85, 130);
+            } else if (key == "bg_opacity") {
+                target.overlay.backgroundOpacityPercent = std::clamp(
+                    parseInt(value, target.overlay.backgroundOpacityPercent), -1, 100);
+            } else if (key == "padding") {
+                target.overlay.paddingPx = std::clamp(parseInt(value, target.overlay.paddingPx), -1, 28);
+            } else if (key == "row_gap") {
+                target.overlay.rowGapPx = std::clamp(parseInt(value, target.overlay.rowGapPx), -1, 14);
+            } else if (key == "value_color") {
+                target.overlay.valueColor = std::clamp(parseInt(value, target.overlay.valueColor), -1, 5);
+            } else if (key == "label_color") {
+                target.overlay.labelColor = std::clamp(parseInt(value, target.overlay.labelColor), -1, 5);
             } else if (key.size() > 5 && key.substr(0, 5) == "show_") {
                 for (std::size_t index = 0; index < kLabelCount; ++index) {
                     const auto field = static_cast<LabelField>(index);
@@ -443,6 +465,12 @@ std::string serializeSettings(const Settings& settings)
     text += std::string("bold = ") + (settings.overlay.fontBold ? "1" : "0") + "\n";
     text += std::string("italic = ") + (settings.overlay.fontItalic ? "1" : "0") + "\n";
     text += "text_outline = " + std::to_string(settings.overlay.textOutline) + "\n";
+    text += "text_scale = " + std::to_string(settings.overlay.textScalePercent) + "\n";
+    text += "bg_opacity = " + std::to_string(settings.overlay.backgroundOpacityPercent) + "\n";
+    text += "padding = " + std::to_string(settings.overlay.paddingPx) + "\n";
+    text += "row_gap = " + std::to_string(settings.overlay.rowGapPx) + "\n";
+    text += "value_color = " + std::to_string(settings.overlay.valueColor) + "\n";
+    text += "label_color = " + std::to_string(settings.overlay.labelColor) + "\n";
     for (std::size_t index = 0; index < kLabelCount; ++index) {
         const auto field = static_cast<LabelField>(index);
         text += std::string("show_") + std::string(labelKey(field)) + " = "

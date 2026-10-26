@@ -997,6 +997,30 @@ body.is-compact .chart-wrap--frames canvas { height: 96px; }
 
 .osd__row { display: flex; align-items: baseline; gap: 5px; white-space: nowrap; }
 
+/* Цвета оверлея: «авто» — из пресета, остальные — ручной выбор. */
+.swatches { display: flex; flex-wrap: wrap; gap: 6px; }
+.swatch {
+  width: 26px;
+  height: 22px;
+  border-radius: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #1a202a;
+  color: #98a4b3;
+  font-size: 9.5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+}
+.swatch.is-active { outline: 2px solid rgba(94, 242, 155, 0.6); outline-offset: 1px; color: #e9eef4; }
+
+.osd { --osd-text: 1; }
+.osd .osd__val { font-size: calc(18px * var(--osd-text, 1)); }
+.osd .osd__val--sm { font-size: calc(12.5px * var(--osd-text, 1)); }
+.osd .osd__key { font-size: calc(9.5px * var(--osd-text, 1)); }
+.osd .osd__unit { font-size: calc(9.5px * var(--osd-text, 1)); }
+
 .osd__key {
   font-size: 9.5px;
   letter-spacing: 0.1em;

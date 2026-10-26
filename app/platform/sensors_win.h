@@ -82,8 +82,16 @@ private:
     PdhWildcardCounter m_gpuEngine;
     // ACPI-термозона: отдаёт температуру без прав администратора и без MSR-драйвера.
     PdhWildcardCounter m_thermalZone;
-    // Счётчик загрузки на каждое физическое ядро; nullptr — ядра с таким номером нет.
-    std::array<std::unique_ptr<PdhCounter>, 16> m_coreLoad;
+    // Загрузка ядер считается по NtQuerySystemInformation(SystemProcessorPerformanceInformation):
+    // этот источник есть на любой Windows и не зависит от локали и набора счётчиков PDH,
+    // поэтому «Датчики» больше не остаются пустыми на машинах без нужных счётчиков.
+    bool sampleCoreTimes();
+    std::array<std::uint64_t, 16> m_coreIdleTicks{};
+    std::array<std::uint64_t, 64> m_coreTotalTicks{};
+    std::array<std::uint64_t, 16> m_previousCoreIdle{};
+    std::array<std::uint64_t, 64> m_previousCoreTotal{};
+    bool m_hasCoreTimes = false;
+    std::uint32_t m_coreTimeCount = 0;
 
     SensorAvailability m_availability;
     std::size_t m_activeGpu = 0;

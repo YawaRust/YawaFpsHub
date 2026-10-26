@@ -31,7 +31,7 @@ constexpr float kGroupHeight = 30.0f;
 
 std::vector<Group> makeGroups(std::uint32_t cores)
 {
-    std::vector<MetricId> cpu{ MetricId::CpuLoad, MetricId::CpuTemp, MetricId::CpuClock, MetricId::CpuPower,
+    std::vector<MetricId> cpu{ MetricId::CpuLoad, MetricId::CpuTemp, MetricId::CpuClock, MetricId::CpuPeakLoad,
         MetricId::GameThreadLoad };
     // Ядра добавляются только реально существующие: пустых строк «Ядро 17» быть не должно.
     for (std::uint32_t index = 0; index < std::min<std::uint32_t>(cores, 16); ++index) {
@@ -84,6 +84,7 @@ bool valueKnown(MetricId id, const AppModel& model)
     case MetricId::CpuClock:
         return model.availability.cpuClock && model.store.value(id) > 0.0;
     case MetricId::CpuPower:
+    case MetricId::CpuPeakLoad:
     case MetricId::GameThreadLoad:
     case MetricId::GpuHotspot:
     case MetricId::GpuPower:
@@ -189,7 +190,7 @@ void drawSearchBox(Renderer& renderer, const AppModel& model, const Theme& theme
 
 } // namespace
 
-void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area,
+void drawSensors(Renderer& renderer, AppModel& model, const Theme& theme, const Rect& area,
     std::vector<UiHit>& hits)
 {
     // --- Панель инструментов: поиск, фильтры, «только в оверлее».
@@ -441,14 +442,20 @@ void drawSensors(Renderer& renderer, const AppModel& model, const Theme& theme, 
     }
     renderer.popClip();
 
-    // Полоса прокрутки: тонкая, только когда содержимое не помещается.
+    // Полоса прокрутки: бегунок тянется мышью, клик по дорожке листает на страницу.
+    model.sensorScrollMax = maxScroll;
+    model.sensorViewportHeight = viewport.height();
+    model.sensorScrollTrack = Rect{ inner.right - 11.0f, viewport.top, inner.right - 5.0f, viewport.bottom };
     if (contentHeight > viewport.height() && viewport.height() > 0.0f && maxScroll > 0.0f) {
         const float thumbHeight = std::max(24.0f, viewport.height() * (viewport.height() / contentHeight));
         const float thumbTop = viewport.top + (viewport.height() - thumbHeight) * (offset / maxScroll);
-        renderer.fillRoundRect(Rect{ inner.right - 9.0f, viewport.top, inner.right - 5.0f, viewport.bottom }, 2.0f,
-            theme.line.withAlpha(0.5f));
-        renderer.fillRoundRect(Rect{ inner.right - 9.0f, thumbTop, inner.right - 5.0f, thumbTop + thumbHeight }, 2.0f,
-            theme.textFaint.withAlpha(0.7f));
+        const Rect scrollTrack = model.sensorScrollTrack;
+        const Rect thumb{ scrollTrack.left, thumbTop, scrollTrack.right, thumbTop + thumbHeight };
+        const bool hovered = isHovered(model, scrollTrack);
+        renderer.fillRoundRect(scrollTrack, 3.0f, theme.line.withAlpha(hovered ? 0.55f : 0.3f));
+        renderer.fillRoundRect(thumb, 3.0f, theme.textFaint.withAlpha(hovered ? 1.0f : 0.8f));
+        hits.push_back(UiHit{ thumb, ActionKind::ScrollSensorsThumb, 0 });
+        hits.push_back(UiHit{ scrollTrack, ActionKind::ScrollSensorsTrack, 0 });
     }
 
     renderer.text(L"ETW — кадры, PDH — счётчики диспетчера задач, NVML — NVIDIA, ACPI-термозона — процессор."
