@@ -289,6 +289,57 @@ void drawDisplayCard(Renderer& renderer, const AppModel& model, const Theme& the
     }
 }
 
+void drawDiskCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card)
+{
+    drawCard(renderer, card, theme);
+    const Rect inner = card.inset(kCardPadding);
+    drawCardHeader(renderer, card, L"Диски", L"WMI Win32_DiskDrive и GetDiskFreeSpaceEx: модель, интерфейс и объём", theme);
+
+    if (model.hardware.disks.empty()) {
+        renderer.text(L"нет данных",
+            Rect{ inner.left, inner.top + 44.0f, inner.right, inner.top + 62.0f }, TextRole::Body, theme.textFaint);
+        return;
+    }
+
+    float top = inner.top + 42.0f;
+    for (const DiskIdentity& disk : model.hardware.disks) {
+        if (top + 36.0f > inner.bottom) {
+            break;
+        }
+        const std::wstring title = field(disk.name);
+        renderer.text(clipText(renderer, title, TextRole::Body, inner.width()), Rect{ inner.left, top,
+                       inner.right, top + 18.0f }, TextRole::Body, theme.text);
+        std::wstring note;
+        if (!disk.interfaceType.empty()) {
+            note += wideText(disk.interfaceType);
+        }
+        if (!disk.mediaType.empty()) {
+            note += note.empty() ? L"" : L" · ";
+            note += wideText(disk.mediaType);
+        }
+        if (disk.totalGb > 0.5) {
+            note += note.empty() ? L"" : L" · ";
+            note += wideText(formatValue(disk.totalGb, 0) + \" ГБ\");
+            if (disk.freeGb > 0.0) {
+                note += wideText(\" · свободно \" + formatValue(disk.freeGb, 0) + \" ГБ\");
+            } else if (!disk.driveLetter.empty()) {
+                note += wideText(\" · \" + disk.driveLetter);
+            }
+        } else if (!disk.driveLetter.empty()) {
+            note += note.empty() ? L"" : L" · ";
+            note += wideText(disk.driveLetter);
+        }
+        if (!disk.fileSystem.empty()) {
+            note += L\" · \" + wideText(disk.fileSystem);
+        }
+        if (!note.empty()) {
+            renderer.text(clipText(renderer, note, TextRole::Tiny, inner.width()),
+                Rect{ inner.left, top + 19.0f, inner.right, top + 33.0f }, TextRole::Tiny, theme.textFaint);
+        }
+        top += 42.0f;
+    }
+}
+
 } // namespace
 
 void drawSystemView(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area,
@@ -318,7 +369,11 @@ void drawSystemView(Renderer& renderer, const AppModel& model, const Theme& them
     drawDisplayCard(renderer, model, theme, columns.span(narrow ? 0 : 8, narrow ? 12 : 4,
         narrow ? memoryTop + memoryHeight + kGap : memoryTop, monitorHeight));
 
-    const float noteTop = memoryTop + memoryHeight + kGap + (narrow ? monitorHeight + kGap : 0.0f);
+    const float diskHeight = 184.0f;
+    const float diskTop = memoryTop + memoryHeight + kGap + (narrow ? monitorHeight + kGap : 0.0f);
+    drawDiskCard(renderer, model, theme, columns.span(0, 12, diskTop, diskHeight));
+
+    const float noteTop = diskTop + diskHeight + kGap;
     const Rect note = columns.span(0, 12, noteTop, area.top + systemHeight(narrow) - 8.0f - noteTop);
     drawCard(renderer, note, theme);
     const Rect inner = note.inset(kCardPadding);

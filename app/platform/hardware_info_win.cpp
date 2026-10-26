@@ -7,6 +7,7 @@
 #include "platform/win_util.h"
 
 #include <windows.h>
+#include <wbemidl.h>
 #include <intrin.h>
 
 #include <algorithm>
@@ -424,6 +425,123 @@ void collectDisplays(HardwareIdentity& info)
     }
 }
 
+void collectDisks(HardwareIdentity& info)
+{
+    // Диски — из WMI, как и температуры, но без драйвера: Win32_DiskDrive отдаёт
+    // модель, тип интерфейса и размер любого накопителя, будь то NVMe, SATA или USB.
+    const bool comReady = [] {
+        const HRESULT result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        return SUCCEEDED(result) || result == RPC_E_CHANGED_MODE;
+    }();
+    bool wmiOk = false;
+    if (comReady) {
+        IWbemLocator* locator = nullptr;
+        if (SUCCEEDED(CoCreateInstance(CLSID_WbemLocator, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&locator)))
+            && locator != nullptr) {
+            IWbemServices* services = nullptr;
+            BSTR ns = SysAllocString(L"ROOT\\\\CIMV2");
+            HRESULT connect = E_FAIL;
+            if (ns != nullptr) {
+                connect = locator->ConnectServer(ns, nullptr, nullptr, nullptr, 0, nullptr, nullptr, &services);
+                SysFreeString(ns);
+            }
+            locator->Release();
+            if (SUCCEEDED(connect) && services != nullptr) {
+                CoSetProxyBlanket(services, RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE, nullptr,
+                    RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE, nullptr, EOAC_NONE);
+                IEnumWbemClassObject* enumerator = nullptr;
+                BSTR lang = SysAllocString(L"WQL");
+                BSTR query = SysAllocString(L"SELECT Model, Size, InterfaceType, MediaType FROM Win32_DiskDrive");
+                if (lang != nullptr && query != nullptr) {
+                    if (SUCCEEDED(services->ExecQuery(lang, query, WBEM_FLAG_FORWARD_ONLY, nullptr, &enumerator))
+                        && enumerator != nullptr) {
+                        for (int index = 0; index < 32; ++index) {
+                            IWbemClassObject* object = nullptr;
+                            ULONG returned = 0;
+                            if (FAILED(enumerator->Next(200, 1, &object, &returned)) || returned == 0
+                                || object == nullptr) {
+                                break;
+                            }
+                            DiskIdentity disk;
+                            VARIANT value;
+                            VariantInit(&value);
+                            if (SUCCEEDED(object->Get(L"Model", 0, &value, nullptr, nullptr)) && value.vt == VT_BSTR
+                                && value.bstrVal != nullptr) {
+                                disk.name = toUtf8(value.bstrVal);
+                            }
+                            VariantClear(&value);
+                            if (SUCCEEDED(object->Get(L"InterfaceType", 0, &value, nullptr, nullptr))
+                                && value.vt == VT_BSTR && value.bstrVal != nullptr) {
+                                disk.interfaceType = toUtf8(value.bstrVal);
+                            }
+                            VariantClear(&value);
+                            if (SUCCEEDED(object->Get(L"MediaType", 0, &value, nullptr, nullptr))
+                                && value.vt == VT_BSTR && value.bstrVal != nullptr) {
+                                disk.mediaType = toUtf8(value.bstrVal);
+                            }
+                            VariantClear(&value);
+                            if (SUCCEEDED(object->Get(L"Size", 0, &value, nullptr, nullptr))) {
+                                std::uint64_t bytes = 0;
+                                if (value.vt == VT_BSTR && value.bstrVal != nullptr) {
+                                    bytes = static_cast<std::uint64_t>(_wtoi64(value.bstrVal));
+                                } else if (value.vt == VT_BSVALT) {
+                                    // редко
+                                }
+                                if (bytes > 0) {
+                                    disk.totalGb = static_cast<double>(bytes) / (1024.0 * 1024.0 * 1024.0);
+                                }
+                            }
+                            VariantClear(&value);
+                            if (!disk.name.empty()) {
+                                info.disks.push_back(disk);
+                                wmiOk = true;
+                            }
+                            object->Release();
+                        }
+                        enumerator->Release();
+                    }
+                }
+                if (lang) SysFreeString(lang);
+                if (query) SysFreeString(query);
+                services->Release();
+            }
+        }
+    }
+
+    if (wmiOk) {
+        // Обогащаем свободным местом по логическим дискам: каждому физическому сопоставить
+        // суммарный свободный объём нельзя без Partition-драйвера, поэтому показываем
+        // логические тома отдельной строкой только если WMI не дал ни одного диска.
+        return;
+    }
+
+    // Резерв: логические диски через GetLogicalDrives — работает даже в виртуалке без WMI.
+    const DWORD drives = GetLogicalDrives();
+    for (wchar_t letter = L'A'; letter <= L'Z'; ++letter) {
+        if ((drives & (1u << (letter - L'A'))) == 0) {
+            continue;
+        }
+        wchar_t root[4]{ letter, L':', L'\\', L'\0' };
+        if (GetDriveTypeW(root) != DRIVE_FIXED) {
+            continue;
+        }
+        ULARGE_INTEGER freeBytes{}, totalBytes{};
+        if (!GetDiskFreeSpaceExW(root, &freeBytes, &totalBytes, nullptr)) {
+            continue;
+        }
+        wchar_t fs[32]{};
+        GetVolumeInformationW(root, nullptr, 0, nullptr, nullptr, nullptr, fs, 32);
+        DiskIdentity disk;
+        disk.driveLetter = std::string(1, static_cast<char>(letter)) + \":\";
+        disk.name = disk.driveLetter + \" — том\";
+        disk.totalGb = static_cast<double>(totalBytes.QuadPart) / (1024.0 * 1024.0 * 1024.0);
+        disk.freeGb = static_cast<double>(freeBytes.QuadPart) / (1024.0 * 1024.0 * 1024.0);
+        disk.fileSystem = toUtf8(fs);
+        disk.interfaceType = \"Fixed\";
+        info.disks.push_back(disk);
+    }
+}
+
 // Версия драйвера видеокарты — из реестра класса дисплейных адаптеров: ищем подпись
 // «VEN_10DE&DEV_2704», чтобы не перепутать встроенную и дискретную карты.
 void collectGpuDrivers(HardwareIdentity& info, const std::vector<std::pair<std::uint32_t, std::uint32_t>>& pciIds)
@@ -476,6 +594,7 @@ bool collectHardwareInfo(HardwareIdentity& info, const GpuRegistry& registry, st
     collectCpu(info);
     collectMemory(info);
     collectDisplays(info);
+    collectDisks(info);
 
     std::vector<std::pair<std::uint32_t, std::uint32_t>> pciIds;
     for (const GpuAdapter& adapter : registry.adapters()) {

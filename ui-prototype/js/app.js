@@ -624,6 +624,17 @@
             display.scale > 1 ? `, масштаб ${Math.round(display.scale * 100)} %` : ""}</span>
         </li>`).join("");
     }
+
+    const diskHost = $("#diskCard");
+    if (diskHost) {
+      const disks = machine.disks || [];
+      diskHost.innerHTML = disks.map((disk) => `
+        <li>
+          <b>${disk.name}${disk.driveLetter ? ` · ${disk.driveLetter}` : ""}</b>
+          <span>${[disk.interfaceType, disk.mediaType, disk.totalGb ? `${Math.round(disk.totalGb)} ГБ` : \"\",
+            disk.freeGb ? `свободно ${Math.round(disk.freeGb)} ГБ` : \"\", disk.fileSystem].filter(Boolean).join(\" · \")}</span>
+        </li>`).join(\"\") || '<li><span>нет данных</span></li>';
+    }
   }
 
   let lastSnapshot = null;

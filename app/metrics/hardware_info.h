@@ -68,6 +68,16 @@ struct DisplayIdentity {
     bool primary = false;
 };
 
+struct DiskIdentity {
+    std::string name;
+    std::string interfaceType;
+    std::string mediaType;
+    double totalGb = 0.0;
+    double freeGb = 0.0;
+    std::string fileSystem;
+    std::string driveLetter;
+};
+
 struct OsIdentity {
     std::string product;
     std::string edition;
@@ -85,6 +95,7 @@ struct HardwareIdentity {
     std::vector<GpuIdentity> gpus;
     MemoryIdentity memory;
     std::vector<DisplayIdentity> displays;
+    std::vector<DiskIdentity> disks;
     bool detected = false;
 
     const GpuIdentity* primaryGpu() const;

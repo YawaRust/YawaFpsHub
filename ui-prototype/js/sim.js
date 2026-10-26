@@ -318,6 +318,10 @@
     displays: [
       { name: "LG 27GP850-B", width: 2560, height: 1440, hz: 165, scale: 1, primary: true },
       { name: "Dell U2422H", width: 1920, height: 1080, hz: 60, scale: 1, primary: false }
+    ],
+    disks: [
+      { name: "Samsung 980 PRO 1TB", interfaceType: "NVMe", mediaType: "Fixed hard disk media", totalGb: 931, freeGb: 420, driveLetter: "C:", fileSystem: "NTFS" },
+      { name: "ST2000DM008 2TB", interfaceType: "SATA", mediaType: "Fixed hard disk media", totalGb: 1863, freeGb: 890, driveLetter: "D:", fileSystem: "NTFS" }
     ]
   };
 

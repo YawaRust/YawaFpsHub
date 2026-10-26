@@ -116,6 +116,7 @@ constexpr float kBalanceNote = 144.0f;
 constexpr float kSystemRow = 274.0f;
 constexpr float kSystemMemory = 416.0f;
 constexpr float kSystemMonitor = 190.0f;
+constexpr float kSystemDisk = 184.0f;
 constexpr float kSystemNote = 143.0f;
 
 } // namespace
@@ -131,9 +132,10 @@ float balanceHeight(std::size_t adviceCount, bool narrow)
 float systemHeight(bool narrow)
 {
     if (narrow) {
-        return 8.0f + 3.0f * (kSystemRow + kGap) + kSystemMemory + kGap + kSystemMonitor + kGap + kSystemNote + 8.0f;
+        return 8.0f + 3.0f * (kSystemRow + kGap) + kSystemMemory + kGap + kSystemMonitor + kGap + kSystemDisk + kGap
+            + kSystemNote + 8.0f;
     }
-    return 8.0f + kSystemRow + kGap + kSystemMemory + kGap + kSystemNote + 8.0f;
+    return 8.0f + kSystemRow + kGap + kSystemMemory + kGap + kSystemDisk + kGap + kSystemNote + 8.0f;
 }
 
 float drawCardHeader(Renderer& renderer, const Rect& card, std::wstring_view title, std::wstring_view subtitle,

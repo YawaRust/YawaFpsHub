@@ -381,10 +381,23 @@ void drawSensors(Renderer& renderer, AppModel& model, const Theme& theme, const 
             if (nextGroupStart > 0) {
                 top += groupGap;
             }
+            const Rect headerRect{ inner.left, top, rowRight, top + kGroupHeight - 4.0f };
             if (top + kGroupHeight > viewport.top) {
-                renderer.text(upperCopy(groups[groupIndexes[nextGroupStart]].title),
-                    Rect{ inner.left + 14.0f, top, rowRight, top + kGroupHeight - 4.0f }, TextRole::Tiny,
+                renderer.text(upperCopy(groups[groupIndexes[nextGroupStart]].title), headerRect, TextRole::Tiny,
                     theme.accent);
+            }
+            // Заголовок группы — кликабельный переключатель всего блока: включает
+            // или выключает сразу весь набор датчиков группы в оверлее.
+            {
+                const std::size_t groupIndex = groupIndexes[nextGroupStart];
+                int headerField = -1;
+                if (groupIndex == 0) headerField = static_cast<int>(LabelField::Fps);
+                else if (groupIndex == 1) headerField = static_cast<int>(LabelField::Cpu);
+                else if (groupIndex == 2) headerField = static_cast<int>(LabelField::Gpu);
+                else if (groupIndex == 3) headerField = static_cast<int>(LabelField::Ram);
+                if (headerField >= 0) {
+                    hits.push_back(UiHit{ headerRect, ActionKind::ToggleMetric, headerField });
+                }
             }
             top += kGroupHeight;
             ++nextGroupStart;
