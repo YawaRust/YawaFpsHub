@@ -1,0 +1,45 @@
+MSBuild version 18.11.1-1.26513.3+940033be3 for .NET Framework
+
+  hardware_info_win.cpp
+  yawa_metrics.vcxproj -> D:\a\YawaFpsHub\YawaFpsHub\build\Release\yawa_metrics.lib
+  metrics_tests.vcxproj -> D:\a\YawaFpsHub\YawaFpsHub\build\tests\Release\metrics_tests.exe
+  hardware_info_win.cpp
+  system_view.cpp
+D:\a\YawaFpsHub\YawaFpsHub\app\platform\hardware_info_win.cpp(487,56): error C2065: 'VT_BSVALT': undeclared identifier [D:\a\YawaFpsHub\YawaFpsHub\build\app\YawaFpsHub.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\platform\hardware_info_win.cpp(535,72): error C2017: unknown escape sequence [D:\a\YawaFpsHub\YawaFpsHub\build\app\YawaFpsHub.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\platform\hardware_info_win.cpp(535,73): error C2001: newline in string literal [D:\a\YawaFpsHub\YawaFpsHub\build\app\YawaFpsHub.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\platform\hardware_info_win.cpp(536,9): error C2146: syntax error: missing ';' before identifier 'disk' [D:\a\YawaFpsHub\YawaFpsHub\build\app\YawaFpsHub.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\platform\hardware_info_win.cpp(536,40): error C2017: unknown escape sequence [D:\a\YawaFpsHub\YawaFpsHub\build\app\YawaFpsHub.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\platform\hardware_info_win.cpp(536,41): error C2001: newline in string literal [D:\a\YawaFpsHub\YawaFpsHub\build\app\YawaFpsHub.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\platform\hardware_info_win.cpp(537,9): error C2146: syntax error: missing ';' before identifier 'disk' [D:\a\YawaFpsHub\YawaFpsHub\build\app\YawaFpsHub.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\platform\hardware_info_win.cpp(540,30): error C2017: unknown escape sequence [D:\a\YawaFpsHub\YawaFpsHub\build\app\YawaFpsHub.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\platform\hardware_info_win.cpp(540,31): error C2001: newline in string literal [D:\a\YawaFpsHub\YawaFpsHub\build\app\YawaFpsHub.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\platform\hardware_info_win.cpp(541,9): error C2146: syntax error: missing ';' before identifier 'info' [D:\a\YawaFpsHub\YawaFpsHub\build\app\YawaFpsHub.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\platform\hardware_info_win.cpp(487,56): error C2065: 'VT_BSVALT': undeclared identifier [D:\a\YawaFpsHub\YawaFpsHub\build\tools\probe\yawa-probe.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\platform\hardware_info_win.cpp(535,72): error C2017: unknown escape sequence [D:\a\YawaFpsHub\YawaFpsHub\build\tools\probe\yawa-probe.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\platform\hardware_info_win.cpp(535,73): error C2001: newline in string literal [D:\a\YawaFpsHub\YawaFpsHub\build\tools\probe\yawa-probe.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\platform\hardware_info_win.cpp(536,9): error C2146: syntax error: missing ';' before identifier 'disk' [D:\a\YawaFpsHub\YawaFpsHub\build\tools\probe\yawa-probe.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\platform\hardware_info_win.cpp(536,40): error C2017: unknown escape sequence [D:\a\YawaFpsHub\YawaFpsHub\build\tools\probe\yawa-probe.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\platform\hardware_info_win.cpp(536,41): error C2001: newline in string literal [D:\a\YawaFpsHub\YawaFpsHub\build\tools\probe\yawa-probe.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\platform\hardware_info_win.cpp(537,9): error C2146: syntax error: missing ';' before identifier 'disk' [D:\a\YawaFpsHub\YawaFpsHub\build\tools\probe\yawa-probe.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\platform\hardware_info_win.cpp(540,30): error C2017: unknown escape sequence [D:\a\YawaFpsHub\YawaFpsHub\build\tools\probe\yawa-probe.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\platform\hardware_info_win.cpp(540,31): error C2001: newline in string literal [D:\a\YawaFpsHub\YawaFpsHub\build\tools\probe\yawa-probe.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\platform\hardware_info_win.cpp(541,9): error C2146: syntax error: missing ';' before identifier 'info' [D:\a\YawaFpsHub\YawaFpsHub\build\tools\probe\yawa-probe.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\ui\system_view.cpp(322,61): error C2017: unknown escape sequence [D:\a\YawaFpsHub\YawaFpsHub\build\app\YawaFpsHub.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\ui\system_view.cpp(322,62): error C2001: newline in string literal [D:\a\YawaFpsHub\YawaFpsHub\build\app\YawaFpsHub.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\ui\system_view.cpp(323,13): error C2143: syntax error: missing ')' before 'if' [D:\a\YawaFpsHub\YawaFpsHub\build\app\YawaFpsHub.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\ui\system_view.cpp(323,13): error C2143: syntax error: missing ';' before 'if' [D:\a\YawaFpsHub\YawaFpsHub\build\app\YawaFpsHub.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\ui\system_view.cpp(324,34): error C2017: unknown escape sequence [D:\a\YawaFpsHub\YawaFpsHub\build\app\YawaFpsHub.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\ui\system_view.cpp(324,35): error C2001: newline in string literal [D:\a\YawaFpsHub\YawaFpsHub\build\app\YawaFpsHub.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\ui\system_view.cpp(325,13): error C2143: syntax error: missing ')' before '}' [D:\a\YawaFpsHub\YawaFpsHub\build\app\YawaFpsHub.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\ui\system_view.cpp(325,13): error C2143: syntax error: missing ';' before '}' [D:\a\YawaFpsHub\YawaFpsHub\build\app\YawaFpsHub.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\ui\system_view.cpp(326,34): error C2017: unknown escape sequence [D:\a\YawaFpsHub\YawaFpsHub\build\app\YawaFpsHub.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\ui\system_view.cpp(326,35): error C2001: newline in string literal [D:\a\YawaFpsHub\YawaFpsHub\build\app\YawaFpsHub.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\ui\system_view.cpp(327,13): error C2143: syntax error: missing ')' before '}' [D:\a\YawaFpsHub\YawaFpsHub\build\app\YawaFpsHub.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\ui\system_view.cpp(327,13): error C2143: syntax error: missing ';' before '}' [D:\a\YawaFpsHub\YawaFpsHub\build\app\YawaFpsHub.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\ui\system_view.cpp(333,22): error C2017: unknown escape sequence [D:\a\YawaFpsHub\YawaFpsHub\build\app\YawaFpsHub.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\ui\system_view.cpp(333,23): error C2001: newline in string literal [D:\a\YawaFpsHub\YawaFpsHub\build\app\YawaFpsHub.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\ui\system_view.cpp(333,21): error C2065: 'L': undeclared identifier [D:\a\YawaFpsHub\YawaFpsHub\build\app\YawaFpsHub.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\ui\system_view.cpp(333,23): error C2143: syntax error: missing ';' before 'string' [D:\a\YawaFpsHub\YawaFpsHub\build\app\YawaFpsHub.vcxproj]
+D:\a\YawaFpsHub\YawaFpsHub\app\ui\system_view.cpp(334,9): error C2143: syntax error: missing ';' before '}' [D:\a\YawaFpsHub\YawaFpsHub\build\app\YawaFpsHub.vcxproj]
+  Generating Code...
