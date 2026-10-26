@@ -1,4 +1,5 @@
 #include "platform/pawnio_package.h"
+#include "platform/pawnio_sensors.h"
 #include "platform/win_util.h"
 #include "resources/pawnio_ids.h"
 
@@ -258,6 +259,57 @@ namespace {
     }
 
 } // namespace
+
+bool prepareSensorsForLaunch(std::wstring_view arguments)
+{
+    // CI и явные служебные команды не должны менять систему или вызывать UAC.
+    if ((!arguments.empty() && arguments != L"--sensor-ready") || !PawnioSensors::supportsCpu()) {
+        return false;
+    }
+    SYSTEM_INFO system { };
+    GetNativeSystemInfo(&system);
+    if (system.wProcessorArchitecture != PROCESSOR_ARCHITECTURE_AMD64) {
+        return false;
+    }
+    if (!isAdministrator()) {
+        std::array<wchar_t, 32768> executable { };
+        if (GetModuleFileNameW(nullptr, executable.data(), static_cast<DWORD>(executable.size())) == 0) {
+            return false;
+        }
+        SHELLEXECUTEINFOW launch { };
+        launch.cbSize = sizeof(launch);
+        launch.lpVerb = L"runas";
+        launch.lpFile = executable.data();
+        launch.lpParameters = L"--sensor-ready";
+        launch.nShow = SW_SHOWNORMAL;
+        if (ShellExecuteExW(&launch)) {
+            return true; // запущенный с повышением экземпляр сам откроет главное окно
+        }
+        // При отказе от UAC остаются обычные датчики Windows, без ложной CPU-температуры.
+        return false;
+    }
+    const HANDLE device = CreateFileW(L"\\\\?\\GLOBALROOT\\Device\\PawnIO", GENERIC_READ | GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
+    if (device != INVALID_HANDLE_VALUE) {
+        CloseHandle(device);
+        return false;
+    }
+    const DWORD status = GetLastError();
+    if (status != ERROR_FILE_NOT_FOUND && status != ERROR_PATH_NOT_FOUND) {
+        return false; // существующий, но недоступный драйвер не перезаписываем
+    }
+    bool reboot = false;
+    std::wstring error;
+    if (!installDriver(reboot, error)) {
+        MessageBoxW(nullptr, (L"Аппаратные датчики CPU недоступны: " + error
+            + L"\nОстальные показатели продолжат работать.").c_str(),
+            L"YawaFpsHub", MB_OK | MB_ICONWARNING);
+    } else if (reboot) {
+        MessageBoxW(nullptr, L"Для аппаратных датчиков CPU может потребоваться перезагрузка Windows.",
+            L"YawaFpsHub", MB_OK | MB_ICONINFORMATION);
+    }
+    return false;
+}
 
 int runSensorCommandLine()
 {

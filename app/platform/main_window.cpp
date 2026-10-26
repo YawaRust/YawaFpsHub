@@ -237,6 +237,11 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
     return true;
 }
 
+void MainWindow::openEditorForSmoke()
+{
+    applyAction(UiHit{ {}, ActionKind::OpenOverlayEditor, 0 });
+}
+
 void MainWindow::exportOverlayStyles()
 {
     if (m_overlayShotDir.empty()) {
@@ -851,7 +856,7 @@ float MainWindow::contentDesignHeight() const
     case View::Sensors:
         return contentArea().height();
     case View::Overlay:
-        return kOverlayHeight + kGap + overlayOrderCardHeight(m_model.settings.overlay);
+        return 430.0f + kGap + 158.0f + kGap;
     case View::Settings:
         return kSettingsHeight;
     case View::Bottleneck:
@@ -1530,15 +1535,27 @@ void MainWindow::applyAction(const UiHit& hit)
         break;
 
     case ActionKind::OpenOverlayEditor:
-        if (!m_overlayEditor.open(m_window, m_instance, m_model.settings.overlay, m_model.store,
+        if (!m_overlayEditor.open(m_window, m_instance, m_model, m_theme,
+                [this](const UiHit& control, float x, bool finished) {
+                    if (isSliderAction(control.action)) {
+                        applySlider(control.action, control.rect, x);
+                        if (finished) { saveSettings(); }
+                    } else {
+                        applyAction(control);
+                    }
+                    if (control.action == ActionKind::ToggleMetric && m_model.settings.overlay.pixelLayout) {
+                        enableOverlayPixelLayout(m_model.settings.overlay);
+                        m_overlay.setSettings(m_model.settings.overlay);
+                    }
+                    m_overlayEditor.refresh();
+                    InvalidateRect(m_window, nullptr, FALSE);
+                },
+                [this](wchar_t symbol) { editLabelChar(symbol); m_overlayEditor.refresh(); },
                 [this](bool finished) {
                     m_overlay.setSettings(m_model.settings.overlay);
-                    if (finished) {
-                        saveSettings();
-                    }
+                    if (finished) { saveSettings(); }
                     InvalidateRect(m_window, nullptr, FALSE);
-                })
-            && m_log) {
+                }) && m_log) {
             m_log->warning("не удалось открыть редактор оверлея");
         }
         break;

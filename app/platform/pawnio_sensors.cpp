@@ -85,6 +85,20 @@ PawnioSensors::~PawnioSensors()
     shutdown();
 }
 
+bool PawnioSensors::supportsCpu()
+{
+    const auto vendor = cpuid(0);
+    char name[13] { };
+    std::memcpy(name, &vendor[1], 4);
+    std::memcpy(name + 4, &vendor[3], 4);
+    std::memcpy(name + 8, &vendor[2], 4);
+    const unsigned signature = cpuid(1)[0];
+    const unsigned baseFamily = (signature >> 8) & 0xf;
+    const unsigned family = baseFamily == 0xf ? baseFamily + ((signature >> 20) & 0xff) : baseFamily;
+    return (std::strcmp(name, "GenuineIntel") == 0 && family == 6)
+        || (std::strcmp(name, "AuthenticAMD") == 0 && (family == 0x17 || family == 0x19 || family == 0x1a));
+}
+
 bool PawnioSensors::initialize(Log& log)
 {
     shutdown();
@@ -98,7 +112,7 @@ bool PawnioSensors::initialize(Log& log)
     const unsigned family = baseFamily == 0xf ? baseFamily + ((signature >> 20) & 0xff) : baseFamily;
     m_amd = std::strcmp(name, "AuthenticAMD") == 0;
     const bool intel = std::strcmp(name, "GenuineIntel") == 0 && family == 6;
-    if ((!intel && !m_amd) || (m_amd && family != 0x17 && family != 0x19 && family != 0x1a)) {
+    if (!supportsCpu()) {
         log.info("PawnIO: семейство CPU пока не поддержано сборщиком");
         return false;
     }

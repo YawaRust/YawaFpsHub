@@ -25,6 +25,7 @@ public:
     PawnioSensors(const PawnioSensors&) = delete;
     PawnioSensors& operator=(const PawnioSensors&) = delete;
 
+    static bool supportsCpu();
     bool initialize(Log& log);
     void shutdown();
     CpuHardwareReading read();

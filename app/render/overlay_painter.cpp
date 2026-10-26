@@ -322,6 +322,7 @@ struct StyleLook {
     Color accent;
     Color value;
     std::array<Color, kLabelCount> palette{};
+    std::array<Color, kMetricCount> rowPalette{};
     float radius = 8.0f;
     float padding = 10.0f;
     float rowGap = 2.0f;
@@ -615,7 +616,7 @@ void drawFrosted(Painter& painter, const OverlayText& text, const Rect& frame, c
             TextRole::Tiny, look.label);
         painter.text(values[index],
             Rect { right - look.valueWidth * scale, y, right, y + kRowHeight * scale }, TextRole::Small,
-            look.palette[index % kLabelCount], TextAlign::Right);
+            look.rowPalette[index], TextAlign::Right);
         y += (18.0f + look.rowGap) * scale;
     }
 }
@@ -657,13 +658,13 @@ void drawNeon(Painter& painter, const OverlayText& text, const Rect& frame, cons
             continue;
         }
         painter.fillCircle(
-            left + 2.0f * scale, y + 8.0f * scale, 2.0f * scale, look.palette[index % kLabelCount]);
+            left + 2.0f * scale, y + 8.0f * scale, 2.0f * scale, look.rowPalette[index]);
         painter.text(labels[index],
             Rect { left + 10.0f * scale, y, left + look.labelWidth * scale, y + kRowHeight * scale },
             TextRole::Tiny, look.label);
         painter.text(values[index],
             Rect { right - look.valueWidth * scale, y, right, y + kRowHeight * scale }, TextRole::Small,
-            look.palette[index % kLabelCount], TextAlign::Right);
+            look.rowPalette[index], TextAlign::Right);
         y += (18.0f + look.rowGap) * scale;
     }
 }
@@ -722,7 +723,7 @@ void drawTerminal(Painter& painter, const OverlayText& text, const Rect& frame, 
             look.label);
         painter.text(tracked(values[index], look.letterSpacing),
             Rect { right - look.valueWidth * scale, y, right, y + kRowHeight * scale }, TextRole::Mono,
-            look.palette[index % kLabelCount], TextAlign::Right);
+            look.rowPalette[index], TextAlign::Right);
         y += (18.0f + look.rowGap) * scale;
     }
 }
@@ -768,7 +769,7 @@ void drawCyber(Painter& painter, const OverlayText& text, const Rect& frame, con
             TextRole::Tiny, look.label);
         painter.text(values[index],
             Rect { right - look.valueWidth * scale, y, right, y + kRowHeight * scale }, TextRole::Small,
-            look.palette[index % kLabelCount], TextAlign::Right);
+            look.rowPalette[index], TextAlign::Right);
         y += (18.0f + look.rowGap) * scale;
     }
 }
@@ -793,7 +794,7 @@ void drawMono(Painter& painter, const OverlayText& text, const Rect& frame, cons
         painter.text(values[index],
             Rect { frame.right - look.padding * scale - look.valueWidth * scale, y,
                 frame.right - look.padding * scale, y + kRowHeight * scale },
-            TextRole::Small, look.palette[index % kLabelCount], TextAlign::Right);
+            TextRole::Small, look.rowPalette[index], TextAlign::Right);
         y += (18.0f + look.rowGap) * scale;
     }
 }
@@ -827,7 +828,7 @@ void drawEsport(Painter& painter, const OverlayText& text, const Rect& frame, co
         painter.text(labels[index], Rect{ x, top, x + cellWidth, top + 12.0f * scale }, TextRole::Tiny,
             look.label);
         painter.text(values[index], Rect { x, top + (big ? 8.0f : 12.0f) * scale, x + cellWidth, bottom },
-            big ? TextRole::Value : TextRole::Small, look.palette[index % kLabelCount]);
+            big ? TextRole::Value : TextRole::Small, look.rowPalette[index]);
         x += cellWidth;
 
         if (look.separators) {
@@ -873,7 +874,7 @@ void drawRetro(Painter& painter, const OverlayText& text, const Rect& frame, con
             TextRole::Mono, look.label);
         painter.text(tracked(values[index], look.letterSpacing),
             Rect { right - look.valueWidth * scale, y, right, y + kRowHeight * scale }, TextRole::Mono,
-            look.palette[index % kLabelCount], TextAlign::Right);
+            look.rowPalette[index], TextAlign::Right);
         y += (18.0f + look.rowGap) * scale;
     }
 }
@@ -882,20 +883,27 @@ void drawInline(Painter& painter, const OverlaySettings& settings, const Overlay
     const StyleLook& look)
 {
     const float scale = painter.scale();
-    const std::wstring line = tracked(inlineText(text), look.letterSpacing);
     const Rect inner = Rect{ frame.left + look.padding * scale, frame.top, frame.right - look.padding * scale,
         frame.bottom };
     const TextRole role = look.mono ? TextRole::Mono : TextRole::Small;
 
-    if (settings.style == OverlayStyle::Rtss) {
-        painter.text(line, inner, role, look.accent);
-        return;
+    if (settings.style != OverlayStyle::Rtss) {
+        painter.plate(frame, look.radius * scale, look.background, look.shadow ? 0.72f : 0.35f);
+        painter.outline(frame, look.radius * scale, look.border,
+            settings.style == OverlayStyle::Neon ? 1.4f : 1.0f, 0.85f);
     }
-
-    painter.plate(frame, look.radius * scale, look.background, look.shadow ? 0.72f : 0.35f);
-    painter.outline(frame, look.radius * scale, look.border, settings.style == OverlayStyle::Neon ? 1.4f : 1.0f,
-        0.85f);
-    painter.text(line, inner, role, look.palette[0]);
+    float x = inner.left;
+    const float separator = painter.measure(tracked(L"   ", look.letterSpacing), role);
+    for (std::size_t index = 0; index < text.labels.size(); ++index) {
+        if (!rowShown(text, index)) { continue; }
+        const std::wstring segment = tracked(text.labels[index] + L" " + text.values[index], look.letterSpacing);
+        const float width = painter.measure(segment, role);
+        const bool customized = settings.metricColors[static_cast<std::size_t>(text.ids[index])] >= 0
+            || settings.valueColor >= 0 || settings.rowColors[index % kLabelCount] >= 0;
+        painter.text(segment, Rect{ x, inner.top, x + width + 4.0f, inner.bottom }, role,
+            settings.style == OverlayStyle::Rtss && !customized ? look.accent : look.rowPalette[index]);
+        x += width + separator;
+    }
 }
 
 } // namespace
@@ -989,6 +997,17 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
         if (color >= 0 && color < kOverlayColorCount) {
             look.palette[index] = pickColor(color);
         }
+    }
+    for (std::size_t index = 0; index < text.ids.size() && index < kMetricCount; ++index) {
+        const int metric = settings.metricColors[static_cast<std::size_t>(text.ids[index])];
+        const int row = settings.rowColors[index % kLabelCount];
+        look.rowPalette[index] = metric >= 0 && metric < kOverlayColorCount ? pickColor(metric)
+            : row >= 0 && row < kOverlayColorCount ? pickColor(row)
+            : settings.valueColor >= 0 && settings.valueColor < kOverlayColorCount
+                ? pickColor(settings.valueColor) : look.palette[index % kLabelCount];
+    }
+    if (!text.ids.empty() && settings.metricColors[static_cast<std::size_t>(text.ids[0])] >= 0) {
+        look.value = look.rowPalette[0];
     }
     // Регистр и разделители: -1 — из стиля, иначе явное значение пользователя.
     if (settings.uppercaseMode >= 0) {
@@ -1157,7 +1176,7 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
                 TextRole::Small, look.label);
             painter.text(text.values[i],
                 Rect { frame.left + row.valueX * scale, y, frame.left + 505.0f * scale, y + 26.0f * scale },
-                TextRole::Small, look.palette[i % kLabelCount]);
+                TextRole::Small, look.rowPalette[i]);
         }
     } else if (settings.layout == OverlayLayout::Line) {
         drawInline(painter, settings, text, frame, look);

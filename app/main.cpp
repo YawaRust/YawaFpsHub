@@ -19,6 +19,14 @@ namespace {
 
 constexpr wchar_t kInstanceMutex[] = L"Global\\YawaFpsHubInstance";
 
+bool anotherInstanceExists()
+{
+    HANDLE mutex = OpenMutexW(SYNCHRONIZE, FALSE, kInstanceMutex);
+    if (mutex == nullptr) { return false; }
+    CloseHandle(mutex);
+    return true;
+}
+
 bool isAlreadyRunning()
 {
     HANDLE mutex = CreateMutexW(nullptr, TRUE, kInstanceMutex);
@@ -43,6 +51,14 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
     const std::wstring_view arguments = commandLine != nullptr ? commandLine : L"";
     const std::size_t smokeFlag = arguments.find(L"--smoke");
     const bool smoke = smokeFlag != std::wstring_view::npos;
+    if (!smoke && (arguments.empty() || arguments == L"--sensor-ready") && anotherInstanceExists()) {
+        MessageBoxW(nullptr, L"YawaFpsHub уже запущен — окно свёрнуто в трей.", L"YawaFpsHub",
+            MB_OK | MB_ICONINFORMATION);
+        return 0;
+    }
+    if (!smoke && yawa::prepareSensorsForLaunch(arguments)) {
+        return 0; // UAC запустил этот же exe с доступом к CPU-датчикам
+    }
 
     // --smoke=<секунды>: CI держит окно дольше, чтобы замерить потребление в установившемся режиме.
     int smokeSeconds = 8;
@@ -160,6 +176,9 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
         overlayShotDir = std::wstring(arguments.substr(shotFlag + 16));
     }
 
+    if (arguments.find(L"--editor") != std::wstring_view::npos) {
+        window.openEditorForSmoke();
+    }
     const int result = window.run(smoke ? smokeSeconds : 0, overlayShotDir);
     log.info("остановка");
     if (SUCCEEDED(comResult)) {

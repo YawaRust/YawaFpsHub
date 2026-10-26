@@ -23,6 +23,7 @@ inline constexpr std::array<MetricId, kLabelCount> kOverlayPrimaryMetrics { Metr
 
 std::array<bool, kMetricCount> defaultOverlayMetrics();
 std::array<MetricId, kMetricCount> defaultOverlayOrder();
+std::array<int, kMetricCount> defaultOverlayMetricColors();
 
 struct OverlayRowPosition
 {
@@ -100,6 +101,9 @@ struct OverlaySettings {
     std::array<MetricId, kMetricCount> order = defaultOverlayOrder();
     bool pixelLayout = false;
     std::array<OverlayRowPosition, kMetricCount> rowPositions { };
+    std::array<int, kMetricCount> metricColors = defaultOverlayMetricColors(); // -1 — палитра стиля
+    std::array<bool, kMetricCount> customLabelSet { };
+    std::array<std::string, kMetricCount> customLabels { };
     std::array<bool, kLabelCount> visible{ true, true, true, true, true };
     std::array<std::string, kLabelCount> labels{ "FPS", "CPU", "GPU", "RAM", "VRAM" };
 };
@@ -140,6 +144,7 @@ struct Settings {
 Settings defaultSettings();
 void moveOverlayMetric(OverlaySettings& settings, MetricId moved, MetricId before);
 void enableOverlayPixelLayout(OverlaySettings& settings);
+void setOverlayMetricLabel(OverlaySettings& settings, MetricId id, std::string label);
 
 // Формат — docs/settings.md. Неизвестные ключи пропускаются, отсутствующие остаются
 // значениями по умолчанию: файл мог остаться от прошлой версии.

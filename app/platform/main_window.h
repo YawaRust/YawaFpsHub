@@ -47,6 +47,7 @@ public:
         m_overlay.setSettings(m_model.settings.overlay);
     }
     void setOverlayVisible(bool visible);
+    void openEditorForSmoke();
     void exportOverlayStyles();
     // smokeSeconds > 0 — самопроверка для CI: окно живёт заданное время и закрывается само.
     int run(int smokeSeconds = 0, const std::wstring& overlayShotDir = std::wstring());

@@ -48,6 +48,9 @@ std::vector<OverlayMetricRow> overlayMetricRows(const OverlaySettings& settings,
         if (primary != kOverlayPrimaryMetrics.end()) {
             label = settings.labels[static_cast<std::size_t>(primary - kOverlayPrimaryMetrics.begin())];
         }
+        if (settings.customLabelSet[static_cast<std::size_t>(id)]) {
+            label = settings.customLabels[static_cast<std::size_t>(id)];
+        }
         auto decimals = metric.decimals;
         if (metric.id == MetricId::Fps || metric.id == MetricId::Low1Fps || metric.id == MetricId::Low01Fps
             || metric.id == MetricId::AvgFps) {

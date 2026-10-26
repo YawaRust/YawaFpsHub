@@ -119,6 +119,34 @@ std::array<MetricId, kMetricCount> defaultOverlayOrder()
     return order;
 }
 
+std::array<int, kMetricCount> defaultOverlayMetricColors()
+{
+    std::array<int, kMetricCount> colors { };
+    colors.fill(-1);
+    return colors;
+}
+
+void setOverlayMetricLabel(OverlaySettings& settings, MetricId id, std::string label)
+{
+    const std::size_t index = static_cast<std::size_t>(id);
+    if (index >= kMetricCount) { return; }
+    // Не обрезаем UTF-8 посередине символа; переводы строк не должны ломать INI.
+    std::string clean;
+    std::size_t characters = 0;
+    for (std::size_t i = 0; i < label.size() && characters < 32;) {
+        const unsigned char byte = static_cast<unsigned char>(label[i]);
+        const std::size_t length = byte < 0x80 ? 1 : byte < 0xe0 ? 2 : byte < 0xf0 ? 3 : 4;
+        if (i + length > label.size()) { break; }
+        if (byte != '\n' && byte != '\r' && byte != '=' && byte != '[' && byte != ']') {
+            clean.append(label, i, length);
+            ++characters;
+        }
+        i += length;
+    }
+    settings.customLabels[index] = std::move(clean);
+    settings.customLabelSet[index] = true;
+}
+
 void moveOverlayMetric(OverlaySettings& settings, MetricId moved, MetricId before)
 {
     const auto source = std::find(settings.order.begin(), settings.order.end(), displayMetric(moved));
@@ -550,6 +578,19 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                     }
                 }
             }
+        } else if (section == "overlay_metric_colors") {
+            const auto entry = std::find_if(kMetricTable.begin(), kMetricTable.end(),
+                [&key](const MetricInfo& info) { return info.key == key; });
+            if (entry != kMetricTable.end()) {
+                target.overlay.metricColors[static_cast<std::size_t>(entry->id)]
+                    = std::clamp(parseInt(value, -1), -1, 5);
+            }
+        } else if (section == "overlay_labels") {
+            const auto entry = std::find_if(kMetricTable.begin(), kMetricTable.end(),
+                [&key](const MetricInfo& info) { return info.key == key; });
+            if (entry != kMetricTable.end()) {
+                setOverlayMetricLabel(target.overlay, entry->id, std::string(value));
+            }
         } else if (section == "hotkeys") {
             if (key == "overlay") {
                 target.hotkeys.overlay = static_cast<unsigned int>(std::clamp(parseInt(value, 0), 0, 254));
@@ -680,6 +721,18 @@ std::string serializeSettings(const Settings& settings)
         if (pos.y >= 0) {
             text += std::string(metric.key) + " = " + std::to_string(pos.labelX) + ","
                 + std::to_string(pos.valueX) + "," + std::to_string(pos.y) + "\n";
+        }
+    }
+    text += "\n[overlay_metric_colors]\n";
+    for (const MetricInfo& metric : kMetricTable) {
+        const int color = settings.overlay.metricColors[static_cast<std::size_t>(metric.id)];
+        if (color >= 0) { text += std::string(metric.key) + " = " + std::to_string(color) + "\n"; }
+    }
+    text += "\n[overlay_labels]\n";
+    for (const MetricInfo& metric : kMetricTable) {
+        const std::size_t index = static_cast<std::size_t>(metric.id);
+        if (settings.overlay.customLabelSet[index]) {
+            text += std::string(metric.key) + " = " + settings.overlay.customLabels[index] + "\n";
         }
     }
     text += "\n[labels]\n";

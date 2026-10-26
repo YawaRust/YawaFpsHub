@@ -161,6 +161,33 @@ void testPairedMetricsAndOrder()
     CHECK(parsed.overlay.rowPositions[static_cast<std::size_t>(MetricId::VramUsed)].y == -1);
 }
 
+void testEditorMetricSettings()
+{
+    Settings settings;
+    settings.overlay.metrics.fill(false);
+    settings.overlay.metrics[static_cast<std::size_t>(MetricId::VramUsed)] = true;
+    CHECK(settings.overlay.metricColors[static_cast<std::size_t>(MetricId::VramUsed)] == -1);
+    setOverlayMetricLabel(settings.overlay, MetricId::VramUsed, "Память ГП");
+    settings.overlay.metricColors[static_cast<std::size_t>(MetricId::VramUsed)] = 3;
+    MetricStore store;
+    store.set(MetricId::VramUsed, 2.0);
+    CHECK(overlayMetricRows(settings.overlay, store)[0].label == "Память ГП");
+    Settings parsed;
+    std::string error;
+    CHECK(parseSettings(serializeSettings(settings), parsed, error));
+    CHECK(parsed.overlay.metricColors[static_cast<std::size_t>(MetricId::VramUsed)] == 3);
+    CHECK(overlayMetricRows(parsed.overlay, store)[0].label == "Память ГП");
+    setOverlayMetricLabel(parsed.overlay, MetricId::VramUsed, "");
+    CHECK(overlayMetricRows(parsed.overlay, store)[0].label.empty());
+    CHECK(parseSettings(serializeSettings(parsed), settings, error));
+    CHECK(settings.overlay.customLabelSet[static_cast<std::size_t>(MetricId::VramUsed)]);
+    CHECK(overlayMetricRows(settings.overlay, store)[0].label.empty());
+    settings.overlay.customLabelSet[static_cast<std::size_t>(MetricId::VramUsed)] = false;
+    CHECK(overlayMetricRows(settings.overlay, store)[0].label == settings.overlay.labels[4]);
+    CHECK(parseSettings("[overlay_metric_colors]\nvram_used = 1000\n", parsed, error));
+    CHECK(parsed.overlay.metricColors[static_cast<std::size_t>(MetricId::VramUsed)] == 5);
+}
+
 void testSmbiosModuleSizes()
 {
     CHECK(smbiosModuleSizeGb(0x7fff, 32768) == 32.0);
@@ -385,6 +412,7 @@ void runSettingsTests()
     testLegacyOverlaySelection();
     testPairedMetricsAndOrder();
     testSmbiosModuleSizes();
+    testEditorMetricSettings();
     testDefaultsRoundTrip();
     testOverlayCustomization();
     testOverlayCustomizationClamps();
