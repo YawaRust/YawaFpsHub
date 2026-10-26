@@ -19,23 +19,6 @@ constexpr std::array<std::wstring_view, 4> kPositionNames{ L"Слева свер
 constexpr std::array<std::wstring_view, 5> kFieldNames{ L"Кадры в секунду", L"Загрузка процессора",
     L"Загрузка видеокарты", L"Занятая память", L"Видеопамять" };
 
-OverlayValues currentValues(const AppModel& model)
-{
-    OverlayValues values;
-    values.fps = model.fps.currentFps;
-    values.low1 = model.fps.low1Fps;
-    values.cpuLoad = model.store.value(MetricId::CpuLoad);
-    values.cpuTemp = model.store.value(MetricId::CpuTemp);
-    values.hasCpuTemp = model.availability.cpuTemperature;
-    values.gpuLoad = model.store.value(MetricId::GpuLoad);
-    values.gpuTemp = model.store.value(MetricId::GpuTemp);
-    values.hasGpuTemp = model.availability.gpuTemperature;
-    values.ramUsed = model.store.value(MetricId::RamUsed);
-    values.vramUsed = model.store.value(MetricId::VramUsed);
-    values.hasVram = model.store.value(MetricId::VramTotal) > 0.0;
-    return values;
-}
-
 void drawSlider(Renderer& renderer, const Rect& row, int value, int minimum, int maximum, std::wstring_view caption,
     const Theme& theme, std::vector<UiHit>& hits, ActionKind action, std::wstring_view suffix)
 {
@@ -335,7 +318,7 @@ void drawPreviewCard(Renderer& renderer, const AppModel& model, const Theme& the
     const OverlayFormats formats{ renderer.dwrite(), renderer.textFormat(TextRole::Heading),
         renderer.textFormat(TextRole::Value), renderer.textFormat(TextRole::Small),
         renderer.textFormat(TextRole::Mono) };
-    const OverlayText text = makeOverlayText(model.settings.overlay, currentValues(model));
+    const OverlayText text = makeOverlayText(model.settings.overlay, model.store);
     const float scale = static_cast<float>(model.settings.overlay.scalePercent) / 100.0f * 0.9f;
     paintOverlay(renderer.target(), model.settings.overlay, theme, text, scene, scale, formats);
 
@@ -615,8 +598,9 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
         if (top + 24.0f > inner.bottom) {
             break;
         }
-        drawToggleRow(renderer, Rect{ inner.left, top, inner.right, top + 24.0f }, kFieldNames[index],
-            overlay.visible[index], theme, hits, ActionKind::ToggleMetric, static_cast<int>(index));
+        drawToggleRow(renderer, Rect { inner.left, top, inner.right, top + 24.0f }, kFieldNames[index],
+            overlay.metrics[static_cast<std::size_t>(kOverlayPrimaryMetrics[index])], theme, hits,
+            ActionKind::ToggleMetric, static_cast<int>(index));
         top += 25.0f;
     }
 }

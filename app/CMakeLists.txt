@@ -7,6 +7,7 @@ add_executable(YawaFpsHub WIN32
     metrics/metric_store.cpp
     metrics/statistics.cpp
     metrics/system_sampler.cpp
+    metrics/overlay_rows.cpp
     metrics/units.cpp
     platform/app_paths.cpp
     platform/display_info.cpp

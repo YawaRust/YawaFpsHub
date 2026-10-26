@@ -102,7 +102,7 @@ std::string cpuBrand()
 {
     std::array<int, 4> limits{};
     __cpuid(limits.data(), 0x80000000);
-    if (limits[0] < 0x80000004) {
+    if (static_cast<unsigned int>(limits[0]) < 0x80000004u) {
         return {};
     }
 
@@ -429,17 +429,15 @@ void collectDisks(HardwareIdentity& info)
 {
     // Диски — из WMI, как и температуры, но без драйвера: Win32_DiskDrive отдаёт
     // модель, тип интерфейса и размер любого накопителя, будь то NVMe, SATA или USB.
-    const bool comReady = [] {
-        const HRESULT result = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-        return SUCCEEDED(result) || result == RPC_E_CHANGED_MODE;
-    }();
+    const HRESULT comResult = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    const bool comReady = SUCCEEDED(comResult) || comResult == RPC_E_CHANGED_MODE;
     bool wmiOk = false;
     if (comReady) {
         IWbemLocator* locator = nullptr;
         if (SUCCEEDED(CoCreateInstance(CLSID_WbemLocator, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&locator)))
             && locator != nullptr) {
             IWbemServices* services = nullptr;
-            BSTR ns = SysAllocString(L"ROOT\\\\CIMV2");
+            BSTR ns = SysAllocString(L"ROOT\\CIMV2");
             HRESULT connect = E_FAIL;
             if (ns != nullptr) {
                 connect = locator->ConnectServer(ns, nullptr, nullptr, nullptr, 0, nullptr, nullptr, &services);
@@ -484,8 +482,8 @@ void collectDisks(HardwareIdentity& info)
                                 std::uint64_t bytes = 0;
                                 if (value.vt == VT_BSTR && value.bstrVal != nullptr) {
                                     bytes = static_cast<std::uint64_t>(_wtoi64(value.bstrVal));
-                                } else if (value.vt == VT_BSVALT) {
-                                    // редко
+                                } else if (value.vt == VT_UI8) {
+                                    bytes = value.ullVal;
                                 }
                                 if (bytes > 0) {
                                     disk.totalGb = static_cast<double>(bytes) / (1024.0 * 1024.0 * 1024.0);
@@ -508,10 +506,10 @@ void collectDisks(HardwareIdentity& info)
         }
     }
 
+    if (SUCCEEDED(comResult)) {
+        CoUninitialize();
+    }
     if (wmiOk) {
-        // Обогащаем свободным местом по логическим дискам: каждому физическому сопоставить
-        // суммарный свободный объём нельзя без Partition-драйвера, поэтому показываем
-        // логические тома отдельной строкой только если WMI не дал ни одного диска.
         return;
     }
 
@@ -532,12 +530,12 @@ void collectDisks(HardwareIdentity& info)
         wchar_t fs[32]{};
         GetVolumeInformationW(root, nullptr, 0, nullptr, nullptr, nullptr, fs, 32);
         DiskIdentity disk;
-        disk.driveLetter = std::string(1, static_cast<char>(letter)) + \":\";
-        disk.name = disk.driveLetter + \" — том\";
+        disk.driveLetter = std::string(1, static_cast<char>(letter)) + ":";
+        disk.name = disk.driveLetter + " — том";
         disk.totalGb = static_cast<double>(totalBytes.QuadPart) / (1024.0 * 1024.0 * 1024.0);
         disk.freeGb = static_cast<double>(freeBytes.QuadPart) / (1024.0 * 1024.0 * 1024.0);
         disk.fileSystem = toUtf8(fs);
-        disk.interfaceType = \"Fixed\";
+        disk.interfaceType = "Fixed";
         info.disks.push_back(disk);
     }
 }

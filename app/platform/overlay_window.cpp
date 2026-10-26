@@ -521,29 +521,10 @@ void OverlayWindow::repaint()
 
 
 
-OverlayValues OverlayWindow::currentValues() const
-{
-    OverlayValues values;
-    values.fps = m_fps.currentFps;
-    values.low1 = m_fps.low1Fps;
-    values.cpuLoad = m_store.value(MetricId::CpuLoad);
-    values.cpuTemp = m_store.value(MetricId::CpuTemp);
-    values.hasCpuTemp = values.cpuTemp > 0.0;
-    values.gpuLoad = m_store.value(MetricId::GpuLoad);
-    values.gpuTemp = m_store.value(MetricId::GpuTemp);
-    values.hasGpuTemp = values.gpuTemp > 0.0;
-    values.ramUsed = m_store.value(MetricId::RamUsed);
-    values.ramTotal = m_store.value(MetricId::RamUsed) + m_store.value(MetricId::RamFree);
-    values.vramUsed = m_store.value(MetricId::VramUsed);
-    values.vramTotal = m_store.value(MetricId::VramTotal);
-    values.hasVram = values.vramTotal > 0.0;
-    return values;
-}
-
 void OverlayWindow::drawScene(float scale)
 {
     OverlayFormats formats{ m_dwrite, m_keyFormat, m_valueFormat, m_smallFormat, m_monoFormat };
-    const OverlayText text = makeOverlayText(m_settings, currentValues());
+    const OverlayText text = makeOverlayText(m_settings, m_store);
     const Rect bounds{ 0.0f, 0.0f, static_cast<float>(m_bitmapWidth), static_cast<float>(m_bitmapHeight) };
     m_contentRectD2D = D2D1::RectF(0.0f, 0.0f, 0.0f, 0.0f);
 

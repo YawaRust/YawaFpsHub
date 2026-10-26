@@ -1,43 +1,21 @@
 #pragma once
 
+#include "metrics/metric_store.h"
 #include "render/d2d.h"
 #include "render/theme.h"
 #include "ui/settings.h"
 
 #include <array>
 #include <string>
+#include <vector>
 
 namespace yawa {
 
-// Числа, которые показывает оверлей. Форматирование живёт в одном месте, чтобы
-// предпросмотр в настройках и настоящее окно поверх игры совпадали до символа.
-struct OverlayValues {
-    double fps = 0.0;
-    double low1 = 0.0;
-    double cpuLoad = 0.0;
-    double cpuTemp = 0.0;
-    bool hasCpuTemp = false;
-    double gpuLoad = 0.0;
-    double gpuTemp = 0.0;
-    bool hasGpuTemp = false;
-    double ramUsed = 0.0;
-    double ramTotal = 0.0;
-    double vramUsed = 0.0;
-    double vramTotal = 0.0;
-    bool hasVram = false;
-};
-
+// Общий набор строк для предпросмотра и окна поверх игры.
 struct OverlayText {
-    std::wstring fps;
-    std::wstring low1;
-    std::wstring cpu;
-    std::wstring cpuTemp;
-    std::wstring gpu;
-    std::wstring gpuTemp;
-    std::wstring ram;
-    std::wstring vram;
-    std::array<std::wstring, kLabelCount> labels;
-    std::array<bool, kLabelCount> visible;
+    std::vector<std::wstring> labels;
+    std::vector<std::wstring> values;
+    std::vector<bool> visible;
 };
 
 struct OverlayFormats {
@@ -48,7 +26,7 @@ struct OverlayFormats {
     IDWriteTextFormat* mono = nullptr;
 };
 
-OverlayText makeOverlayText(const OverlaySettings& settings, const OverlayValues& values);
+OverlayText makeOverlayText(const OverlaySettings& settings, const MetricStore& store);
 
 // Палитра стиля для галереи в редакторе: миниатюру рисуем теми же цветами, что и оверлей.
 struct OverlaySwatch {

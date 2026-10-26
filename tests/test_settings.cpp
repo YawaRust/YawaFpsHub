@@ -1,11 +1,105 @@
+#include "metrics/overlay_rows.h"
 #include "ui/settings.h"
+
 #include "test_support.h"
+#include <algorithm>
 
 #include <string>
 
 namespace yawa::test {
 
 namespace {
+
+    void testIndependentOverlaySensors()
+    {
+        Settings settings;
+        const auto before = settings.overlay.metrics;
+        const auto clock = static_cast<std::size_t>(MetricId::CpuClock);
+        settings.overlay.metrics[clock] = true;
+        settings.overlay.metrics[static_cast<std::size_t>(MetricId::CpuTemp)] = false;
+        CHECK(settings.overlay.metrics[static_cast<std::size_t>(MetricId::CpuLoad)]
+            == before[static_cast<std::size_t>(MetricId::CpuLoad)]);
+        CHECK(settings.overlay.metrics[static_cast<std::size_t>(MetricId::GpuTemp)]
+            == before[static_cast<std::size_t>(MetricId::GpuTemp)]);
+        Settings parsed;
+        std::string error;
+        CHECK(parseSettings(serializeSettings(settings), parsed, error));
+        CHECK(parsed.overlay.metrics == settings.overlay.metrics);
+        CHECK(parsed.overlay.metrics[clock]);
+        CHECK(!parsed.overlay.metrics[static_cast<std::size_t>(MetricId::CpuTemp)]);
+    }
+
+    void testEverySelectedSensorReachesOverlay()
+    {
+        OverlaySettings settings;
+        MetricStore store;
+        settings.metrics.fill(true);
+        for (const MetricInfo& metric : kMetricTable) {
+            store.set(metric.id, 42.0);
+        }
+        auto rows = overlayMetricRows(settings, store);
+        CHECK(rows.size() == kMetricCount);
+        for (const MetricInfo& metric : kMetricTable) {
+            CHECK(std::count_if(rows.begin(), rows.end(), [&](const auto& row) {
+                return row.id == metric.id;
+            }) == 1);
+        }
+        settings.metrics[static_cast<std::size_t>(MetricId::CpuTemp)] = false;
+        rows = overlayMetricRows(settings, store);
+        CHECK(rows.size() == kMetricCount - 1);
+        CHECK(std::none_of(
+            rows.begin(), rows.end(), [](const auto& row) { return row.id == MetricId::CpuTemp; }));
+        CHECK(std::any_of(
+            rows.begin(), rows.end(), [](const auto& row) { return row.id == MetricId::CpuLoad; }));
+        settings.metrics.fill(false);
+        CHECK(overlayMetricRows(settings, store).empty());
+        for (const MetricInfo& metric : kMetricTable) {
+            settings.metrics[static_cast<std::size_t>(metric.id)] = true;
+            rows = overlayMetricRows(settings, store);
+            CHECK(rows.size() == 1);
+            CHECK(rows[0].id == metric.id);
+            CHECK(!rows[0].value.empty());
+            settings.metrics[static_cast<std::size_t>(metric.id)] = false;
+        }
+    }
+
+    void testUnavailableAndZeroOverlaySensors()
+    {
+        OverlaySettings settings;
+        settings.metrics.fill(false);
+        settings.metrics[static_cast<std::size_t>(MetricId::PageFileLoad)] = true;
+        settings.metrics[static_cast<std::size_t>(MetricId::DiskTemp)] = true;
+        MetricStore store;
+        store.set(MetricId::PageFileLoad, 0.0);
+        const auto rows = overlayMetricRows(settings, store);
+        CHECK(rows.size() == 2);
+        CHECK(rows[0].value != "нет данных");
+        CHECK(rows[1].value == "нет данных");
+        settings.metrics.fill(false);
+        settings.metrics[static_cast<std::size_t>(MetricId::CpuLoad)] = true;
+        settings.labels[1].clear();
+        CHECK(overlayMetricRows(settings, store).size() == 1);
+        CHECK(overlayMetricRows(settings, store)[0].label.empty());
+    }
+
+    void testLegacyOverlaySelection()
+    {
+        Settings settings;
+        std::string error;
+        CHECK(parseSettings("[overlay]\nshow_cpu = 0\nshow_fps = 0\n", settings, error));
+        CHECK(!settings.overlay.metrics[static_cast<std::size_t>(MetricId::CpuLoad)]);
+        CHECK(!settings.overlay.metrics[static_cast<std::size_t>(MetricId::CpuTemp)]);
+        CHECK(!settings.overlay.metrics[static_cast<std::size_t>(MetricId::Fps)]);
+        CHECK(!settings.overlay.metrics[static_cast<std::size_t>(MetricId::Low1Fps)]);
+        CHECK(settings.overlay.metrics[static_cast<std::size_t>(MetricId::GpuLoad)]);
+        CHECK(parseSettings("[overlay_metrics]\ncpu_temp = 1\n[overlay]\nshow_cpu = 0\n", settings, error));
+        CHECK(settings.overlay.metrics[static_cast<std::size_t>(MetricId::CpuTemp)]);
+        CHECK(settings.overlay.metrics[static_cast<std::size_t>(MetricId::CpuLoad)]);
+        settings.overlay.metrics.fill(false);
+        Settings parsed;
+        CHECK(parseSettings(serializeSettings(settings), parsed, error));
+        CHECK(parsed.overlay.metrics == settings.overlay.metrics);
+    }
 
 void testDefaultsRoundTrip()
 {
@@ -211,6 +305,10 @@ void testCrlfFile()
 
 void runSettingsTests()
 {
+    testIndependentOverlaySensors();
+    testEverySelectedSensorReachesOverlay();
+    testUnavailableAndZeroOverlaySensors();
+    testLegacyOverlaySelection();
     testDefaultsRoundTrip();
     testOverlayCustomization();
     testOverlayCustomizationClamps();

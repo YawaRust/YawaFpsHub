@@ -158,7 +158,7 @@ std::string sessionsDirectory()
 
 bool readTextFile(const std::string& path, std::string& content)
 {
-    std::ifstream file(toWide(path), std::ios::binary);
+    std::ifstream file(toWide(path).c_str(), std::ios::binary);
     if (!file.is_open()) {
         return false;
     }
@@ -174,7 +174,7 @@ bool writeTextFile(const std::string& path, const std::string& content)
     // Сначала пишем рядом, потом заменяем: оборванная запись не оставит пустой ini.
     const std::string temporary = path + ".tmp";
     {
-        std::ofstream file(toWide(temporary), std::ios::binary | std::ios::trunc);
+        std::ofstream file(toWide(temporary).c_str(), std::ios::binary | std::ios::trunc);
         if (!file.is_open()) {
             return false;
         }

@@ -319,18 +319,18 @@ void drawDiskCard(Renderer& renderer, const AppModel& model, const Theme& theme,
         }
         if (disk.totalGb > 0.5) {
             note += note.empty() ? L"" : L" · ";
-            note += wideText(formatValue(disk.totalGb, 0) + \" ГБ\");
+            note += wideText(formatValue(disk.totalGb, 0) + " ГБ");
             if (disk.freeGb > 0.0) {
-                note += wideText(\" · свободно \" + formatValue(disk.freeGb, 0) + \" ГБ\");
+                note += wideText(" · свободно " + formatValue(disk.freeGb, 0) + " ГБ");
             } else if (!disk.driveLetter.empty()) {
-                note += wideText(\" · \" + disk.driveLetter);
+                note += wideText(" · " + disk.driveLetter);
             }
         } else if (!disk.driveLetter.empty()) {
             note += note.empty() ? L"" : L" · ";
             note += wideText(disk.driveLetter);
         }
         if (!disk.fileSystem.empty()) {
-            note += L\" · \" + wideText(disk.fileSystem);
+            note += L" · " + wideText(disk.fileSystem);
         }
         if (!note.empty()) {
             renderer.text(clipText(renderer, note, TextRole::Tiny, inner.width()),

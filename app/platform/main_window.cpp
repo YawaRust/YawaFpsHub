@@ -1280,7 +1280,6 @@ void MainWindow::applyAction(const UiHit& hit)
     case ActionKind::ResetLabels:
         // Сбрасываем только подписи: остальные настройки оверлея не трогаем.
         m_model.settings.overlay.labels = OverlaySettings{}.labels;
-        m_model.settings.overlay.visible = OverlaySettings{}.visible;
         m_model.editingLabel = -1;
         m_overlay.setSettings(m_model.settings.overlay);
         saveSettings();
@@ -1431,9 +1430,19 @@ void MainWindow::applyAction(const UiHit& hit)
         saveSettings();
         break;
 
+    case ActionKind::ToggleSensor:
+        if (hit.value >= 0 && hit.value < static_cast<int>(kMetricCount)) {
+            auto& selected = m_model.settings.overlay.metrics[static_cast<std::size_t>(hit.value)];
+            selected = !selected;
+            m_overlay.setSettings(m_model.settings.overlay);
+            saveSettings();
+        }
+        break;
+
     case ActionKind::ToggleMetric:
         if (hit.value >= 0 && hit.value < static_cast<int>(kLabelCount)) {
-            auto& visible = m_model.settings.overlay.visible[static_cast<std::size_t>(hit.value)];
+            auto& visible = m_model.settings.overlay.metrics[static_cast<std::size_t>(
+                kOverlayPrimaryMetrics[static_cast<std::size_t>(hit.value)])];
             visible = !visible;
             m_overlay.setSettings(m_model.settings.overlay);
             saveSettings();

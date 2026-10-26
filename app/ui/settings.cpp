@@ -99,6 +99,16 @@ std::string sanitizeLabel(std::string_view text)
 
 } // namespace
 
+std::array<bool, kMetricCount> defaultOverlayMetrics()
+{
+    std::array<bool, kMetricCount> selected { };
+    for (MetricId id : { MetricId::Fps, MetricId::Low1Fps, MetricId::CpuLoad, MetricId::CpuTemp,
+             MetricId::GpuLoad, MetricId::GpuTemp, MetricId::RamUsed, MetricId::VramUsed }) {
+        selected[static_cast<std::size_t>(id)] = true;
+    }
+    return selected;
+}
+
 Settings defaultSettings()
 {
     return Settings{};
@@ -297,6 +307,7 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
 
     std::string section;
     std::size_t lineNumber = 0;
+    bool hasMetricSelection = false;
 
     while (!text.empty()) {
         const std::size_t lineEnd = text.find('\n');
@@ -320,6 +331,9 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                 return false;
             }
             section = std::string(trim(line.substr(1, close - 1)));
+            if (section == "overlay_metrics") {
+                hasMetricSelection = true;
+            }
             continue;
         }
 
@@ -427,6 +441,13 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                     }
                 }
             }
+        } else if (section == "overlay_metrics") {
+            for (const MetricInfo& metric : kMetricTable) {
+                if (key == metric.key) {
+                    const auto index = static_cast<std::size_t>(metric.id);
+                    target.overlay.metrics[index] = parseBool(value, target.overlay.metrics[index]);
+                }
+            }
         } else if (section == "hotkeys") {
             if (key == "overlay") {
                 target.hotkeys.overlay = static_cast<unsigned int>(std::clamp(parseInt(value, 0), 0, 254));
@@ -465,6 +486,15 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
         }
     }
 
+    if (!hasMetricSelection) {
+        for (std::size_t index = 0; index < kLabelCount; ++index) {
+            target.overlay.metrics[static_cast<std::size_t>(kOverlayPrimaryMetrics[index])]
+                = target.overlay.visible[index];
+        }
+        target.overlay.metrics[static_cast<std::size_t>(MetricId::Low1Fps)] = target.overlay.visible[0];
+        target.overlay.metrics[static_cast<std::size_t>(MetricId::CpuTemp)] = target.overlay.visible[1];
+        target.overlay.metrics[static_cast<std::size_t>(MetricId::GpuTemp)] = target.overlay.visible[2];
+    }
     return true;
 }
 
@@ -524,11 +554,17 @@ std::string serializeSettings(const Settings& settings)
     for (std::size_t index = 0; index < kLabelCount; ++index) {
         const auto field = static_cast<LabelField>(index);
         text += std::string("show_") + std::string(labelKey(field)) + " = "
-            + (settings.overlay.visible[index] ? "1" : "0") + "\n";
+            + (settings.overlay.metrics[static_cast<std::size_t>(kOverlayPrimaryMetrics[index])] ? "1" : "0")
+            + "\n";
     }
     text += "\n";
 
-    text += "[labels]\n";
+    text += "[overlay_metrics]\n";
+    for (const MetricInfo& metric : kMetricTable) {
+        text += std::string(metric.key) + " = "
+            + (settings.overlay.metrics[static_cast<std::size_t>(metric.id)] ? "1" : "0") + "\n";
+    }
+    text += "\n[labels]\n";
     for (std::size_t index = 0; index < kLabelCount; ++index) {
         const auto field = static_cast<LabelField>(index);
         text += std::string(labelKey(field)) + " = " + labelValue(settings.overlay, field) + "\n";

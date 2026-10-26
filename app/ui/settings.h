@@ -1,5 +1,7 @@
 #pragma once
 
+#include "metrics/metric_id.h"
+
 #include <array>
 #include <cstdint>
 #include <string>
@@ -16,6 +18,10 @@ enum class Accent : std::uint8_t { Mint, Ice, Violet, Amber, Coral };
 
 enum class LabelField : std::uint8_t { Fps, Cpu, Gpu, Ram, Vram };
 constexpr std::size_t kLabelCount = 5;
+inline constexpr std::array<MetricId, kLabelCount> kOverlayPrimaryMetrics { MetricId::Fps, MetricId::CpuLoad,
+    MetricId::GpuLoad, MetricId::RamUsed, MetricId::VramUsed };
+
+std::array<bool, kMetricCount> defaultOverlayMetrics();
 
 struct CaptureSettings {
     int intervalMs = 1000;
@@ -81,7 +87,8 @@ struct OverlaySettings {
     // Сквозной клик: окно оверлея полностью пропускает мышь в игру. Выключается хоткеем,
     // когда оверлей нужно перетащить.
     bool clickThrough = false;
-    // Состав: какие строки вообще показывать (fps, cpu, gpu, ram, vram).
+    // visible оставлен только для переноса настроек из старого ini.
+    std::array<bool, kMetricCount> metrics = defaultOverlayMetrics();
     std::array<bool, kLabelCount> visible{ true, true, true, true, true };
     std::array<std::string, kLabelCount> labels{ "FPS", "CPU", "GPU", "RAM", "VRAM" };
 };

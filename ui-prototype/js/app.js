@@ -274,14 +274,49 @@
   const sensorRows = new Map();
   const sensorFilter = { group: "all", query: "", pinnedOnly: false };
 
-  // Какой строке оверлея соответствует датчик: та же привязка, что в приложении.
-  function osdFieldFor(id) {
-    if (id.startsWith("fps") || id === "frameMs" || id === "framesDropped") return "fps";
-    if (id.startsWith("cpu") || id.startsWith("core")) return "cpu";
-    if (id === "vramUsed" || id === "vramTotal") return "vram";
-    if (id.startsWith("ram") || id.startsWith("pageFile")) return "ram";
-    if (id.startsWith("gpu") || id === "pcieLoad") return "gpu";
-    return null;
+  const OSD_PRIMARY = { fps: "fps", cpu: "cpu", gpu: "gpu", ramUsed: "ram", vramUsed: "vram" };
+
+  function saveOverlaySensors() {
+    const selected = Object.fromEntries([...sensorRows].map(([id, entry]) => [id, Boolean(entry.sensor.pinned)]));
+    store.write("yawa.overlaySensors", JSON.stringify(selected));
+  }
+
+  function rebuildOverlaySensors() {
+    const host = $("#osdPreview");
+    host.replaceChildren();
+    const sensors = [...sensorRows.values()].map((entry) => entry.sensor);
+    const primary = Object.keys(OSD_PRIMARY);
+    sensors.sort((a, b) => {
+      const ai = primary.indexOf(a.id);
+      const bi = primary.indexOf(b.id);
+      return (ai < 0 ? primary.length : ai) - (bi < 0 ? primary.length : bi);
+    });
+    for (const sensor of sensors) {
+      const entry = sensorRows.get(sensor.id);
+      entry.row.querySelector(".sensor-row__eye").classList.toggle("is-on", Boolean(sensor.pinned));
+      if (!sensor.pinned) continue;
+      const row = document.createElement("div");
+      row.className = "osd__row";
+      const field = OSD_PRIMARY[sensor.id];
+      row.dataset.osdItem = field || sensor.id;
+      const label = document.createElement("span");
+      label.className = "osd__key";
+      label.textContent = field ? overlayState.labels[field] : sensor.label;
+      const value = document.createElement("b");
+      value.className = sensor.id === "fps" ? "osd__val" : "osd__val osd__val--sm";
+      value.dataset.metric = sensor.id;
+      const unit = document.createElement("span");
+      unit.className = "osd__unit";
+      unit.textContent = sensor.unit;
+      row.append(label, value, unit);
+      host.appendChild(row);
+    }
+    for (const [id, field] of Object.entries(OSD_PRIMARY)) {
+      const toggle = $(`[data-osd-toggle="${field}"]`);
+      if (toggle) toggle.checked = Boolean(sensorRows.get(id)?.sensor.pinned);
+    }
+    updateMetrics(window.Sim.snapshot());
+    applyOverlay();
   }
 
   function buildSensorTable() {
@@ -322,14 +357,8 @@
       eye.addEventListener("click", () => {
         sensor.pinned = !sensor.pinned;
         eye.classList.toggle("is-on", sensor.pinned);
-        // Как в приложении: «глаз» включает и выключает строку в оверлее.
-        const field = osdFieldFor(sensor.id);
-        if (field) {
-          const fieldRow = $(`[data-osd-item="${field}"]`);
-          if (fieldRow) fieldRow.classList.toggle("is-hidden", !sensor.pinned);
-          const toggle = $(`[data-osd-toggle="${field}"]`);
-          if (toggle) toggle.checked = sensor.pinned;
-        }
+        saveOverlaySensors();
+        rebuildOverlaySensors();
         applySensorFilter();
       });
 
@@ -345,6 +374,18 @@
         sensor
       });
     }
+    const saved = store.read("yawa.overlaySensors");
+    if (saved) {
+      try {
+        const selected = JSON.parse(saved);
+        for (const [id, entry] of sensorRows) {
+          if (typeof selected?.[id] === "boolean") entry.sensor.pinned = selected[id];
+        }
+      } catch (error) {
+        /* Повреждённый выбор не мешает открыть прототип. */
+      }
+    }
+    rebuildOverlaySensors();
   }
 
   function applySensorFilter() {
@@ -631,9 +672,9 @@
       diskHost.innerHTML = disks.map((disk) => `
         <li>
           <b>${disk.name}${disk.driveLetter ? ` · ${disk.driveLetter}` : ""}</b>
-          <span>${[disk.interfaceType, disk.mediaType, disk.totalGb ? `${Math.round(disk.totalGb)} ГБ` : \"\",
-            disk.freeGb ? `свободно ${Math.round(disk.freeGb)} ГБ` : \"\", disk.fileSystem].filter(Boolean).join(\" · \")}</span>
-        </li>`).join(\"\") || '<li><span>нет данных</span></li>';
+          <span>${[disk.interfaceType, disk.mediaType, disk.totalGb ? `${Math.round(disk.totalGb)} ГБ` : "",
+            disk.freeGb ? `свободно ${Math.round(disk.freeGb)} ГБ` : "", disk.fileSystem].filter(Boolean).join(" · ")}</span>
+        </li>`).join("") || '<li><span>нет данных</span></li>';
     }
   }
 
@@ -756,13 +797,13 @@
     $$(".swatch").forEach((node) => node.classList.toggle("is-active", node.dataset.color === "-1"));
     $$("#osdLayout button").forEach((node) => node.classList.toggle("is-active", node.dataset.layout === preset.layout));
 
-    for (const [key, isOn] of Object.entries(preset.items)) {
-      const toggle = $(`[data-osd-toggle="${key}"]`);
-      if (!toggle) continue;
-      toggle.checked = isOn;
-      const row = $(`[data-osd-item="${key}"]`);
-      if (row) row.classList.toggle("is-hidden", !isOn);
+    for (const [id, field] of Object.entries(OSD_PRIMARY)) {
+      const entry = sensorRows.get(id);
+      if (entry) entry.sensor.pinned = Boolean(preset.items[field]);
     }
+    saveOverlaySensors();
+    rebuildOverlaySensors();
+    applySensorFilter();
 
     const scale = $("#osdScale");
     scale.value = String(preset.scale);
@@ -791,6 +832,16 @@
       if (node) node.textContent = label;
     }
     store.write("yawa.labels", JSON.stringify(overlayState.labels));
+  }
+
+  function fitOverlay() {
+    const osd = $("#osdPreview");
+    const scene = osd.parentElement;
+    if (!scene.clientWidth || !scene.clientHeight) return;
+    const scale = overlayState.scale / 100;
+    const fit = Math.min(1, scene.clientWidth * 0.94 / Math.max(1, osd.scrollWidth * scale),
+      scene.clientHeight * 0.9 / Math.max(1, osd.scrollHeight * scale));
+    osd.style.setProperty("--osd-fit", fit.toFixed(4));
   }
 
   function applyOverlay() {
@@ -865,6 +916,7 @@
     osd.classList.toggle("no-border", !overlayState.border);
     osd.classList.toggle("no-shadow", !overlayState.shadow);
 
+    fitOverlay();
     const radiusValue = $("#osdRadiusValue");
     if (radiusValue) radiusValue.textContent = `${overlayState.radius === null ? 8 : overlayState.radius} px`;
     const offsetValue = $("#osdOffsetValue");
@@ -1327,8 +1379,12 @@
 
     $$("[data-osd-toggle]").forEach((toggle) => {
       toggle.addEventListener("change", () => {
-        const row = $(`[data-osd-item="${toggle.dataset.osdToggle}"]`);
-        if (row) row.classList.toggle("is-hidden", !toggle.checked);
+        const id = Object.keys(OSD_PRIMARY).find((key) => OSD_PRIMARY[key] === toggle.dataset.osdToggle);
+        const entry = sensorRows.get(id);
+        if (entry) entry.sensor.pinned = toggle.checked;
+        saveOverlaySensors();
+        rebuildOverlaySensors();
+        applySensorFilter();
       });
     });
 
@@ -1491,6 +1547,7 @@
   bindPerfLegend();
   restorePreferences();
 
+  new ResizeObserver(fitOverlay).observe($("#osdPreview").parentElement);
   window.Charts.observe($("#frameChart"));
   window.Charts.observe($("#perfChart"));
   $$(".spark[data-series]").forEach((canvas) => window.Charts.observe(canvas));

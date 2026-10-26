@@ -31,8 +31,8 @@ constexpr float kGroupHeight = 30.0f;
 
 std::vector<Group> makeGroups(std::uint32_t cores)
 {
-    std::vector<MetricId> cpu{ MetricId::CpuLoad, MetricId::CpuTemp, MetricId::CpuClock, MetricId::CpuPeakLoad,
-        MetricId::GameThreadLoad };
+    std::vector<MetricId> cpu { MetricId::CpuLoad, MetricId::CpuTemp, MetricId::CpuClock, MetricId::CpuPower,
+        MetricId::CpuPeakLoad, MetricId::GameThreadLoad };
     // Ядра добавляются только реально существующие: пустых строк «Ядро 17» быть не должно.
     for (std::uint32_t index = 0; index < std::min<std::uint32_t>(cores, 16); ++index) {
         cpu.push_back(static_cast<MetricId>(static_cast<std::size_t>(MetricId::Core0Load) + index));
@@ -51,53 +51,6 @@ std::vector<Group> makeGroups(std::uint32_t cores)
                                MetricId::NetUp } },
         { L"Система", { MetricId::ChipsetTemp, MetricId::SelfCpu, MetricId::SelfRam, MetricId::SelfThreads } },
     };
-}
-
-// «Глаз» в строке привязывает датчик к строке оверлея: у каждой строки есть своё поле подписи.
-int overlayField(MetricId id)
-{
-    switch (id) {
-    // В оверлее пять строк; все датчики одной темы управляют своей строкой,
-    // поэтому «глаз» работает у каждой строки, а не только у пяти.
-    case MetricId::Fps:
-    case MetricId::FrameTime:
-    case MetricId::Low1Fps:
-    case MetricId::Low01Fps:
-    case MetricId::AvgFps:
-    case MetricId::DroppedFrames:
-        return static_cast<int>(LabelField::Fps);
-    case MetricId::CpuLoad:
-    case MetricId::CpuTemp:
-    case MetricId::CpuClock:
-    case MetricId::CpuPeakLoad:
-    case MetricId::GameThreadLoad:
-    case MetricId::CpuPower:
-        return static_cast<int>(LabelField::Cpu);
-    case MetricId::GpuLoad:
-    case MetricId::GpuTemp:
-    case MetricId::GpuHotspot:
-    case MetricId::GpuClock:
-    case MetricId::GpuMemClock:
-    case MetricId::GpuPower:
-    case MetricId::GpuFan:
-    case MetricId::GpuEncode:
-    case MetricId::GpuDecode:
-    case MetricId::PcieLoad:
-        return static_cast<int>(LabelField::Gpu);
-    case MetricId::RamUsed:
-    case MetricId::RamLoad:
-    case MetricId::RamCache:
-    case MetricId::RamFree:
-    case MetricId::PageFile:
-    case MetricId::PageFileTotal:
-    case MetricId::PageFileLoad:
-        return static_cast<int>(LabelField::Ram);
-    case MetricId::VramUsed:
-    case MetricId::VramTotal:
-        return static_cast<int>(LabelField::Vram);
-    default:
-        return -1;
-    }
 }
 
 bool valueKnown(MetricId id, const AppModel& model)
@@ -343,7 +296,7 @@ void drawSensors(Renderer& renderer, AppModel& model, const Theme& theme, const 
             if (!matchesQuery(id, group.title, query)) {
                 continue;
             }
-            if (model.overlayOnly && overlayField(id) < 0) {
+            if (model.overlayOnly && !model.settings.overlay.metrics[static_cast<std::size_t>(id)]) {
                 continue;
             }
             if (!started) {
@@ -385,19 +338,6 @@ void drawSensors(Renderer& renderer, AppModel& model, const Theme& theme, const 
             if (top + kGroupHeight > viewport.top) {
                 renderer.text(upperCopy(groups[groupIndexes[nextGroupStart]].title), headerRect, TextRole::Tiny,
                     theme.accent);
-            }
-            // Заголовок группы — кликабельный переключатель всего блока: включает
-            // или выключает сразу весь набор датчиков группы в оверлее.
-            {
-                const std::size_t groupIndex = groupIndexes[nextGroupStart];
-                int headerField = -1;
-                if (groupIndex == 0) headerField = static_cast<int>(LabelField::Fps);
-                else if (groupIndex == 1) headerField = static_cast<int>(LabelField::Cpu);
-                else if (groupIndex == 2) headerField = static_cast<int>(LabelField::Gpu);
-                else if (groupIndex == 3) headerField = static_cast<int>(LabelField::Ram);
-                if (headerField >= 0) {
-                    hits.push_back(UiHit{ headerRect, ActionKind::ToggleMetric, headerField });
-                }
             }
             top += kGroupHeight;
             ++nextGroupStart;
@@ -472,15 +412,14 @@ void drawSensors(Renderer& renderer, AppModel& model, const Theme& theme, const 
             }
 
             // «Глаз» есть у каждой строки, как в демо: серый — датчик не в оверлее,
-            // зелёный — показывается. Строки, которых нет в оверлее, рисуют неактивный глаз.
-            const int field = overlayField(id);
+            // зелёный — выбран именно этот показатель.
+            const auto metricIndex = static_cast<std::size_t>(id);
             // Кликабельная область глаза — вся правая колонка строки: попасть в иконку
             // 26×30 мышью было почти невозможно.
             const Rect eyeHit{ rowRight - 40.0f, rowTop, rowRight - 2.0f, rowTop + kRowHeight };
             const Rect eye{ rowRight - 34.0f, rowTop + 4.0f, rowRight - 6.0f, rowTop + kRowHeight - 4.0f };
-            const bool pinned = field >= 0
-                && model.settings.overlay.visible[static_cast<std::size_t>(field)];
-            const bool eyeHover = field >= 0 && isHovered(model, eyeHit);
+            const bool pinned = model.settings.overlay.metrics[metricIndex];
+            const bool eyeHover = isHovered(model, eyeHit);
             // Как в демо: выключенный «глаз» — серый перечёркнутый контур, включённый — зелёный чип.
             const Color eyeColor = pinned ? theme.accent : (eyeHover ? theme.textDim : theme.textFaint);
             if (pinned || eyeHover) {
@@ -501,9 +440,7 @@ void drawSensors(Renderer& renderer, AppModel& model, const Theme& theme, const 
             // Строка попадает в список хитов раньше глаза: обработчик берёт последний
             // подходящий хит, поэтому раньше клик по глазу гасился пустым действием строки.
             hits.push_back(UiHit{ row, ActionKind::None, static_cast<int>(index) });
-            if (field >= 0) {
-                hits.push_back(UiHit{ eyeHit, ActionKind::ToggleMetric, field });
-            }
+            hits.push_back(UiHit { eyeHit, ActionKind::ToggleSensor, static_cast<int>(id) });
         }
 
         top += kRowHeight;

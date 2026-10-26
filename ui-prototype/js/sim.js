@@ -54,7 +54,7 @@
     { id: "gpuEncode", label: "Кодирование видео", group: "gpu", unit: "%", decimals: 0 },
     { id: "gpuDecode", label: "Декодирование видео", group: "gpu", unit: "%", decimals: 0 },
     { id: "pcieLoad", label: "Нагрузка PCI-e", group: "gpu", unit: "%", decimals: 0 },
-    { id: "vramUsed", label: "Видеопамять занято", group: "gpu", unit: "ГБ", decimals: 1 },
+    { id: "vramUsed", label: "Видеопамять занято", group: "gpu", unit: "ГБ", decimals: 1, pinned: true },
 
     { id: "ramUsed", label: "Память занято", group: "mem", unit: "ГБ", decimals: 1, pinned: true },
     { id: "ramLoad", label: "Загрузка ОЗУ", group: "mem", unit: "%", decimals: 0 },

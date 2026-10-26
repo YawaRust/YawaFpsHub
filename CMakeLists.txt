@@ -30,6 +30,7 @@ option(YAWA_BUILD_PROBE "Собирать yawa-probe (Windows)" ON)
 
 # Портируемое ядро метрик: собирается везде, включая Linux-агент тестов.
 add_library(yawa_metrics STATIC
+    app/metrics/overlay_rows.cpp
     app/metrics/units.cpp
     app/metrics/statistics.cpp
     app/metrics/metric_store.cpp
