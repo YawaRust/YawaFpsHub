@@ -300,10 +300,13 @@ jobs:
           foreach ($view in @("dashboard", "sensors", "overlay", "settings")) {
             $url = "http://127.0.0.1:8765/index.html?view=$view&nofx=1&shot=1"
             $shot = "demo-$view.png"
+            # Свой профиль Edge на каждый экран: с общим профилем запуск уходил
+            # в уже работающий процесс, и все снимки выходили одинаковыми — с обзора.
+            $profile = Join-Path $env:TEMP "yawa-edge-$view"
             # Первый запуск Edge бывает медленным: даём две попытки, иначе часть
             # эталонов теряется и сравнивать не с чем.
             for ($attempt = 0; $attempt -lt 2 -and -not (Test-Path $shot); $attempt++) {
-              Start-Process -FilePath $edge -ArgumentList "--headless=new","--disable-gpu","--hide-scrollbars","--no-first-run","--window-size=$demoWidth,$demoHeight","--virtual-time-budget=6000","--screenshot=$PWD\$shot",$url -Wait
+              Start-Process -FilePath $edge -ArgumentList "--headless=new","--disable-gpu","--hide-scrollbars","--no-first-run","--user-data-dir=$profile","--window-size=$demoWidth,$demoHeight","--virtual-time-budget=6000","--screenshot=$PWD\$shot",$url -Wait
             }
             if (Test-Path $shot) {
               Write-Output "::notice title=YawaFpsHub::демо $view снято"
@@ -313,7 +316,8 @@ jobs:
             # Высокий снимок: по нему снимаем настоящие высоты карточек демо,
             # чтобы приложение повторяло их и прокручивало содержимое, а не сжимало.
             $tall = "demo-$view-tall.png"
-            Start-Process -FilePath $edge -ArgumentList "--headless=new","--disable-gpu","--hide-scrollbars","--no-first-run","--window-size=$demoWidth,2400","--virtual-time-budget=6000","--screenshot=$PWD\$tall",$url -Wait
+            $tallProfile = Join-Path $env:TEMP "yawa-edge-$view-tall"
+            Start-Process -FilePath $edge -ArgumentList "--headless=new","--disable-gpu","--hide-scrollbars","--no-first-run","--user-data-dir=$tallProfile","--window-size=$demoWidth,2400","--virtual-time-budget=6000","--screenshot=$PWD\$tall",$url -Wait
           }
           Stop-Process -Id $server.Id -Force
 

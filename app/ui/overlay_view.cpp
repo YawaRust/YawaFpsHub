@@ -530,8 +530,8 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
     renderer.text(L"Цвет строк", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small,
         theme.textDim);
     top += 18.0f;
-    const std::array<std::wstring_view, kLabelCount> rowNames{ L"Кадры", L"Процессор", L"Видеокарта", L"Память",
-        L"Видеопамять" };
+    // Короткие имена строк: длинные подписи наезжали на палитры справа.
+    const std::array<std::wstring_view, kLabelCount> rowNames{ L"FPS", L"CPU", L"GPU", L"RAM", L"VRAM" };
     for (std::size_t index = 0; index < kLabelCount; ++index) {
         if (top + 20.0f > inner.bottom) {
             break;
