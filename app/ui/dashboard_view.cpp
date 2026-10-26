@@ -252,7 +252,7 @@ void drawCpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
     const float radius = gaugeRadius(gaugeArea);
     const float rowsLeft = inner.left + radius * 2.0f + 20.0f;
     float rowTop = top + 2.0f;
-    // Четыре строки, как в демо: частота, температура, питание и поток игры.
+    // Четыре строки: частота, температура, питание и поток активной игры.
     const std::array<std::pair<std::wstring, std::wstring>, 4> rows {
         std::pair<std::wstring, std::wstring> { L"Частота",
             model.availability.cpuClock
@@ -262,10 +262,10 @@ void drawCpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
             model.availability.cpuTemperature
                 ? wideMetric(MetricId::CpuTemp, model.store.value(MetricId::CpuTemp))
                 : L"нет данных" },
-        // «Питание» без драйвера не читается, поэтому показываем самое загруженное ядро:
-        // он сразу говорит, упирается ли игра в одно ядро.
-        { L"Самое занятое ядро",
-            wideMetric(MetricId::CpuPeakLoad, model.store.value(MetricId::CpuPeakLoad)) },
+        { L"Питание",
+            model.store.hasValue(MetricId::CpuPower) && model.store.value(MetricId::CpuPower) > 0.0
+                ? wideMetric(MetricId::CpuPower, model.store.value(MetricId::CpuPower))
+                : L"нет данных" },
         { L"Поток игры",
             model.store.value(MetricId::GameThreadLoad) > 0.0
                 ? wideMetric(MetricId::GameThreadLoad, model.store.value(MetricId::GameThreadLoad))

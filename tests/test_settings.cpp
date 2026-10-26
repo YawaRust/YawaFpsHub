@@ -41,7 +41,7 @@ namespace {
             store.set(metric.id, 42.0);
         }
         auto rows = overlayMetricRows(settings, store);
-        CHECK(rows.size() == kMetricCount - kPairedMetricDetails.size());
+        CHECK(rows.size() == kMetricCount - kPairedMetricDetails.size() - 1);
         for (const MetricInfo& metric : kMetricTable) {
             CHECK(std::count_if(rows.begin(), rows.end(), [&](const auto& row) {
                 return row.id == displayMetric(metric.id);
@@ -49,7 +49,7 @@ namespace {
         }
         settings.metrics[static_cast<std::size_t>(MetricId::CpuTemp)] = false;
         rows = overlayMetricRows(settings, store);
-        CHECK(rows.size() == kMetricCount - kPairedMetricDetails.size() - 1);
+        CHECK(rows.size() == kMetricCount - kPairedMetricDetails.size() - 2);
         CHECK(std::none_of(
             rows.begin(), rows.end(), [](const auto& row) { return row.id == MetricId::CpuTemp; }));
         CHECK(std::any_of(
@@ -59,9 +59,15 @@ namespace {
         for (const MetricInfo& metric : kMetricTable) {
             settings.metrics[static_cast<std::size_t>(metric.id)] = true;
             rows = overlayMetricRows(settings, store);
-            CHECK(rows.size() == 1);
-            CHECK(rows[0].id == displayMetric(metric.id));
-            CHECK(!rows[0].value.empty());
+            if (metric.id == MetricId::CpuPeakLoad) {
+                CHECK(rows.empty()); // сохранённый старый ключ не рисуется
+            } else {
+                CHECK(rows.size() == 1);
+                if (!rows.empty()) {
+                    CHECK(rows[0].id == displayMetric(metric.id));
+                    CHECK(!rows[0].value.empty());
+                }
+            }
             settings.metrics[static_cast<std::size_t>(metric.id)] = false;
         }
     }
@@ -120,10 +126,14 @@ void testPairedMetricsAndOrder()
     for (MetricId detail : kPairedMetricDetails) {
         settings.metrics[static_cast<std::size_t>(detail)] = true;
     }
+    settings.metrics[static_cast<std::size_t>(MetricId::CpuLoad)] = true;
+    settings.metrics[static_cast<std::size_t>(MetricId::CpuPeakLoad)] = true; // старые настройки
     auto rows = overlayMetricRows(settings, store);
     CHECK(rows.size() == 4);
     CHECK(rows[0].value.find("45") != std::string::npos);
-    CHECK(rows[0].value.find("89") != std::string::npos);
+    CHECK(rows[0].value.find("89") == std::string::npos);
+    CHECK(std::none_of(
+        rows.begin(), rows.end(), [](const auto& row) { return row.id == MetricId::CpuPeakLoad; }));
     const auto vram = std::find_if(
         rows.begin(), rows.end(), [](const auto& row) { return row.id == MetricId::VramUsed; });
     CHECK(vram != rows.end());

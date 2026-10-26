@@ -100,7 +100,7 @@ struct MetricInfo {
 
 constexpr std::size_t kMetricCount = 56;
 
-inline constexpr std::array<MetricInfo, kMetricCount> kMetricTable{{
+inline constexpr std::array<MetricInfo, kMetricCount> kMetricTable { {
     { MetricId::Fps, "fps", "FPS", MetricUnit::Count, 0 },
     { MetricId::FrameTime, "frame_time", "Frame time", MetricUnit::Milliseconds, 2 },
     { MetricId::Low1Fps, "low_1", "1% low", MetricUnit::Count, 0 },
@@ -113,7 +113,7 @@ inline constexpr std::array<MetricInfo, kMetricCount> kMetricTable{{
     { MetricId::CpuClock, "cpu_clock", "Частота CPU", MetricUnit::Megahertz, 0 },
     { MetricId::CpuPower, "cpu_power", "Питание CPU", MetricUnit::Watts, 0 },
     { MetricId::GameThreadLoad, "game_thread", "Поток игры", MetricUnit::Percent, 0 },
-    { MetricId::CpuPeakLoad, "cpu_peak", "Пик по ядрам", MetricUnit::Percent, 0 },
+    { MetricId::CpuPeakLoad, "cpu_peak", "Самое занятое ядро", MetricUnit::Percent, 0 },
 
     { MetricId::GpuLoad, "gpu_load", "Загрузка видеокарты", MetricUnit::Percent, 0 },
     { MetricId::GpuTemp, "gpu_temp", "Температура GPU", MetricUnit::Celsius, 0 },
@@ -163,7 +163,7 @@ inline constexpr std::array<MetricInfo, kMetricCount> kMetricTable{{
     { MetricId::Core13Load, "core13_load", "Ядро 14", MetricUnit::Percent, 0 },
     { MetricId::Core14Load, "core14_load", "Ядро 15", MetricUnit::Percent, 0 },
     { MetricId::Core15Load, "core15_load", "Ядро 16", MetricUnit::Percent, 0 },
-}};
+} };
 
 constexpr std::size_t metricIndex(MetricId id)
 {
