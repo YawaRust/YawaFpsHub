@@ -17,11 +17,14 @@ struct Columns {
 
     float width() const { return (area.width() - kGap * 11.0f) / 12.0f; }
 
-    Rect span(float first, float count, float top, float height) const
+    // Колонки целые, координаты — вещественные: иначе на каждом вызове MSVC ругается
+    // на неявное int→float в аргументах.
+    Rect span(int first, int count, float top, float height) const
     {
         const float column = width();
-        const float left = area.left + first * (column + kGap);
-        const float right = area.left + (first + count) * column + (first + count - 1.0f) * kGap;
+        const float left = area.left + static_cast<float>(first) * (column + kGap);
+        const float right = area.left + static_cast<float>(first + count) * column
+            + static_cast<float>(first + count - 1) * kGap;
         return Rect{ left, top, right, top + height };
     }
 };

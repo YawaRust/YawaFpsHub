@@ -15,11 +15,14 @@ struct Columns {
 
     float width() const { return (area.width() - kGap * 11.0f) / 12.0f; }
 
-    Rect span(float first, float count, float top, float height) const
+    // Колонки целые, координаты — вещественные: иначе на каждом вызове MSVC ругается
+    // на неявное int→float в аргументах.
+    Rect span(int first, int count, float top, float height) const
     {
         const float column = width();
-        const float left = area.left + first * (column + kGap);
-        const float right = area.left + (first + count) * column + (first + count - 1.0f) * kGap;
+        const float left = area.left + static_cast<float>(first) * (column + kGap);
+        const float right = area.left + static_cast<float>(first + count) * column
+            + static_cast<float>(first + count - 1) * kGap;
         return Rect{ left, top, right, top + height };
     }
 };
@@ -303,20 +306,20 @@ void drawSystemView(Renderer& renderer, const AppModel& model, const Theme& them
 
     const float wideTop = area.top;
     const float narrowStep = rowHeight + kGap;
-    drawOsCard(renderer, model, theme, columns.span(0.0f, narrow ? 12.0f : 4.0f, wideTop, rowHeight));
+    drawOsCard(renderer, model, theme, columns.span(0, narrow ? 12 : 4, wideTop, rowHeight));
     drawCpuCard(renderer, model, theme,
-        columns.span(narrow ? 0.0f : 4.0f, narrow ? 12.0f : 4.0f, narrow ? wideTop + narrowStep : wideTop, rowHeight));
+        columns.span(narrow ? 0 : 4, narrow ? 12 : 4, narrow ? wideTop + narrowStep : wideTop, rowHeight));
     drawGpuCard(renderer, model, theme,
-        columns.span(narrow ? 0.0f : 8.0f, narrow ? 12.0f : 4.0f, narrow ? wideTop + 2.0f * narrowStep : wideTop, rowHeight));
+        columns.span(narrow ? 0 : 8, narrow ? 12 : 4, narrow ? wideTop + 2 * narrowStep : wideTop, rowHeight));
 
     const float memoryTop = narrow ? wideTop + 3.0f * narrowStep : wideTop + rowHeight + kGap;
-    drawMemoryCard(renderer, model, theme, columns.span(0.0f, narrow ? 12.0f : 8.0f, memoryTop, memoryHeight));
+    drawMemoryCard(renderer, model, theme, columns.span(0, narrow ? 12 : 8, memoryTop, memoryHeight));
     const float monitorHeight = narrow ? 190.0f : memoryHeight;
-    drawDisplayCard(renderer, model, theme, columns.span(narrow ? 0.0f : 8.0f, narrow ? 12.0f : 4.0f,
+    drawDisplayCard(renderer, model, theme, columns.span(narrow ? 0 : 8, narrow ? 12 : 4,
         narrow ? memoryTop + memoryHeight + kGap : memoryTop, monitorHeight));
 
     const float noteTop = memoryTop + memoryHeight + kGap + (narrow ? monitorHeight + kGap : 0.0f);
-    const Rect note = columns.span(0.0f, 12.0f, noteTop, area.top + systemHeight(narrow) - 8.0f - noteTop);
+    const Rect note = columns.span(0, 12, noteTop, area.top + systemHeight(narrow) - 8.0f - noteTop);
     drawCard(renderer, note, theme);
     const Rect inner = note.inset(kCardPadding);
     drawCardHeader(renderer, note, L"Откуда эти числа",
