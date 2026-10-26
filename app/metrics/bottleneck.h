@@ -10,8 +10,8 @@
 namespace yawa {
 
 // Индекс производительности относительно условного флагмана (RTX 4090 и CPU
-// уровня Ryzen 9 7900X = 100). Значения — обобщение публичных обзоров, они нужны
-// только для прогноза, когда игра не запущена: живые замеры точнее любого индекса.
+// уровня Ryzen 9 7900X = 100). Это справочная характеристика связки,
+// не замена замерам конкретной игры.
 double cpuPerfIndex(std::string_view name, std::uint32_t cores, std::uint32_t threads);
 double gpuPerfIndex(std::string_view name, double dedicatedMb);
 
@@ -22,7 +22,6 @@ enum class BottleneckKind : std::uint8_t {
     LiveGpu,        // упор в видеокарту по живым замерам
     LiveBalanced,   // оба компонента загружены ровно
     VramLimited,    // закончилась видеопамять
-    RefreshLimited, // кадры ограничены герцовкой или вертикальной синхронизацией
     EstimateCpu,    // прогноз по индексу: упирается в CPU
     EstimateGpu,    // прогноз по индексу: упирается в GPU
     EstimateBalanced,
@@ -48,8 +47,8 @@ struct BottleneckResult {
     std::vector<BottleneckAdvice> advice;
 };
 
-// Живые показатели за последний интервал опроса. Значения < 0 означают «датчик молчит»:
-// тогда расчёт уходит в прогноз по индексу, а не в ноль.
+// Живые показатели за последний интервал опроса. Значения < 0 означают «датчик молчит».
+// Вызывающая сторона не должна подменять отсутствующие замеры активной игры прогнозом.
 struct SystemLoad {
     double cpuLoad = -1.0;
     double cpuPeakCore = -1.0;
@@ -61,14 +60,14 @@ struct SystemLoad {
     double pageFileLoad = -1.0;
     double cpuPower = -1.0;
     double gpuPower = -1.0;
-    double targetFps = 60.0;
-    bool vsyncLikeLimit = false;
 };
 
 BottleneckResult analyzeBottleneck(const HardwareIdentity& hardware, const SystemLoad& load);
+// Вердикт активной игры: в отличие от анализа связки не подменяет её PID паспортным прогнозом.
+BottleneckResult analyzeActiveGame(const HardwareIdentity& hardware, SystemLoad gameLoad, bool active);
 
-// Собирает нагрузку из хранилища метрик. Датчик, который ни разу не приходил,
-// остаётся со значением < 0: тогда расчёт идёт по индексу железа, а не по нулям.
-SystemLoad loadFromStore(const MetricStore& store, double targetFps);
+// Собирает показания из хранилища. Для активной игры CPU/GPU заменяются значениями
+// её PID в MainWindow; общесистемные показатели туда не подставляются.
+SystemLoad loadFromStore(const MetricStore& store);
 
 } // namespace yawa

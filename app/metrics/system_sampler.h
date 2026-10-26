@@ -44,6 +44,9 @@ struct SystemSnapshot {
     double cpuClockMhz = 0.0;
     double cpuPowerWatts = 0.0;
     double gameThreadLoad = 0.0;
+    double gameCpuLoad = -1.0;
+    double gamePeakThreadLoad = -1.0;
+    double gameGpuLoad = -1.0;
 
     double gpuLoadPercent = 0.0;
     double gpuTemperature = 0.0;
@@ -58,6 +61,7 @@ struct SystemSnapshot {
     double pcieLoadPercent = 0.0;
     std::uint64_t vramUsedBytes = 0;
     std::uint64_t vramBudgetBytes = 0;
+    bool vramUsageKnown = false;
 
     double diskTemperature = 0.0;
     double chipsetTemperature = 0.0;
@@ -97,6 +101,9 @@ struct DerivedValues {
     double vramUsedGb = 0.0;
     double vramTotalGb = 0.0;
 };
+
+// FILETIME измеряется в 100-нс тиках. Отрицательное значение означает отсутствие интервала.
+double processCpuPercent(std::uint64_t busyTicks, double seconds, std::uint32_t logicalProcessors);
 
 DerivedValues deriveValues(const SystemSnapshot& snapshot, const SystemSampler::Deltas& deltas);
 

@@ -60,7 +60,6 @@ SystemLoad liveLoads(double cpu, double core, double gpu, double fps)
     load.vramTotalGb = 24.0;
     load.ramLoad = 45.0;
     load.pageFileLoad = 5.0;
-    load.targetFps = 165.0;
     return load;
 }
 
@@ -137,14 +136,35 @@ void testVideoMemoryShortageWins()
     CHECK(contains(result.detail, "Видеопамять заполнена"));
 }
 
-void testFrameLimitedByRefresh()
+void testFrameRateDoesNotDecideBottleneck()
 {
     const HardwareIdentity machine = demoMachine();
     const BottleneckResult result = analyzeBottleneck(machine, liveLoads(30.0, 40.0, 38.0, 164.0));
 
-    CHECK(result.kind == BottleneckKind::RefreshLimited);
-    CHECK(result.percent == 0);
-    CHECK(hasAdvice(result, "G-SYNC"));
+    CHECK(result.kind == BottleneckKind::Idle);
+    CHECK(!result.measured);
+    CHECK(!hasAdvice(result, "G-SYNC"));
+}
+
+void testGameVerdictNeverUsesSystemLoadOrHardwareEstimate()
+{
+    const HardwareIdentity machine = demoMachine();
+    SystemLoad game = liveLoads(97.0, 97.0, 46.0, 120.0);
+    game.vramUsedGb = 24.0; // расход системы не является расходом процесса
+    CHECK(analyzeActiveGame(machine, game, false).kind == BottleneckKind::Idle);
+    CHECK(analyzeActiveGame(machine, SystemLoad { }, true).kind == BottleneckKind::NoData);
+    const BottleneckResult result = analyzeActiveGame(machine, game, true);
+    CHECK(result.kind == BottleneckKind::LiveCpu);
+    CHECK(result.measured);
+}
+
+void testSingleBusyGameThreadIsVisibleWithoutSystemLoad()
+{
+    const HardwareIdentity machine = demoMachine();
+    const BottleneckResult result = analyzeActiveGame(machine, liveLoads(8.0, 96.0, 45.0, 100.0), true);
+    CHECK(result.kind == BottleneckKind::LiveCpu);
+    const BottleneckResult idle = analyzeActiveGame(machine, liveLoads(15.0, 45.0, 15.0, 100.0), true);
+    CHECK(idle.kind == BottleneckKind::Idle);
 }
 
 void testIdleIsNotABottleneck()
@@ -230,7 +250,9 @@ void runBottleneckTests()
     testMeasuredGpuBottleneck();
     testBalancedPairHasNoBottleneck();
     testVideoMemoryShortageWins();
-    testFrameLimitedByRefresh();
+    testFrameRateDoesNotDecideBottleneck();
+    testGameVerdictNeverUsesSystemLoadOrHardwareEstimate();
+    testSingleBusyGameThreadIsVisibleWithoutSystemLoad();
     testIdleIsNotABottleneck();
     testStaticEstimateFollowsResolution();
     testUnknownHardwareSaysSo();

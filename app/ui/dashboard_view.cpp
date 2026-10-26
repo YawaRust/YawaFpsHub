@@ -252,17 +252,20 @@ void drawCpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
     const float radius = gaugeRadius(gaugeArea);
     const float rowsLeft = inner.left + radius * 2.0f + 20.0f;
     float rowTop = top + 2.0f;
-    // Четыре строки, как в демо: частота, температура, питание и поток игры.
-    const std::array<std::pair<std::wstring, std::wstring>, 4> rows{
-        std::pair<std::wstring, std::wstring>{ L"Частота",
-            model.availability.cpuClock ? wideMetric(MetricId::CpuClock, model.store.value(MetricId::CpuClock))
-                                        : L"нет данных" },
+    // Четыре строки: частота, температура, питание и поток активной игры.
+    const std::array<std::pair<std::wstring, std::wstring>, 4> rows {
+        std::pair<std::wstring, std::wstring> { L"Частота",
+            model.availability.cpuClock
+                ? wideMetric(MetricId::CpuClock, model.store.value(MetricId::CpuClock))
+                : L"нет данных" },
         { L"Температура",
-            model.availability.cpuTemperature ? wideMetric(MetricId::CpuTemp, model.store.value(MetricId::CpuTemp))
-                                              : L"нет данных" },
-        // «Питание» без драйвера не читается, поэтому показываем пик по ядрам:
-        // он сразу говорит, упирается ли игра в одно ядро.
-        { L"Пик по ядрам", wideMetric(MetricId::CpuPeakLoad, model.store.value(MetricId::CpuPeakLoad)) },
+            model.availability.cpuTemperature
+                ? wideMetric(MetricId::CpuTemp, model.store.value(MetricId::CpuTemp))
+                : L"нет данных" },
+        { L"Питание",
+            model.store.hasValue(MetricId::CpuPower) && model.store.value(MetricId::CpuPower) > 0.0
+                ? wideMetric(MetricId::CpuPower, model.store.value(MetricId::CpuPower))
+                : L"нет данных" },
         { L"Поток игры",
             model.store.value(MetricId::GameThreadLoad) > 0.0
                 ? wideMetric(MetricId::GameThreadLoad, model.store.value(MetricId::GameThreadLoad))
@@ -338,11 +341,16 @@ void drawGpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
         rowTop += 22.0f;
     }
 
-    if (vramTotal > 0.0 && rowTop + 16.0f <= inner.bottom) {
-        drawLabelValue(renderer, Rect{ rowsLeft, rowTop, inner.right, rowTop + 16.0f }, L"Видеопамять",
-            wideNumber(model.store.value(MetricId::VramUsed), MetricUnit::Gigabytes, 1) + L" / "
-                + wideNumber(vramTotal, MetricUnit::Gigabytes, 1),
-            theme);
+    if ((model.store.hasValue(MetricId::VramUsed) || model.store.hasValue(MetricId::VramTotal))
+        && rowTop + 16.0f <= inner.bottom) {
+        const std::wstring used = model.store.hasValue(MetricId::VramUsed)
+            ? wideNumber(model.store.value(MetricId::VramUsed), MetricUnit::Gigabytes, 1)
+            : L"—";
+        const std::wstring total = model.store.hasValue(MetricId::VramTotal)
+            ? wideNumber(vramTotal, MetricUnit::Gigabytes, 1)
+            : L"—";
+        drawLabelValue(renderer, Rect { rowsLeft, rowTop, inner.right, rowTop + 16.0f }, L"Видеопамять",
+            used + L" / " + total, theme);
         rowTop += 22.0f;
     }
 

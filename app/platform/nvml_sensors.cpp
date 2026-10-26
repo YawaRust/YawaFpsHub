@@ -33,6 +33,14 @@ struct NvmlFanSpeedInfo
 };
 static_assert(sizeof(NvmlFanSpeedInfo) == 12);
 
+struct NvmlMemoryInfo
+{
+    unsigned long long total = 0;
+    unsigned long long free = 0;
+    unsigned long long used = 0;
+};
+static_assert(sizeof(NvmlMemoryInfo) == 24);
+
 struct NvmlApi {
     HMODULE module = nullptr;
 
@@ -44,6 +52,7 @@ struct NvmlApi {
     NvmlReturn (*deviceGetTemperature)(NvmlDevice, int, unsigned*) = nullptr;
     NvmlReturn (*deviceGetClockInfo)(NvmlDevice, int, unsigned*) = nullptr;
     NvmlReturn (*deviceGetPowerUsage)(NvmlDevice, unsigned*) = nullptr;
+    NvmlReturn (*deviceGetMemoryInfo)(NvmlDevice, NvmlMemoryInfo*) = nullptr;
     NvmlReturn (*deviceGetFanSpeed)(NvmlDevice, unsigned*) = nullptr;
     NvmlReturn (*deviceGetFanSpeedRpm)(NvmlDevice, NvmlFanSpeedInfo*) = nullptr;
     NvmlReturn (*deviceGetEncoderUtilization)(NvmlDevice, unsigned*, unsigned*) = nullptr;
@@ -113,6 +122,7 @@ bool NvmlSensors::initialize(std::string& error)
     loadSymbol(module, "nvmlDeviceGetTemperature", m_impl->api.deviceGetTemperature);
     loadSymbol(module, "nvmlDeviceGetClockInfo", m_impl->api.deviceGetClockInfo);
     loadSymbol(module, "nvmlDeviceGetPowerUsage", m_impl->api.deviceGetPowerUsage);
+    loadSymbol(module, "nvmlDeviceGetMemoryInfo", m_impl->api.deviceGetMemoryInfo);
     loadSymbol(module, "nvmlDeviceGetFanSpeed", m_impl->api.deviceGetFanSpeed);
 
     // Версия RPM-вентилятора появилась в NVML 12: на старых драйверах её просто нет.
@@ -218,6 +228,13 @@ GpuSensorReading NvmlSensors::read() const
     if (api.deviceGetPowerUsage != nullptr
         && api.deviceGetPowerUsage(m_impl->device, &value) == kNvmlSuccess) {
         reading.powerWatts = static_cast<double>(value) / 1000.0;
+    }
+    NvmlMemoryInfo memory;
+    if (api.deviceGetMemoryInfo != nullptr && api.deviceGetMemoryInfo(m_impl->device, &memory) == kNvmlSuccess
+        && memory.total >= 256ull * 1024 * 1024 && memory.used <= memory.total) {
+        reading.memoryUsedBytes = memory.used;
+        reading.memoryTotalBytes = memory.total;
+        reading.hasMemory = true;
     }
     // Занятость медиа-движков и пропускная способность PCI-e.
     unsigned samplingPeriod = 0;

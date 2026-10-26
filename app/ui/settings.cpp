@@ -2,8 +2,9 @@
 #include "metrics/overlay_metric.h"
 
 #include <algorithm>
-#include <charconv>
 #include <cctype>
+#include <charconv>
+#include <cmath>
 #include <utility>
 
 namespace yawa {
@@ -186,6 +187,16 @@ void enableOverlayPixelLayout(OverlaySettings& settings)
         ++row;
     }
     settings.pixelLayout = true;
+}
+
+int scaledOverlayOffset(int offset, double sourceExtent, double targetExtent)
+{
+    if (sourceExtent <= 0.0 || targetExtent <= 0.0) {
+        return offset;
+    }
+    return std::clamp(
+        static_cast<int>(std::lround(static_cast<double>(offset) * targetExtent / sourceExtent)), -8192,
+        8192);
 }
 
 Settings defaultSettings()
@@ -455,11 +466,11 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
             } else if (key == "opacity") {
                 target.overlay.opacityPercent = std::clamp(parseInt(value, target.overlay.opacityPercent), 0, 100);
             } else if (key == "offset_x") {
-                target.overlay.offsetX = std::clamp(parseInt(value, target.overlay.offsetX), -2000, 2000);
+                target.overlay.offsetX = std::clamp(parseInt(value, target.overlay.offsetX), -8192, 8192);
             } else if (key == "pixel_layout") {
                 target.overlay.pixelLayout = parseBool(value, target.overlay.pixelLayout);
             } else if (key == "offset_y") {
-                target.overlay.offsetY = std::clamp(parseInt(value, target.overlay.offsetY), -2000, 2000);
+                target.overlay.offsetY = std::clamp(parseInt(value, target.overlay.offsetY), -8192, 8192);
             } else if (key == "background") {
                 target.overlay.showBackground = parseBool(value, target.overlay.showBackground);
             } else if (key == "border") {

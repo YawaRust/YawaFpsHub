@@ -184,8 +184,8 @@ bool OverlayWindow::create(HINSTANCE instance, std::string& error)
     m_monoFormat = createFormat(m_dwrite, 11.0f, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_LEADING,
         L"Cascadia Mono");
 
-    // Содержимое появляется только после первого опроса. Чтобы оверлей не оказался
-    // пустым при включении, считаем, что рисовать уже есть что: нули честнее пустоты.
+    // До первого опроса неизвестные метрики показываются как «нет данных»,
+    // а не маскируются нулями или пустым оверлеем.
     m_hasContent = true;
     return true;
 }
@@ -317,8 +317,8 @@ void OverlayWindow::updateDrag(int screenX, int screenY)
     // на сколько уехал курсор, без множителей масштаба.
     const int deltaX = screenX - static_cast<int>(m_dragOrigin.x);
     const int deltaY = screenY - static_cast<int>(m_dragOrigin.y);
-    m_settings.offsetX = std::clamp(m_dragOffsetX + deltaX, -2000, 2000);
-    m_settings.offsetY = std::clamp(m_dragOffsetY + deltaY, -2000, 2000);
+    m_settings.offsetX = std::clamp(m_dragOffsetX + deltaX, -8192, 8192);
+    m_settings.offsetY = std::clamp(m_dragOffsetY + deltaY, -8192, 8192);
     repaint();
     if (m_onMove) {
         m_onMove(m_settings.offsetX, m_settings.offsetY, false);

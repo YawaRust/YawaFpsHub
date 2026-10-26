@@ -190,161 +190,197 @@ void collectCpu(HardwareIdentity& info)
     info.cpu.l3CacheMb = l3Mb;
 }
 
-std::string memoryTypeName(BYTE type)
-{
-    switch (type) {
-    case 0x12:
-        return "DDR";
-    case 0x13:
-        return "DDR2";
-    case 0x18:
-        return "DDR3";
-    case 0x1A:
-        return "DDR4";
-    case 0x22:
-        return "DDR5";
-    case 0x1E:
-        return "LPDDR4";
-    case 0x21:
-        return "LPDDR5";
-    default:
-        return {};
-    }
-}
-
-// SMBIOS — единственный источник, который честно говорит «сколько планок и каких».
-// Поля читаем с проверкой длины структуры: на старых BIOS часть полей отсутствует.
 void collectSmbiosMemory(HardwareIdentity& info)
 {
-    // GetSystemFirmwareTable принимает сигнатуру провайдера: четыре символа 'RSMB'.
     constexpr DWORD kSmbios = 0x52534D42;
     const DWORD needed = GetSystemFirmwareTable(kSmbios, 0, nullptr, 0);
     if (needed <= 8 || needed > 16u * 1024u * 1024u) {
         return;
     }
-
     std::vector<BYTE> table(needed);
     if (GetSystemFirmwareTable(kSmbios, 0, table.data(), needed) != needed) {
         return;
     }
+    info.memory = parseSmbiosMemory(table, info.memory.totalGb);
+}
 
-    // RAW_SMBIOS_DATA: байты метода и версий, затем DWORD длины и сами структуры.
-    const std::size_t dataStart = 8;
-    DWORD dataLength = 0;
-    std::memcpy(&dataLength, table.data() + 4, sizeof(dataLength));
-    if (dataStart + dataLength > table.size()) {
+void collectWmiMemory(HardwareIdentity& info)
+{
+    const HRESULT initialized = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    if (FAILED(initialized) && initialized != RPC_E_CHANGED_MODE) {
         return;
     }
-
-    const BYTE* const begin = table.data() + dataStart;
-    const BYTE* const limit = begin + dataLength;
-    const BYTE* cursor = begin;
-
-    std::vector<MemoryModule> modules;
-    std::uint32_t slots = 0;
-    // SMBIOS 2.7 перешёл с мегагерц на мегаперехваты в секунду; до него удваиваем.
-    const bool speedInMhz = table[1] < 2 || (table[1] == 2 && table[2] < 7);
-    const double speedScale = speedInMhz ? 2.0 : 1.0;
-    while (cursor + 4 <= limit) {
-        const BYTE type = cursor[0];
-        const BYTE length = cursor[1];
-        if (length < 4 || cursor + length > limit) {
-            break;
+    IWbemLocator* locator = nullptr;
+    IWbemServices* services = nullptr;
+    IEnumWbemClassObject* enumerator = nullptr;
+    IEnumWbemClassObject* slotsEnumerator = nullptr;
+    std::uint32_t wmiSlots = 0;
+    if (SUCCEEDED(CoCreateInstance(CLSID_WbemLocator, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&locator)))
+        && locator != nullptr) {
+        BSTR ns = SysAllocString(L"ROOT\\CIMV2");
+        if (ns != nullptr) {
+            locator->ConnectServer(ns, nullptr, nullptr, nullptr, 0, nullptr, nullptr, &services);
+            SysFreeString(ns);
         }
-
-        const BYTE* const strings = cursor + length;
-        auto stringAt = [&](BYTE index) -> std::string {
-            if (index == 0 || strings >= limit) {
-                return {};
-            }
-            const BYTE* scan = strings;
-            for (BYTE current = 1; current < index && scan < limit; ++current) {
-                while (scan < limit && *scan != 0) {
-                    ++scan;
+        locator->Release();
+    }
+    if (services != nullptr) {
+        CoSetProxyBlanket(services, RPC_C_AUTHN_WINNT, RPC_C_AUTHZ_NONE, nullptr, RPC_C_AUTHN_LEVEL_CALL,
+            RPC_C_IMP_LEVEL_IMPERSONATE, nullptr, EOAC_NONE);
+        BSTR lang = SysAllocString(L"WQL");
+        BSTR query = SysAllocString(L"SELECT DeviceLocator, Capacity, Speed, ConfiguredClockSpeed, "
+                                    L"Manufacturer, PartNumber, SMBIOSMemoryType FROM Win32_PhysicalMemory");
+        if (lang != nullptr && query != nullptr) {
+            services->ExecQuery(lang, query, WBEM_FLAG_FORWARD_ONLY, nullptr, &enumerator);
+        }
+        if (lang) {
+            SysFreeString(lang);
+        }
+        if (query) {
+            SysFreeString(query);
+        }
+        lang = SysAllocString(L"WQL");
+        query = SysAllocString(L"SELECT MemoryDevices, Use FROM Win32_PhysicalMemoryArray");
+        if (lang != nullptr && query != nullptr) {
+            services->ExecQuery(lang, query, WBEM_FLAG_FORWARD_ONLY, nullptr, &slotsEnumerator);
+        }
+        if (lang) {
+            SysFreeString(lang);
+        }
+        if (query) {
+            SysFreeString(query);
+        }
+        services->Release();
+        if (slotsEnumerator != nullptr) {
+            for (int index = 0; index < 8; ++index) {
+                IWbemClassObject* array = nullptr;
+                ULONG count = 0;
+                if (FAILED(slotsEnumerator->Next(200, 1, &array, &count)) || count != 1 || array == nullptr) {
+                    break;
                 }
-                ++scan;
+                VARIANT value;
+                VariantInit(&value);
+                const bool systemMemory = SUCCEEDED(array->Get(L"Use", 0, &value, nullptr, nullptr))
+                    && ((value.vt == VT_I4 && value.lVal == 3) || (value.vt == VT_UI4 && value.ulVal == 3)
+                        || (value.vt == VT_I2 && value.iVal == 3)
+                        || (value.vt == VT_UI2 && value.uiVal == 3));
+                VariantClear(&value);
+                if (systemMemory && SUCCEEDED(array->Get(L"MemoryDevices", 0, &value, nullptr, nullptr))) {
+                    const long devices = value.vt == VT_I4 ? value.lVal
+                        : value.vt == VT_UI4               ? static_cast<long>(value.ulVal)
+                                                           : 0;
+                    if (devices > 0 && devices <= 64
+                        && wmiSlots + static_cast<std::uint32_t>(devices) <= 64) {
+                        wmiSlots += static_cast<std::uint32_t>(devices);
+                    }
+                }
+                VariantClear(&value);
+                array->Release();
             }
-            const BYTE* start = scan;
-            while (scan < limit && *scan != 0) {
-                ++scan;
+            slotsEnumerator->Release();
+        }
+    }
+    std::vector<MemoryModule> modules;
+    if (enumerator != nullptr) {
+        for (int index = 0; index < 32; ++index) {
+            IWbemClassObject* item = nullptr;
+            ULONG count = 0;
+            if (FAILED(enumerator->Next(200, 1, &item, &count)) || count != 1 || item == nullptr) {
+                break;
             }
-            if (start > limit) {
-                return {};
-            }
-            return std::string(reinterpret_cast<const char*>(start), static_cast<std::size_t>(scan - start));
-        };
-
-        auto at = [&](std::size_t offset) -> WORD {
-            WORD value = 0;
-            if (length >= offset + 2 && cursor + offset + 2 <= limit) {
-                std::memcpy(&value, cursor + offset, sizeof(value));
-            }
-            return value;
-        };
-        // Байт только внутри форматной части: короткие структуры старых BIOS
-        // не доходят до нужного поля, и читать за ней нельзя.
-        auto byteAt = [&](std::size_t offset) -> BYTE {
-            return offset < length && cursor + offset < limit ? cursor[offset] : BYTE{ 0 };
-        };
-
-        if (type == 16 && length >= 0x12) {
-            // Physical Memory Array, 10h — число слотов под память.
-            const WORD devices = at(0x10);
-            slots = std::max<std::uint32_t>(slots, devices);
-        } else if (type == 17 && length >= 0x13) {
-            // Память по DMTF: размер — 10h, тип — 16h, заявленная скорость — 19h, строки
-            // слота/вендора/партномера — 14h/1Bh/1Eh, конфигурационная частота — 24h.
-            const WORD rawSize = at(0x10);
+            const auto property = [item](const wchar_t* name) {
+                VARIANT result;
+                VariantInit(&result);
+                item->Get(name, 0, &result, nullptr, nullptr);
+                return result;
+            };
+            const auto number = [](const VARIANT& value) -> std::uint64_t {
+                if (value.vt == VT_BSTR && value.bstrVal != nullptr) {
+                    return static_cast<std::uint64_t>(_wcstoui64(value.bstrVal, nullptr, 10));
+                }
+                if (value.vt == VT_UI8) {
+                    return value.ullVal;
+                }
+                if (value.vt == VT_UI4) {
+                    return value.ulVal;
+                }
+                if (value.vt == VT_I4 && value.lVal > 0) {
+                    return static_cast<std::uint64_t>(value.lVal);
+                }
+                return 0;
+            };
+            const auto string = [](const VARIANT& value) {
+                return value.vt == VT_BSTR && value.bstrVal != nullptr ? toUtf8(value.bstrVal)
+                                                                       : std::string { };
+            };
             MemoryModule module;
-            std::uint32_t extendedMb = 0;
-            if (rawSize == 0x7fff && length >= 0x24) {
-                std::memcpy(&extendedMb, cursor + 0x20, sizeof(extendedMb));
-            }
-            module.sizeGb = smbiosModuleSizeGb(rawSize, extendedMb);
-            module.populated = rawSize != 0 && rawSize != 0xffff;
-
+            VARIANT value = property(L"Capacity");
+            const std::uint64_t capacity = number(value);
+            VariantClear(&value);
+            module.sizeGb = static_cast<double>(capacity) / (1024.0 * 1024.0 * 1024.0);
+            module.populated = module.sizeGb >= 0.25 && module.sizeGb <= 8192.0;
+            value = property(L"DeviceLocator");
+            module.slot = string(value);
+            VariantClear(&value);
+            value = property(L"Manufacturer");
+            module.vendor = string(value);
+            VariantClear(&value);
+            value = property(L"PartNumber");
+            module.part = string(value);
+            VariantClear(&value);
+            value = property(L"Speed");
+            module.ratedMt = validatedMemorySpeed(static_cast<double>(number(value)));
+            VariantClear(&value);
+            value = property(L"ConfiguredClockSpeed");
+            module.configuredMt = validatedMemorySpeed(static_cast<double>(number(value)));
+            VariantClear(&value);
+            value = property(L"SMBIOSMemoryType");
+            module.type = smbiosMemoryTypeName(static_cast<BYTE>(number(value)));
+            VariantClear(&value);
             if (module.populated) {
-                const WORD rated = at(0x19);
-                const WORD configured = length >= 0x26 ? at(0x24) : 0;
-                const WORD millivolts = length >= 0x2C ? at(0x2A) : 0;
-                module.ratedMt = rated == 0xFFFF ? 0.0 : static_cast<double>(rated) * speedScale;
-                module.configuredMt = configured == 0xFFFF ? 0.0 : static_cast<double>(configured) * speedScale;
-                module.voltage = millivolts > 0 ? static_cast<double>(millivolts) / 1000.0 : 0.0;
-                module.type = memoryTypeName(byteAt(0x16));
-                module.slot = stringAt(byteAt(0x14));
-                module.vendor = stringAt(byteAt(0x1B));
-                module.part = stringAt(byteAt(0x1E));
-                modules.push_back(module);
+                modules.push_back(std::move(module));
             }
+            item->Release();
         }
-
-        // Следующая структура идёт за блоком строк, который заканчивается пустой строкой.
-        const BYTE* scan = strings;
-        while (scan + 1 < limit && !(*scan == 0 && *(scan + 1) == 0)) {
-            ++scan;
+        enumerator->Release();
+    }
+    if (SUCCEEDED(initialized)) {
+        CoUninitialize();
+    }
+    double reported = 0.0;
+    for (const MemoryModule& module : modules) {
+        reported += module.sizeGb;
+    }
+    if (modules.empty() || !smbiosSizesPlausible(reported, info.memory.totalGb)) {
+        return;
+    }
+    if (info.memory.slots == 0 && wmiSlots >= modules.size()) {
+        info.memory.slots = wmiSlots;
+    }
+    const bool hasSmbiosSize = std::any_of(info.memory.modules.begin(), info.memory.modules.end(),
+        [](const MemoryModule& module) { return module.sizeGb > 0.0; });
+    if (!hasSmbiosSize) {
+        info.memory.modules = std::move(modules);
+        return;
+    }
+    for (MemoryModule& current : info.memory.modules) {
+        const auto match
+            = std::find_if(modules.begin(), modules.end(), [&current](const MemoryModule& other) {
+                  return !current.slot.empty() && current.slot == other.slot;
+              });
+        if (match == modules.end()) {
+            continue;
         }
-        cursor = scan + 2;
-    }
-
-    // Некоторые BIOS сообщают ранги как отдельные планки по 1 ГБ. Если сумма
-    // Type 17 расходится с доступным физическим объёмом, не показываем ложный размер слота.
-    double reportedGb = 0.0;
-    for (const auto& module : modules) {
-        reportedGb += module.sizeGb;
-    }
-    if (!modules.empty() && !smbiosSizesPlausible(reportedGb, info.memory.totalGb)) {
-        for (auto& module : modules) {
-            module.sizeGb = 0.0;
+        if (current.configuredMt <= 0.0) {
+            current.configuredMt = match->configuredMt;
         }
-    }
-
-    if (!modules.empty()) {
-        info.memory.modules = modules;
-        info.memory.slots = std::max<std::uint32_t>(slots, static_cast<std::uint32_t>(modules.size()));
+        if (current.ratedMt <= 0.0) {
+            current.ratedMt = match->ratedMt;
+        }
     }
 }
 
-void collectMemory(HardwareIdentity& info)
+void collectMemory(HardwareIdentity& info, bool includeWmi)
 {
     MEMORYSTATUSEX status{};
     status.dwLength = sizeof(status);
@@ -355,21 +391,28 @@ void collectMemory(HardwareIdentity& info)
     // SMBIOS даёт раскладку по слотам; если он молчит (виртуалка, старый BIOS),
     // остаются только гигабайты из GlobalMemoryStatusEx.
     collectSmbiosMemory(info);
+    // Не тормозим каждый запуск дополнительным WMI-запросом, когда Type 17 полон.
+    const bool smbiosReady = info.memory.slots > 0 && !info.memory.modules.empty()
+        && std::all_of(
+            info.memory.modules.begin(), info.memory.modules.end(), [](const MemoryModule& module) {
+                return !module.populated || (module.sizeGb > 0.0 && module.configuredMt > 0.0);
+            });
+    if (includeWmi && !smbiosReady) {
+        collectWmiMemory(info);
+    }
     double rated = 0.0;
-    double configured = 0.0;
     for (const MemoryModule& module : info.memory.modules) {
         if (!module.populated) {
             continue;
         }
         rated = std::max(rated, module.ratedMt);
-        configured = std::max(configured, module.configuredMt);
         if (info.memory.type.empty()) {
             info.memory.type = module.type;
         }
     }
 
     info.memory.ratedMt = rated;
-    info.memory.configuredMt = configured > 0.0 ? configured : rated;
+    info.memory.configuredMt = configuredMemorySpeed(info.memory.modules);
 }
 
 void collectDisplays(HardwareIdentity& info)
@@ -570,13 +613,16 @@ void collectGpuDrivers(HardwareIdentity& info, const std::vector<std::pair<std::
 
 } // namespace
 
-bool collectHardwareInfo(HardwareIdentity& info, const GpuRegistry& registry, std::string& error)
+bool collectHardwareInfo(
+    HardwareIdentity& info, const GpuRegistry& registry, std::string& error, bool includeWmi)
 {
     collectOperatingSystem(info);
     collectCpu(info);
-    collectMemory(info);
+    collectMemory(info, includeWmi);
     collectDisplays(info);
-    collectDisks(info);
+    if (includeWmi) {
+        collectDisks(info);
+    }
 
     std::vector<std::pair<std::uint32_t, std::uint32_t>> pciIds;
     for (const GpuAdapter& adapter : registry.adapters()) {

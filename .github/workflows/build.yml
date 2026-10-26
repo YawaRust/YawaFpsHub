@@ -69,6 +69,26 @@ jobs:
       - name: Тесты
         run: ctest --test-dir build -C Release --output-on-failure
 
+      - name: Проверить зависимости распространяемого exe
+        shell: pwsh
+        run: |
+          $exe = (Get-ChildItem -Path .\build -Recurse -Filter YawaFpsHub.exe | Select-Object -First 1).FullName
+          if (-not $exe) { throw "Собранный YawaFpsHub.exe не найден" }
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -property installationPath
+          $dumpbin = (Get-Item (Join-Path $vs "VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe") |
+            Select-Object -First 1).FullName
+          $deps = & $dumpbin /dependents $exe | ForEach-Object { $_.Trim() } |
+            Where-Object { $_ -match '\.dll$' }
+          foreach ($dll in $deps) {
+            if ($dll -match "^vcruntime|^msvcp|^ucrt") {
+              throw "Динамический CRT в exe: $dll"
+            }
+            if (-not (Test-Path (Join-Path $env:SystemRoot "System32\$dll"))) {
+              throw "Несистемная зависимость exe: $dll"
+            }
+          }
+
       - name: Самопроверка приложения
         shell: pwsh
         run: |
@@ -417,3 +437,50 @@ jobs:
             style-*.png
             demo-*.png
             shots/*.png
+
+  publish:
+    name: Release после успешной сборки main
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [metrics, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: YawaFpsHub-win64
+          path: release-artifact
+
+      - name: Подготовить проверенный exe
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find release-artifact -type f -name YawaFpsHub.exe)
+          if [ "${#files[@]}" -ne 1 ]; then
+            echo "Ожидался один YawaFpsHub.exe, найдено: ${#files[@]}" >&2
+            exit 1
+          fi
+          cp "${files[0]}" YawaFpsHub.exe
+          test -s YawaFpsHub.exe
+
+      - name: Опубликовать сборку main
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="$(python tools/version.py show)"
+          tag="v${version}-build.${GITHUB_RUN_NUMBER}"
+          printf 'Успешная сборка main из коммита `%s` (запуск Actions #%s).\n' \
+            "$GITHUB_SHA" "$GITHUB_RUN_NUMBER" > release-notes.md
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" YawaFpsHub.exe --clobber
+            gh release edit "$tag" --notes-file release-notes.md --latest
+          else
+            gh release create "$tag" YawaFpsHub.exe --target "$GITHUB_SHA" \
+              --title "YawaFpsHub $version · сборка $GITHUB_RUN_NUMBER" \
+              --notes-file release-notes.md --latest
+          fi
+          test "$(gh release view "$tag" --json assets --jq '.assets | length')" = 1

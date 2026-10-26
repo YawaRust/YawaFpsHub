@@ -38,6 +38,7 @@ add_library(yawa_metrics STATIC
     app/metrics/frame_tracker.cpp
     app/metrics/gpu_registry.cpp
     app/metrics/hardware_info.cpp
+    app/metrics/smbios_memory.cpp
     app/metrics/bottleneck.cpp
     app/ui/settings.cpp
 )

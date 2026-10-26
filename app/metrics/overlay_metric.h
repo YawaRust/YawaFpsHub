@@ -9,8 +9,8 @@
 
 namespace yawa {
 
-inline constexpr std::array<MetricId, 4> kPairedMetricDetails { MetricId::VramTotal, MetricId::RamFree,
-    MetricId::PageFileTotal, MetricId::CpuPeakLoad };
+inline constexpr std::array<MetricId, 3> kPairedMetricDetails { MetricId::VramTotal, MetricId::RamFree,
+    MetricId::PageFileTotal };
 
 constexpr MetricId displayMetric(MetricId id)
 {
@@ -51,18 +51,11 @@ inline std::string displayMetricValue(MetricId id, const MetricStore& store)
         detail = MetricId::PageFileTotal;
         total = store.value(detail);
         break;
-    case MetricId::CpuLoad:
-        detail = MetricId::CpuPeakLoad;
-        total = store.value(detail);
-        break;
     default:
         return value;
     }
     if (!store.hasValue(detail) || total <= 0.0) {
         return value;
-    }
-    if (id == MetricId::CpuLoad) {
-        return value + " / пик " + formatWithUnit(total, MetricUnit::Percent, 0);
     }
     return formatValue(store.value(id), info.decimals) + " / "
         + formatWithUnit(total, info.unit, info.decimals);

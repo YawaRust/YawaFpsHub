@@ -3,6 +3,7 @@
 #include "platform/win_util.h"
 #include "resources/pawnio_ids.h"
 
+#include <objbase.h>
 #include <windows.h>
 
 #include <setupapi.h>
@@ -18,6 +19,7 @@
 #include <array>
 #include <string>
 #include <string_view>
+#include <thread>
 
 namespace yawa {
 namespace {
@@ -260,55 +262,160 @@ namespace {
 
 } // namespace
 
-bool prepareSensorsForLaunch(std::wstring_view arguments)
-{
-    // CI и явные служебные команды не должны менять систему или вызывать UAC.
-    if ((!arguments.empty() && arguments != L"--sensor-ready") || !PawnioSensors::supportsCpu()) {
-        return false;
+namespace {
+
+    std::wstring sensorReadyEvent(DWORD parentPid)
+    {
+        return L"Local\\YawaFpsHubSensorReady-" + std::to_wstring(parentPid);
     }
+
+    bool deviceAccessible()
+    {
+        const HANDLE device = CreateFileW(L"\\\\?\\GLOBALROOT\\Device\\PawnIO", GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
+        if (device == INVALID_HANDLE_VALUE) {
+            return false;
+        }
+        CloseHandle(device);
+        return true;
+    }
+
+} // namespace
+
+void requestSensorElevation(HWND window, UINT completionMessage)
+{
+    if (!PawnioSensors::supportsCpu() || deviceAccessible()) {
+        return;
+    }
+    const DWORD status = GetLastError();
     SYSTEM_INFO system { };
     GetNativeSystemInfo(&system);
     if (system.wProcessorArchitecture != PROCESSOR_ARCHITECTURE_AMD64) {
-        return false;
+        return;
     }
-    if (!isAdministrator()) {
-        std::array<wchar_t, 32768> executable { };
-        if (GetModuleFileNameW(nullptr, executable.data(), static_cast<DWORD>(executable.size())) == 0) {
-            return false;
+    if (status != ERROR_FILE_NOT_FOUND && status != ERROR_PATH_NOT_FOUND
+        && !(status == ERROR_ACCESS_DENIED && !isAdministrator())) {
+        return; // Не переустанавливаем устройство, которое существует, но сломано или занято.
+    }
+    DWORD parentPid = 0;
+    GetWindowThreadProcessId(window, &parentPid);
+    if (parentPid == 0) {
+        return;
+    }
+    const std::wstring eventName = sensorReadyEvent(parentPid);
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            L"D:P(A;;GA;;;BA)(A;;GA;;;SY)", SDDL_REVISION_1, &descriptor, nullptr)) {
+        PostMessageW(window, completionMessage, 2, GetLastError());
+        return;
+    }
+    SECURITY_ATTRIBUTES attributes { sizeof(SECURITY_ATTRIBUTES), descriptor, FALSE };
+    HANDLE ready = CreateEventW(&attributes, TRUE, FALSE, eventName.c_str());
+    const DWORD eventStatus = GetLastError();
+    LocalFree(descriptor);
+    if (ready == nullptr || eventStatus == ERROR_ALREADY_EXISTS) {
+        if (ready != nullptr) {
+            CloseHandle(ready);
         }
-        SHELLEXECUTEINFOW launch { };
-        launch.cbSize = sizeof(launch);
-        launch.lpVerb = L"runas";
-        launch.lpFile = executable.data();
-        launch.lpParameters = L"--sensor-ready";
-        launch.nShow = SW_SHOWNORMAL;
-        if (ShellExecuteExW(&launch)) {
-            return true; // запущенный с повышением экземпляр сам откроет главное окно
+        PostMessageW(window, completionMessage, 2, eventStatus);
+        return;
+    }
+    std::thread([ready, window, completionMessage, parentPid]() {
+        const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        wchar_t executable[32768] { };
+        DWORD error = ERROR_SUCCESS;
+        bool accepted = false;
+        if (GetModuleFileNameW(nullptr, executable, static_cast<DWORD>(std::size(executable))) == 0) {
+            error = GetLastError();
+        } else {
+            const std::wstring parameters = L"--sensor-ready=" + std::to_wstring(parentPid);
+            SHELLEXECUTEINFOW launch { };
+            launch.cbSize = sizeof(launch);
+            launch.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC;
+            launch.lpVerb = isAdministrator() ? L"open" : L"runas";
+            launch.lpFile = executable;
+            launch.lpParameters = parameters.c_str();
+            launch.nShow = SW_SHOWNORMAL;
+            if (!ShellExecuteExW(&launch)) {
+                error = GetLastError();
+            } else if (launch.hProcess != nullptr) {
+                HANDLE handles[] { ready, launch.hProcess };
+                const DWORD result = WaitForMultipleObjects(2, handles, FALSE, 120000);
+                accepted = result == WAIT_OBJECT_0;
+                if (!accepted) {
+                    error = result == WAIT_TIMEOUT ? ERROR_TIMEOUT : ERROR_GEN_FAILURE;
+                }
+                CloseHandle(launch.hProcess);
+            } else {
+                error = ERROR_INVALID_HANDLE;
+            }
         }
-        // При отказе от UAC остаются обычные датчики Windows, без ложной CPU-температуры.
+        if (SUCCEEDED(com)) {
+            CoUninitialize();
+        }
+        CloseHandle(ready);
+        DWORD owner = 0;
+        GetWindowThreadProcessId(window, &owner);
+        if (owner == parentPid) {
+            PostMessageW(window, completionMessage, accepted ? 1 : 2, error);
+        }
+    }).detach();
+}
+
+bool prepareSensorsForLaunch(std::wstring_view arguments)
+{
+    constexpr std::wstring_view flag = L"--sensor-ready=";
+    if (!arguments.starts_with(flag)) {
         return false;
     }
-    const HANDLE device = CreateFileW(L"\\\\?\\GLOBALROOT\\Device\\PawnIO", GENERIC_READ | GENERIC_WRITE,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
-    if (device != INVALID_HANDLE_VALUE) {
-        CloseHandle(device);
-        return false;
+    const std::wstring value(arguments.substr(flag.size()));
+    wchar_t* end = nullptr;
+    const unsigned long parsed = std::wcstoul(value.c_str(), &end, 10);
+    if (parsed == 0 || *end != L'\0' || !isAdministrator()) {
+        return true;
     }
-    const DWORD status = GetLastError();
-    if (status != ERROR_FILE_NOT_FOUND && status != ERROR_PATH_NOT_FOUND) {
-        return false; // существующий, но недоступный драйвер не перезаписываем
+    const DWORD parentPid = static_cast<DWORD>(parsed);
+    HANDLE parent = OpenProcess(SYNCHRONIZE, FALSE, parentPid);
+    HANDLE ready = OpenEventW(EVENT_MODIFY_STATE, FALSE, sensorReadyEvent(parentPid).c_str());
+    if (parent == nullptr || ready == nullptr) {
+        if (parent) {
+            CloseHandle(parent);
+        }
+        if (ready) {
+            CloseHandle(ready);
+        }
+        return true;
     }
-    bool reboot = false;
-    std::wstring error;
-    if (!installDriver(reboot, error)) {
-        MessageBoxW(nullptr, (L"Аппаратные датчики CPU недоступны: " + error
-            + L"\nОстальные показатели продолжат работать.").c_str(),
-            L"YawaFpsHub", MB_OK | MB_ICONWARNING);
-    } else if (reboot) {
-        MessageBoxW(nullptr, L"Для аппаратных датчиков CPU может потребоваться перезагрузка Windows.",
-            L"YawaFpsHub", MB_OK | MB_ICONINFORMATION);
+    if (!deviceAccessible()) {
+        const DWORD status = GetLastError();
+        if (status != ERROR_FILE_NOT_FOUND && status != ERROR_PATH_NOT_FOUND) {
+            CloseHandle(ready);
+            CloseHandle(parent);
+            return true;
+        }
+        bool reboot = false;
+        std::wstring error;
+        if (!installDriver(reboot, error)) {
+            MessageBoxW(nullptr, (L"Аппаратные датчики CPU недоступны: " + error).c_str(), L"YawaFpsHub",
+                MB_OK | MB_ICONWARNING);
+            CloseHandle(ready);
+            CloseHandle(parent);
+            return true;
+        }
+        if (reboot) {
+            MessageBoxW(nullptr, L"Для аппаратных датчиков CPU потребуется перезагрузка Windows.",
+                L"YawaFpsHub", MB_OK | MB_ICONINFORMATION);
+        }
     }
-    return false;
+    if (!SetEvent(ready)) {
+        CloseHandle(ready);
+        CloseHandle(parent);
+        return true;
+    }
+    CloseHandle(ready);
+    const DWORD result = WaitForSingleObject(parent, 45000);
+    CloseHandle(parent);
+    return result != WAIT_OBJECT_0;
 }
 
 int runSensorCommandLine()

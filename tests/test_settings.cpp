@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include <string>
+#include <vector>
 
 namespace yawa::test {
 
@@ -40,7 +41,7 @@ namespace {
             store.set(metric.id, 42.0);
         }
         auto rows = overlayMetricRows(settings, store);
-        CHECK(rows.size() == kMetricCount - kPairedMetricDetails.size());
+        CHECK(rows.size() == kMetricCount - kPairedMetricDetails.size() - 1);
         for (const MetricInfo& metric : kMetricTable) {
             CHECK(std::count_if(rows.begin(), rows.end(), [&](const auto& row) {
                 return row.id == displayMetric(metric.id);
@@ -48,7 +49,7 @@ namespace {
         }
         settings.metrics[static_cast<std::size_t>(MetricId::CpuTemp)] = false;
         rows = overlayMetricRows(settings, store);
-        CHECK(rows.size() == kMetricCount - kPairedMetricDetails.size() - 1);
+        CHECK(rows.size() == kMetricCount - kPairedMetricDetails.size() - 2);
         CHECK(std::none_of(
             rows.begin(), rows.end(), [](const auto& row) { return row.id == MetricId::CpuTemp; }));
         CHECK(std::any_of(
@@ -58,9 +59,15 @@ namespace {
         for (const MetricInfo& metric : kMetricTable) {
             settings.metrics[static_cast<std::size_t>(metric.id)] = true;
             rows = overlayMetricRows(settings, store);
-            CHECK(rows.size() == 1);
-            CHECK(rows[0].id == displayMetric(metric.id));
-            CHECK(!rows[0].value.empty());
+            if (metric.id == MetricId::CpuPeakLoad) {
+                CHECK(rows.empty()); // сохранённый старый ключ не рисуется
+            } else {
+                CHECK(rows.size() == 1);
+                if (!rows.empty()) {
+                    CHECK(rows[0].id == displayMetric(metric.id));
+                    CHECK(!rows[0].value.empty());
+                }
+            }
             settings.metrics[static_cast<std::size_t>(metric.id)] = false;
         }
     }
@@ -119,10 +126,14 @@ void testPairedMetricsAndOrder()
     for (MetricId detail : kPairedMetricDetails) {
         settings.metrics[static_cast<std::size_t>(detail)] = true;
     }
+    settings.metrics[static_cast<std::size_t>(MetricId::CpuLoad)] = true;
+    settings.metrics[static_cast<std::size_t>(MetricId::CpuPeakLoad)] = true; // старые настройки
     auto rows = overlayMetricRows(settings, store);
     CHECK(rows.size() == 4);
     CHECK(rows[0].value.find("45") != std::string::npos);
-    CHECK(rows[0].value.find("89") != std::string::npos);
+    CHECK(rows[0].value.find("89") == std::string::npos);
+    CHECK(std::none_of(
+        rows.begin(), rows.end(), [](const auto& row) { return row.id == MetricId::CpuPeakLoad; }));
     const auto vram = std::find_if(
         rows.begin(), rows.end(), [](const auto& row) { return row.id == MetricId::VramUsed; });
     CHECK(vram != rows.end());
@@ -163,6 +174,10 @@ void testPairedMetricsAndOrder()
 
 void testEditorMetricSettings()
 {
+    MetricStore cpu;
+    cpu.set(MetricId::CpuLoad, 40.0);
+    cpu.set(MetricId::CpuPeakLoad, 53.0);
+    CHECK(displayMetricValue(MetricId::CpuLoad, cpu).find("пик") == std::string::npos);
     Settings settings;
     settings.overlay.metrics.fill(false);
     settings.overlay.metrics[static_cast<std::size_t>(MetricId::VramUsed)] = true;
@@ -186,6 +201,80 @@ void testEditorMetricSettings()
     CHECK(overlayMetricRows(settings.overlay, store)[0].label == settings.overlay.labels[4]);
     CHECK(parseSettings("[overlay_metric_colors]\nvram_used = 1000\n", parsed, error));
     CHECK(parsed.overlay.metricColors[static_cast<std::size_t>(MetricId::VramUsed)] == 5);
+}
+
+void testSmbiosDecodesRealType17Offsets()
+{
+    std::vector<std::uint8_t> table(8);
+    table[1] = 3;
+    table[2] = 5;
+    const auto append = [&table](const std::vector<std::uint8_t>& record, const std::string& strings = { }) {
+        table.insert(table.end(), record.begin(), record.end());
+        table.insert(table.end(), strings.begin(), strings.end());
+        table.push_back(0);
+        table.push_back(0);
+    };
+    std::vector<std::uint8_t> array(0x0F);
+    array[0] = 16;
+    array[1] = 0x0F;
+    array[2] = 0x34;
+    array[3] = 0x12;
+    array[5] = 3; // System Memory
+    array[0x0D] = 4;
+    append(array);
+
+    std::vector<std::uint8_t> dimm(0x28);
+    dimm[0] = 17;
+    dimm[1] = 0x28;
+    dimm[4] = 0x34;
+    dimm[5] = 0x12;
+    dimm[0x0C] = 0;
+    dimm[0x0D] = 0x40; // 16 384 МиБ
+    dimm[0x10] = 1; // Device Locator
+    dimm[0x12] = 0x22; // DDR5
+    dimm[0x15] = 0xE0;
+    dimm[0x16] = 0x15; // 5600 MT/s rated
+    dimm[0x17] = 2;
+    dimm[0x1A] = 3;
+    dimm[0x20] = 0x50;
+    dimm[0x21] = 0x14; // 5200 MT/s configured
+    dimm[0x26] = 0x4C;
+    dimm[0x27] = 0x04; // 1.1 V
+    const auto module = [&append, &dimm](const char* slot) {
+        std::string strings(slot);
+        strings.push_back('\0');
+        strings += "Vendor";
+        strings.push_back('\0');
+        strings += "Part";
+        append(dimm, strings);
+    };
+    module("DIMM_A1");
+    module("DIMM_B1");
+    const auto length = static_cast<std::uint32_t>(table.size() - 8);
+    for (int byte = 0; byte < 4; ++byte) {
+        table[4 + byte] = static_cast<std::uint8_t>(length >> (byte * 8));
+    }
+    const MemoryIdentity memory = parseSmbiosMemory(table, 31.5);
+    CHECK(memory.slots == 4);
+    CHECK(memory.modules.size() == 2);
+    CHECK(memory.modules[0].sizeGb == 16.0);
+    CHECK(memory.modules[0].slot == "DIMM_A1");
+    CHECK(memory.modules[1].slot == "DIMM_B1");
+    CHECK(memory.modules[0].vendor == "Vendor");
+    CHECK(memory.modules[0].part == "Part");
+    CHECK(memory.modules[0].type == "DDR5");
+    CHECK(memory.modules[0].ratedMt == 5600.0);
+    CHECK(memory.modules[0].configuredMt == 5200.0);
+    CHECK_NEAR(memory.modules[0].voltage, 1.1, 0.001);
+    CHECK(configuredMemorySpeed(memory.modules) == 5200.0);
+
+    std::vector<MemoryModule> conflicting = memory.modules;
+    conflicting[1].configuredMt = 4800.0;
+    CHECK(configuredMemorySpeed(conflicting) == 0.0);
+    conflicting[1].configuredMt = 0.0;
+    CHECK(configuredMemorySpeed(conflicting) == 0.0);
+    table[4] = 0xFF; // заголовок обещает больше данных, чем помещается в буфере
+    CHECK(parseSmbiosMemory(table, 31.5).modules.empty());
 }
 
 void testSmbiosModuleSizes()
@@ -263,6 +352,16 @@ void testOverlayCustomization()
     CHECK(copy.overlay.rowColors[0] == -1);
     CHECK(copy.overlay.borderWidth == -1);
     CHECK(copy.overlay.uppercaseMode == -1);
+}
+
+void testOverlayPreviewScale()
+{
+    // Обратное преобразование: низ предпросмотра соответствует низу виртуального экрана.
+    CHECK(scaledOverlayOffset(1080, 1080.0, 216.0) == 216);
+    CHECK(scaledOverlayOffset(-216, 216.0, 1080.0) == -1080);
+    CHECK(scaledOverlayOffset(81, 360.0, 1920.0) == 432);
+    CHECK(scaledOverlayOffset(10000, 1.0, 1000.0) == 8192);
+    CHECK(scaledOverlayOffset(32, 0.0, 200.0) == 32);
 }
 
 void testOverlayCustomizationClamps()
@@ -412,7 +511,9 @@ void runSettingsTests()
     testLegacyOverlaySelection();
     testPairedMetricsAndOrder();
     testSmbiosModuleSizes();
+    testSmbiosDecodesRealType17Offsets();
     testEditorMetricSettings();
+    testOverlayPreviewScale();
     testDefaultsRoundTrip();
     testOverlayCustomization();
     testOverlayCustomizationClamps();

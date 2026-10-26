@@ -13,6 +13,9 @@ struct GpuSensorReading {
     double memoryClockMhz = 0.0;
     double powerWatts = 0.0;
     std::uint32_t fanRpm = 0;
+    std::uint64_t memoryUsedBytes = 0;
+    std::uint64_t memoryTotalBytes = 0;
+    bool hasMemory = false;
     // Медиа-движки: сколько процентов времени заняты кодер и декодер.
     double encoderPercent = 0.0;
     double decoderPercent = 0.0;

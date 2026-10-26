@@ -54,6 +54,13 @@ SystemSampler::Deltas SystemSampler::compute(const SystemSnapshot& snapshot, dou
     return deltas;
 }
 
+double processCpuPercent(std::uint64_t busyTicks, double seconds, std::uint32_t logicalProcessors)
+{
+    if (seconds <= 0.0 || logicalProcessors == 0) { return -1.0; }
+    return std::clamp(static_cast<double>(busyTicks) / 10000000.0 / seconds
+            / static_cast<double>(logicalProcessors) * 100.0, 0.0, 100.0);
+}
+
 DerivedValues deriveValues(const SystemSnapshot& snapshot, const SystemSampler::Deltas& deltas)
 {
     DerivedValues values;
@@ -126,8 +133,16 @@ void applySnapshot(MetricStore& store, const SystemSnapshot& snapshot, const Der
     store.set(MetricId::GpuEncode, snapshot.gpuEncodePercent, smoothingPercent);
     store.set(MetricId::GpuDecode, snapshot.gpuDecodePercent, smoothingPercent);
     store.set(MetricId::PcieLoad, snapshot.pcieLoadPercent, smoothingPercent);
-    store.set(MetricId::VramUsed, values.vramUsedGb);
-    store.set(MetricId::VramTotal, values.vramTotalGb);
+    if (snapshot.vramUsageKnown) {
+        store.set(MetricId::VramUsed, values.vramUsedGb);
+    } else {
+        store.slot(MetricId::VramUsed) = MetricSlot { };
+    }
+    if (snapshot.vramBudgetBytes != 0) {
+        store.set(MetricId::VramTotal, values.vramTotalGb);
+    } else {
+        store.slot(MetricId::VramTotal) = MetricSlot { };
+    }
 
     store.set(MetricId::RamUsed, values.ramUsedGb);
     store.set(MetricId::RamCache, values.ramCacheGb);

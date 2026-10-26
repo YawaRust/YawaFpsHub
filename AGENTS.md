@@ -86,7 +86,7 @@
 | Прототип | `python3 -m http.server 8000 --directory ui-prototype` |
 | Иконка | `python3 tools/make_icon.py` — пересобирает `app/resources/yawa.ico` из кода без зависимостей |
 | Версия | `python3 tools/version.py show` / `check v1.0.1` / `bump --kind patch --write` / `notes 1.0.1` |
-| Релиз | тег `vX.Y.Z` → workflow `release`: в GitHub Releases только `YawaFpsHub.exe` |
+| Релиз | успешный `build` на `main` → `vX.Y.Z-build.N` с единственным `YawaFpsHub.exe`; отдельный ручной `release` → `vX.Y.Z` |
 | Демо-прототип | `python3 -m http.server 8000 --bind 0.0.0.0 --directory ui-prototype` — HTML-эталон интерфейса |
 | Скриншоты exe | CI: `--smoke --view=<экран> --size=1280x800`, остальные снимки — `--scroll=<px>`, `--size=800x620` для узкого окна |
 | Сравнение с демо | `python3 tools/compare_ui.py --demo <каталог demo-*.png> --app <каталог screenshot-*.png> --out <каталог пар>` |

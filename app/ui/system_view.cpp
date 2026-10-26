@@ -151,7 +151,7 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
     const Rect inner = card.inset(kCardPadding);
     const MemoryIdentity& memory = model.hardware.memory;
     drawCardHeader(renderer, card, L"Память",
-        L"SMBIOS Type 17: раскладка по слотам, частоты и напряжение модулей", theme);
+        L"SMBIOS Type 17, резерв WMI · сведения прошивки, не замеры контроллера", theme);
 
     float top = inner.top + 42.0f;
     // Конфигурация — заголовок карточки слева: «2×16 ГБ» должно читаться первым.
@@ -161,7 +161,7 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
 
     std::wstring speed = L"—";
     if (memory.configuredMt > 0.0) {
-        // SMBIOS отдаёт частоту в мегаперехватах в секунду: «МГц» здесь было бы ошибкой.
+        // SMBIOS/WMI сообщают настроенную скорость в мегатранзакциях, а не такт в МГц.
         speed = wideText(formatValue(memory.configuredMt, 0) + " МТ/с");
         if (memory.ratedMt > 0.0 && memory.ratedMt > memory.configuredMt + 1.0) {
             speed += wideText(" из " + formatValue(memory.ratedMt, 0));
@@ -179,7 +179,8 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
                 ++populated;
             }
         }
-        slots = wideText(std::to_string(populated) + " из " + std::to_string(memory.slots));
+        slots = populated > 0 ? wideText(std::to_string(populated) + " из " + std::to_string(memory.slots))
+                              : wideText("— из " + std::to_string(memory.slots));
     }
 
     // Четыре характеристики в сетке 2×2: в демо карточка памяти именно такая,
@@ -243,10 +244,10 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
 
     if (top + 30.0f <= inner.bottom) {
         drawWrappedText(renderer,
-                L"Текущие tCL-tRCD-tRP-tRAS не сообщает SMBIOS; tCK вычислен из скорости. "
-                L"PawnIO не содержит безопасного декодера SPD/контроллера памяти: тайминги пока недоступны.",
-                Rect { inner.left, inner.bottom - 28.0f, inner.right, inner.bottom }, TextRole::Tiny, theme.textFaint,
-            12.0f, 2);
+            L"SMBIOS/WMI не сообщают действующие тайминги; tCK рассчитан из частоты. "
+            L"Декодер SPD/контроллера памяти для PawnIO пока не реализован.",
+            Rect { inner.left, inner.bottom - 28.0f, inner.right, inner.bottom }, TextRole::Tiny,
+            theme.textFaint, 12.0f, 2);
     }
 }
 

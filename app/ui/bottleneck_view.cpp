@@ -86,9 +86,17 @@ void drawVerdictCard(Renderer& renderer, const AppModel& model, const Theme& the
     if (const DisplayIdentity* display = model.hardware.primaryDisplay(); display != nullptr) {
         parts.push_back(describeDisplay(*display));
     }
-    drawCardHeader(renderer, card, L"Узкое место",
-        parts.empty() ? L"оборудование не определено" : wideText(joinParts(parts)), theme);
-    drawTag(renderer, card, balance.measured ? L"ЖИВЫЕ ЗАМЕРЫ" : L"ОЦЕНКА ±15 %", balance.measured, theme);
+    const std::wstring tag = balance.measured ? L"ЗАМЕРЫ ИГРЫ" : L"НЕТ ЗАМЕРОВ";
+    const std::wstring subtitle = model.gameName.empty()
+        ? L"игра не обнаружена"
+        : model.gameName + L" · " + wideText(joinParts(parts));
+    drawCardHeader(renderer, card, L"Узкое место игры", { }, theme);
+    const float subtitleWidth
+        = std::max(0.0f, inner.width() - renderer.measureText(tag, TextRole::Tiny) - 42.0f);
+    renderer.text(clipText(renderer, subtitle, TextRole::Tiny, subtitleWidth),
+        Rect { inner.left, inner.top + 18.0f, inner.left + subtitleWidth, inner.top + 34.0f }, TextRole::Tiny,
+        theme.textFaint);
+    drawTag(renderer, card, tag, balance.measured, theme);
 
     const Color color = severityColor(balance.percent, theme);
     const float radius = 46.0f;
@@ -107,17 +115,10 @@ void drawVerdictCard(Renderer& renderer, const AppModel& model, const Theme& the
     drawWrappedText(renderer, wideText(balance.detail),
         Rect{ textLeft, inner.top + 76.0f, inner.right, inner.bottom }, TextRole::Body, theme.textDim, 18.0f, 3);
 
-    // Пропускная способность узлов: два числа рядом, чтобы вывод можно было проверить.
     const float numbersTop = inner.bottom - 22.0f;
-    renderer.text(L"CPU ~" + wideText(formatValue(balance.cpuCapacityFps, 0)) + L" к/с",
-        Rect{ inner.left, numbersTop, inner.left + 150.0f, numbersTop + 16.0f }, TextRole::Small,
-        theme.cpu.withAlpha(0.9f));
-    renderer.text(L"GPU ~" + wideText(formatValue(balance.gpuCapacityFps, 0)) + L" к/с",
-        Rect{ inner.left + 150.0f, numbersTop, inner.left + 300.0f, numbersTop + 16.0f }, TextRole::Small,
-        theme.gpu.withAlpha(0.9f));
     if (balance.expectedFps > 0.0) {
-        renderer.text(L"ожидание: " + wideText(formatWithUnit(balance.expectedFps, MetricUnit::Count, 0)),
-            Rect{ inner.left + 300.0f, numbersTop, inner.right, numbersTop + 16.0f }, TextRole::Small,
+        renderer.text(L"FPS игры: " + wideText(formatWithUnit(balance.expectedFps, MetricUnit::Count, 0)),
+            Rect { inner.left + 300.0f, numbersTop, inner.right, numbersTop + 16.0f }, TextRole::Small,
             theme.textFaint);
     }
 }
@@ -185,38 +186,44 @@ void drawLoadCard(Renderer& renderer, const AppModel& model, const Theme& theme,
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
-    drawCardHeader(renderer, card, L"Нагрузка сейчас", L"последний интервал опроса", theme);
+    drawCardHeader(renderer, card, L"Нагрузка игры и системы", L"последний интервал опроса", theme);
 
     struct Row {
         std::wstring label;
-        MetricId id;
-        MetricId total;
+        double value;
+        double total;
+        bool known;
         Color color;
     };
 
-    const std::array<Row, 4> rows{ Row{ L"Процессор", MetricId::CpuLoad, MetricId::CpuLoad, theme.cpu },
-        { L"Пик по ядрам", MetricId::CpuPeakLoad, MetricId::CpuPeakLoad, theme.cpu },
-        { L"Видеокарта", MetricId::GpuLoad, MetricId::GpuLoad, theme.gpu },
-        { L"Видеопамять", MetricId::VramUsed, MetricId::VramTotal, theme.ram } };
+    const auto reading
+        = [&model](MetricId id) { return model.store.hasValue(id) ? model.store.value(id) : -1.0; };
+    const std::array<Row, 6> rows { Row { L"CPU игры (все)", model.gameCpuLoad, 100.0, model.gameCpuLoad >= 0.0,
+                                        theme.cpu },
+        { L"Поток игры", model.gamePeakThreadLoad, 100.0, model.gamePeakThreadLoad >= 0.0, theme.cpu },
+        { L"GPU игры (3D)", model.gameGpuLoad, 100.0, model.gameGpuLoad >= 0.0, theme.gpu },
+        { L"CPU системы", reading(MetricId::CpuLoad), 100.0, model.store.hasValue(MetricId::CpuLoad),
+            theme.cpu },
+        { L"GPU системы", reading(MetricId::GpuLoad), 100.0, model.store.hasValue(MetricId::GpuLoad),
+            theme.gpu },
+        { L"VRAM системы", reading(MetricId::VramUsed), reading(MetricId::VramTotal),
+            model.store.hasValue(MetricId::VramUsed), theme.ram } };
 
-    // Шаг 42 px — строка списка в демо именно такая: подпись, значение и тонкая полоса.
     float top = inner.top + 44.0f;
     for (const Row& row : rows) {
         if (top + 26.0f > inner.bottom) {
             break;
         }
-        const bool known = model.store.hasValue(row.id);
-        const double value = model.store.value(row.id);
-        const double total = row.total == row.id ? 100.0 : model.store.value(row.total);
-        const float fraction = total > 0.0 ? std::clamp(static_cast<float>(value / total), 0.0f, 1.0f) : 0.0f;
-
-        renderer.text(row.label, Rect{ inner.left, top, inner.left + 110.0f, top + 16.0f }, TextRole::Small,
+        const float fraction
+            = row.total > 0.0 ? std::clamp(static_cast<float>(row.value / row.total), 0.0f, 1.0f) : 0.0f;
+        renderer.text(row.label, Rect { inner.left, top, inner.left + 118.0f, top + 16.0f }, TextRole::Small,
             theme.textDim);
-        renderer.text(known ? wideMetric(row.id, value) : std::wstring(L"нет данных"),
-            Rect{ inner.left + 110.0f, top - 2.0f, inner.right, top + 16.0f }, TextRole::Body,
-            known ? theme.text : theme.textFaint, TextAlign::Right);
-        drawBar(renderer, Rect{ inner.left, top + 19.0f, inner.right, top + 22.0f }, known ? fraction : 0.0f,
-            row.color, theme);
+        const MetricUnit unit = row.label == L"VRAM системы" ? MetricUnit::Gigabytes : MetricUnit::Percent;
+        renderer.text(row.known ? wideText(formatWithUnit(row.value, unit, 1)) : L"нет данных",
+            Rect { inner.left + 118.0f, top - 2.0f, inner.right, top + 16.0f }, TextRole::Body,
+            row.known ? theme.text : theme.textFaint, TextAlign::Right);
+        drawBar(renderer, Rect { inner.left, top + 19.0f, inner.right, top + 22.0f },
+            row.known ? fraction : 0.0f, row.color, theme);
         top += 42.0f;
     }
 }
@@ -277,14 +284,12 @@ void drawBottleneckView(Renderer& renderer, const AppModel& model, const Theme& 
     drawCardHeader(renderer, note, L"Как считаем",
         L"оба источника показаны отдельно: живые замеры точнее любого справочника", theme);
     drawWrappedText(renderer,
-        L"Во время игры берём загрузку процессора (с учётом самого занятого ядра) и видеокарты: узкое место "
-        L"— тот узел, "
-        L"что ближе к 100 %, а процент показывает, насколько простаивает второй. Если игры нет, считаем "
-        L"прогноз по "
-        L"индексам производительности и разрешения экрана: потолок CPU от пикселей почти не зависит, потолок "
-        L"GPU падает "
-        L"при росте разрешения. Прогноз — оценка ±15 % и живые замеры он не заменяет.",
-        Rect { inner.left, inner.top + 40.0f, inner.right, inner.bottom }, TextRole::Small, theme.textDim, 15.0f, 3);
+        L"Игра — активный процесс с кадрами ETW. CPU измеряется временем её процесса, GPU — счётчиком 3D "
+        L"для её PID и выбранного адаптера. Нагрузки всей системы показаны отдельно и не входят в вердикт. "
+        L"Без игры или счётчика вывод не подменяется прогнозом либо частотой монитора. "
+        L"Сравнение загрузок не доказывает точный прирост FPS от замены железа.",
+        Rect { inner.left, inner.top + 40.0f, inner.right, inner.bottom }, TextRole::Small, theme.textDim,
+        15.0f, 3);
 }
 
 } // namespace yawa

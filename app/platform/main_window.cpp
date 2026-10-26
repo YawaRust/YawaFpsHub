@@ -1,29 +1,31 @@
 #include "platform/main_window.h"
+#include "metrics/overlay_metric.h"
 #include "platform/app_paths.h"
 #include "platform/display_info.h"
 #include "platform/hardware_info_win.h"
+#include "platform/pawnio_package.h"
 #include "platform/win_util.h"
+#include "render/overlay_painter.h"
 #include "ui/bottleneck_view.h"
 #include "ui/chrome.h"
-#include "ui/overlay_view.h"
-#include "render/overlay_painter.h"
-#include "metrics/overlay_metric.h"
 #include "ui/dashboard_view.h"
 #include "ui/layout.h"
+#include "ui/overlay_view.h"
 #include "ui/sensors_view.h"
-#include "ui/system_view.h"
 #include "ui/settings_view.h"
+#include "ui/system_view.h"
 
 #include <windowsx.h>
 #include <dwmapi.h>
 #include <shellapi.h>
 
 #include <algorithm>
+#include <array>
+#include <chrono>
 #include <cmath>
 #include <cwctype>
 #include <iterator>
-#include <array>
-#include <chrono>
+#include <memory>
 
 namespace yawa {
 namespace {
@@ -32,6 +34,23 @@ constexpr wchar_t kClassName[] = L"YawaFpsHubMain";
 constexpr UINT kTrayMessage = WM_APP + 1;
 constexpr UINT kTickMessage = WM_APP + 2;
 constexpr UINT kExportMessage = WM_APP + 3;
+constexpr UINT kSensorElevationMessage = WM_APP + 4;
+constexpr UINT kHardwareInfoMessage = WM_APP + 5;
+constexpr UINT kSensorInitMessage = WM_APP + 6;
+
+struct HardwareReport
+{
+    HardwareIdentity hardware;
+    std::string error;
+    bool success = false;
+};
+
+struct SensorInitReport
+{
+    std::vector<std::wstring> gpuNames;
+    GpuSelection gpu;
+    std::size_t activeGpu = 0;
+};
 constexpr UINT kTrayIconId = 1;
 // DWMWA_BORDER_COLOR = 34, DWMWA_COLOR_NONE = 0xFFFFFFFE. На Windows 10 атрибут
 // неизвестен, вызов просто вернёт ошибку — там рамку убирает растянутая рамка DWM.
@@ -47,17 +66,29 @@ constexpr int kHotkeyOverlay = 1;
 constexpr int kHotkeyPosition = 2;
 constexpr int kHotkeyWindow = 3;
 constexpr int kHotkeyClickThrough = 4;
+constexpr int kHotkeyEmergencyExit = 5;
 
 } // namespace
 
 MainWindow::~MainWindow()
 {
+    // Некоторые драйверы не завершают отменённый IOCTL (в т. ч. SMART/NVMe), а
+    // shutdown() ждёт поток чтения. После 15 секунд даём приложению завершить себя,
+    // не оставляя пользователя с невидимым зависшим процессом до перезагрузки.
+    auto stopped = std::make_shared<std::atomic<bool>>(false);
+    std::thread([stopped] {
+        Sleep(15000);
+        if (!stopped->load()) {
+            TerminateProcess(GetCurrentProcess(), ERROR_TIMEOUT);
+        }
+    }).detach();
     stopSampling();
     destroyTrayIcon();
     m_overlayEditor.close();
     m_overlay.destroy();
     m_sensors.shutdown();
     m_renderer.shutdown();
+    stopped->store(true);
 }
 
 bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
@@ -150,48 +181,6 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
     m_model.settingsPath = settingsPath();
     m_theme = makeTheme(m_model.settings.ui.accent);
 
-    if (!m_sensors.initialize(log, error)) {
-        return false;
-    }
-
-    const GpuRegistry& registry = m_sensors.gpus();
-
-    // Паспорт машины нужен «Балансу» и «Системе». Сбор — реестр, CPUID, SMBIOS и
-    // EnumDisplaySettings: это десятки миллисекунд один раз при старте, а не работа в кадре.
-    {
-        std::string hardwareError;
-        if (collectHardwareInfo(m_model.hardware, registry, hardwareError)) {
-            const CpuIdentity& cpu = m_model.hardware.cpu;
-            log.info("железо: " + (cpu.name.empty() ? std::string("CPU не определён") : cpu.name) + ", ядер "
-                + std::to_string(cpu.physicalCores) + "/" + std::to_string(cpu.logicalProcessors) + ", модулей "
-                + std::to_string(m_model.hardware.memory.modules.size()) + ", мониторов "
-                + std::to_string(m_model.hardware.displays.size()));
-        } else {
-            log.warning("сведения о системе: " + hardwareError);
-        }
-    }
-
-    for (std::size_t index = 0; index < registry.count(); ++index) {
-        const GpuAdapter* adapter = registry.byIndex(index);
-        if (adapter != nullptr) {
-            m_model.gpuNames.push_back(adapter->name);
-        }
-    }
-
-    if (m_model.settings.gpu.hasSelection) {
-        const std::size_t resolved = registry.resolve(m_model.settings.gpu.luidLow, m_model.settings.gpu.luidHigh);
-        m_sensors.selectGpu(resolved);
-        m_model.activeGpu = resolved;
-    } else {
-        m_model.activeGpu = m_sensors.activeGpu();
-        const GpuAdapter* adapter = registry.byIndex(m_model.activeGpu);
-        if (adapter != nullptr) {
-            m_model.settings.gpu.hasSelection = true;
-            m_model.settings.gpu.luidLow = adapter->luidLow;
-            m_model.settings.gpu.luidHigh = adapter->luidHigh;
-        }
-    }
-
     std::string overlayError;
     if (!m_overlay.create(instance, overlayError)) {
         log.warning("оверлей: " + overlayError);
@@ -235,6 +224,11 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
     m_running = true;
     startSampling();
     return true;
+}
+
+void MainWindow::scheduleSensorElevation()
+{
+    PostMessageW(m_window, kSensorElevationMessage, 0, 0);
 }
 
 void MainWindow::openEditorForSmoke()
@@ -486,6 +480,53 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     case WM_ERASEBKGND:
         return 1;
 
+    case kSensorInitMessage: {
+        std::unique_ptr<SensorInitReport> report(reinterpret_cast<SensorInitReport*>(lParam));
+        {
+            std::lock_guard<std::mutex> guard(m_modelMutex);
+            m_model.gpuNames = std::move(report->gpuNames);
+            m_model.activeGpu = report->activeGpu;
+            // Сохраняем только восстановленный из конфигурации LUID, не переписывая
+            // выбор, который пользователь успел сделать после начала опроса.
+            if (!m_model.settings.gpu.hasSelection) {
+                m_model.settings.gpu = report->gpu;
+            }
+        }
+        InvalidateRect(m_window, nullptr, FALSE);
+        return 0;
+    }
+
+    case kHardwareInfoMessage: {
+        std::unique_ptr<HardwareReport> report(reinterpret_cast<HardwareReport*>(lParam));
+        if (report->success) {
+            const CpuIdentity& cpu = report->hardware.cpu;
+            if (m_log != nullptr) {
+                m_log->info("железо: " + (cpu.name.empty() ? std::string("CPU не определён") : cpu.name)
+                    + ", ядер " + std::to_string(cpu.physicalCores) + "/"
+                    + std::to_string(cpu.logicalProcessors) + ", модулей "
+                    + std::to_string(report->hardware.memory.modules.size()));
+            }
+            std::lock_guard<std::mutex> guard(m_modelMutex);
+            m_model.hardware = std::move(report->hardware);
+        } else if (m_log != nullptr) {
+            m_log->warning("сведения о системе: " + report->error);
+        }
+        InvalidateRect(m_window, nullptr, FALSE);
+        return 0;
+    }
+
+    case kSensorElevationMessage:
+        if (wParam == 0) {
+            requestSensorElevation(m_window, kSensorElevationMessage);
+        } else if (wParam == 1) {
+            m_quitRequested = true;
+            PostMessageW(m_window, WM_CLOSE, 0, 0);
+        } else if (m_log != nullptr) {
+            m_log->warning(
+                "повышение прав для датчиков не завершено: " + win32ErrorText(static_cast<DWORD>(lParam)));
+        }
+        return 0;
+
     case kTickMessage:
         // Тик сборщика: он приходит по таймеру, а не по движению мыши, поэтому
         // и окно, и оверлей обновляются сами по себе.
@@ -648,9 +689,9 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             const float x = static_cast<float>(GET_X_LPARAM(lParam)) / m_dpiScale;
             const float y = static_cast<float>(GET_Y_LPARAM(lParam)) / m_dpiScale;
             m_model.settings.overlay.offsetX
-                = std::clamp(m_dragOffsetX + static_cast<int>(std::lround(x - m_dragStartX)), -600, 600);
+                = std::clamp(m_dragOffsetX + static_cast<int>(std::lround(x - m_dragStartX)), -8192, 8192);
             m_model.settings.overlay.offsetY
-                = std::clamp(m_dragOffsetY + static_cast<int>(std::lround(y - m_dragStartY)), -600, 600);
+                = std::clamp(m_dragOffsetY + static_cast<int>(std::lround(y - m_dragStartY)), -8192, 8192);
             m_overlay.setSettings(m_model.settings.overlay);
             InvalidateRect(m_window, nullptr, FALSE);
             return 0;
@@ -783,6 +824,9 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             InvalidateRect(m_window, nullptr, FALSE);
         } else if (wParam == static_cast<WPARAM>(kHotkeyWindow)) {
             toggleVisibilityFromTray();
+        } else if (wParam == static_cast<WPARAM>(kHotkeyEmergencyExit)) {
+            m_quitRequested = true;
+            PostMessageW(m_window, WM_CLOSE, 0, 0);
         } else if (wParam == static_cast<WPARAM>(kHotkeyClickThrough)) {
             m_model.settings.overlay.clickThrough = !m_model.settings.overlay.clickThrough;
             m_overlay.setSettings(m_model.settings.overlay);
@@ -1025,13 +1069,16 @@ void MainWindow::selectGpu(std::size_t index)
         return;
     }
 
-    m_sensors.selectGpu(index);
-    m_model.activeGpu = m_sensors.activeGpu();
-    const GpuAdapter* adapter = m_sensors.gpus().byIndex(m_model.activeGpu);
-    if (adapter != nullptr) {
-        m_model.settings.gpu.hasSelection = true;
-        m_model.settings.gpu.luidLow = adapter->luidLow;
-        m_model.settings.gpu.luidHigh = adapter->luidHigh;
+    {
+        std::lock_guard<std::mutex> guard(m_modelMutex);
+        m_model.activeGpu = index;
+        const GpuAdapter* adapter = m_sensors.gpus().byIndex(index);
+        if (adapter != nullptr) {
+            m_model.settings.gpu.hasSelection = true;
+            m_model.settings.gpu.luidLow = adapter->luidLow;
+            m_model.settings.gpu.luidHigh = adapter->luidHigh;
+        }
+        m_requestedGpu = index;
     }
     saveSettings();
     InvalidateRect(m_window, nullptr, FALSE);
@@ -1494,13 +1541,15 @@ void MainWindow::applyAction(const UiHit& hit)
         break;
 
     case ActionKind::OffsetX:
-        m_model.settings.overlay.offsetX = std::clamp(m_model.settings.overlay.offsetX + hit.value, -600, 600);
+        m_model.settings.overlay.offsetX
+            = std::clamp(m_model.settings.overlay.offsetX + hit.value, -8192, 8192);
         m_overlay.setSettings(m_model.settings.overlay);
         saveSettings();
         break;
 
     case ActionKind::OffsetY:
-        m_model.settings.overlay.offsetY = std::clamp(m_model.settings.overlay.offsetY + hit.value, -600, 600);
+        m_model.settings.overlay.offsetY
+            = std::clamp(m_model.settings.overlay.offsetY + hit.value, -8192, 8192);
         m_overlay.setSettings(m_model.settings.overlay);
         saveSettings();
         break;
@@ -1606,13 +1655,13 @@ void MainWindow::stopSampling()
 
 void MainWindow::restartSampling()
 {
-    stopSampling();
     {
         std::lock_guard<std::mutex> guard(m_modelMutex);
         m_model.etwRunning = false;
         m_model.store.reset();
     }
-    startSampling();
+    m_etwRestartRequested = true;
+    m_wake.notify_all();
 }
 
 bool MainWindow::isSystemProcessCached(std::uint32_t processId)
@@ -1665,10 +1714,58 @@ bool MainWindow::isSystemProcessCached(std::uint32_t processId)
 
 void MainWindow::samplingLoop()
 {
+    if (m_log != nullptr) {
+        m_log->info("инициализация датчиков в фоне");
+    }
+    std::string sensorError;
+    if (!m_sensors.initialize(*m_log, sensorError) && m_log != nullptr) {
+        m_log->warning("инициализация датчиков: " + sensorError);
+    }
+    if (m_stopRequested) {
+        return;
+    }
+
+    const GpuRegistry& registry = m_sensors.gpus();
+    auto ready = std::make_unique<SensorInitReport>();
+    for (std::size_t index = 0; index < registry.count(); ++index) {
+        if (const GpuAdapter* adapter = registry.byIndex(index)) {
+            ready->gpuNames.push_back(adapter->name);
+        }
+    }
+    GpuSelection configured;
+    {
+        std::lock_guard<std::mutex> guard(m_modelMutex);
+        configured = m_model.settings.gpu;
+    }
+    if (configured.hasSelection && registry.count() > 0) {
+        m_sensors.selectGpu(registry.resolve(configured.luidLow, configured.luidHigh));
+    }
+    ready->activeGpu = m_sensors.activeGpu();
+    if (const GpuAdapter* adapter = registry.byIndex(ready->activeGpu)) {
+        ready->gpu = GpuSelection { true, adapter->luidLow, adapter->luidHigh };
+    }
+    if (PostMessageW(m_window, kSensorInitMessage, 0, reinterpret_cast<LPARAM>(ready.get()))) {
+        ready.release();
+    }
+    auto initialHardware = std::make_unique<HardwareReport>();
+    initialHardware->success
+        = collectHardwareInfo(initialHardware->hardware, registry, initialHardware->error, false);
+    if (PostMessageW(m_window, kHardwareInfoMessage, 0, reinterpret_cast<LPARAM>(initialHardware.get()))) {
+        initialHardware.release();
+    }
+    // Если WMI зависнет, паспорт CPU/SMBIOS/DXGI уже показан и окно продолжит работать.
+    std::thread([window = m_window, adapters = GpuRegistry(registry)]() {
+        auto report = std::make_unique<HardwareReport>();
+        report->success = collectHardwareInfo(report->hardware, adapters, report->error);
+        if (PostMessageW(window, kHardwareInfoMessage, 0, reinterpret_cast<LPARAM>(report.get()))) {
+            report.release();
+        }
+    }).detach();
+
     yawa::FrameTracker tracker(EtwFrameSession::qpcFrequency());
     yawa::SystemSampler sampler;
 
-    if (m_model.settings.capture.etwEnabled) {
+    const auto startEtw = [this] {
         std::string error;
         if (!m_etw.start(error)) {
             m_etw.stop();
@@ -1676,16 +1773,40 @@ void MainWindow::samplingLoop()
                 m_log->warning("ETW: " + error);
             }
         }
+    };
+    bool etwEnabled = false;
+    {
+        std::lock_guard<std::mutex> guard(m_modelMutex);
+        etwEnabled = m_model.settings.capture.etwEnabled;
+    }
+    if (etwEnabled) {
+        startEtw();
     }
 
     auto previous = std::chrono::steady_clock::now();
 
     while (!m_stopRequested) {
+        if (m_etwRestartRequested.exchange(false)) {
+            m_etw.stop();
+            tracker.reset();
+            sampler = yawa::SystemSampler { };
+            previous = std::chrono::steady_clock::now();
+            bool enabled = false;
+            {
+                std::lock_guard<std::mutex> guard(m_modelMutex);
+                enabled = m_model.settings.capture.etwEnabled;
+            }
+            if (enabled) {
+                startEtw();
+            }
+        }
         int interval = 1000;
+        int targetHz = 60;
         bool paused = false;
         {
             std::lock_guard<std::mutex> guard(m_modelMutex);
             interval = m_model.settings.capture.intervalMs;
+            targetHz = m_model.settings.capture.targetHz;
             paused = m_model.paused;
         }
 
@@ -1718,12 +1839,21 @@ void MainWindow::samplingLoop()
             }
             tracker.setSystemProcesses(systemPids.data(), systemCount);
 
+            // Для оценки игры не смешиваем фоновые процессы и весь адаптер с её PID.
+            const std::uint32_t gamePid = tracker.activeProcessId() == foregroundPid
+                    && !tracker.isSystemProcess(foregroundPid) && tracker.hasActiveStream()
+                ? static_cast<std::uint32_t>(foregroundPid)
+                : 0;
+            const std::size_t requested = m_requestedGpu.exchange(static_cast<std::size_t>(-1));
+            if (requested != static_cast<std::size_t>(-1)) {
+                m_sensors.selectGpu(requested);
+            }
             yawa::SystemSnapshot snapshot;
-            m_sensors.sample(snapshot);
+            m_sensors.sample(snapshot, gamePid);
 
             const yawa::SystemSampler::Deltas deltas = sampler.compute(snapshot, elapsed);
             const yawa::DerivedValues values = yawa::deriveValues(snapshot, deltas);
-            const yawa::FpsSummary fps = tracker.summary(static_cast<double>(m_model.settings.capture.targetHz));
+            const yawa::FpsSummary fps = tracker.summary(static_cast<double>(targetHz));
 
             const std::wstring foreground = foregroundProcessName();
 
@@ -1739,8 +1869,15 @@ void MainWindow::samplingLoop()
                 m_model.cpuName = m_sensors.cpuName();
                 // Узкое место пересчитываем на том же снимке, что и экраны: отдельного
                 // опроса железа нет, и цифры на «Балансе» всегда совпадают с «Обзором».
-                m_model.balance = analyzeBottleneck(m_model.hardware,
-                    loadFromStore(m_model.store, static_cast<double>(m_model.settings.capture.targetHz)));
+                m_model.gameName = gamePid != 0 ? foreground : L"";
+                m_model.gameCpuLoad = gamePid != 0 ? snapshot.gameCpuLoad : -1.0;
+                m_model.gamePeakThreadLoad = gamePid != 0 ? snapshot.gamePeakThreadLoad : -1.0;
+                m_model.gameGpuLoad = gamePid != 0 ? snapshot.gameGpuLoad : -1.0;
+                SystemLoad gameLoad = loadFromStore(m_model.store);
+                gameLoad.cpuLoad = snapshot.gameCpuLoad;
+                gameLoad.cpuPeakCore = snapshot.gamePeakThreadLoad;
+                gameLoad.gpuLoad = snapshot.gameGpuLoad;
+                m_model.balance = analyzeActiveGame(m_model.hardware, gameLoad, gamePid != 0);
                 m_model.etwRunning = m_etw.isRunning();
                 if (!foreground.empty()) {
                     m_model.foregroundApp = foreground;
@@ -1760,7 +1897,7 @@ void MainWindow::samplingLoop()
 
         std::unique_lock<std::mutex> lock(m_wakeMutex);
         m_wake.wait_for(lock, std::chrono::milliseconds(interval),
-            [this]() { return m_stopRequested.load(); });
+            [this]() { return m_stopRequested.load() || m_etwRestartRequested.load(); });
     }
 
     m_etw.stop();
@@ -1853,6 +1990,9 @@ void MainWindow::registerHotkeys()
     UnregisterHotKey(m_window, kHotkeyOverlay);
     UnregisterHotKey(m_window, kHotkeyPosition);
     UnregisterHotKey(m_window, kHotkeyWindow);
+    UnregisterHotKey(m_window, kHotkeyClickThrough);
+    UnregisterHotKey(m_window, kHotkeyEmergencyExit);
+    RegisterHotKey(m_window, kHotkeyEmergencyExit, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, VK_F10);
 
     // Коды из настроек: ноль означает «клавиша отключена». MOD_NOREPEAT не даёт
     // автоповтору удерживаемой клавиши переключать оверлей десятки раз в секунду.

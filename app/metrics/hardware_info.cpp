@@ -78,7 +78,8 @@ std::string describeMemory(const MemoryIdentity& memory)
     if (!memory.type.empty()) {
         text += " " + memory.type;
         if (memory.configuredMt > 0.0) {
-            text += "-" + std::to_string(static_cast<int>(std::lround(memory.configuredMt)));
+            text.push_back('-');
+            text += std::to_string(static_cast<int>(std::lround(memory.configuredMt)));
         }
     }
     return text;
