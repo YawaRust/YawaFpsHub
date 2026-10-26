@@ -10,6 +10,8 @@ namespace yawa {
 // Если профиль недоступен, пути возвращают каталог рядом с exe — программа не падает.
 // Реестр не используется ни для настроек, ни для автозапуска.
 std::string executableDirectory();
+// Каталог данных: %LOCALAPPDATA%\YawaFpsHub (или каталог exe, если профиль недоступен).
+std::string dataDirectory();
 std::string settingsPath();
 std::string logPath();
 std::string sessionsDirectory();

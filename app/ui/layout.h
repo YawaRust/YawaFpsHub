@@ -11,6 +11,8 @@
 namespace yawa {
 
 // Высота экрана как в прототипе: содержимое не сжимается под окно, а прокручивается.
+// Для «Баланса» и «Системы» высота считается функциями ниже — карточки там
+// фиксированные, но список рекомендаций умеет расти.
 // Значения сняты с демо при ширине кадра 1044 px (см. demo-<view>-tall.png в CI).
 constexpr float kDashboardHeight = 1156.0f;
 // Узкое окно: сетка из трёх колонок не читается, карточки идут по одной.
@@ -18,12 +20,6 @@ constexpr float kDashboardNarrowWidth = 900.0f;
 constexpr float kDashboardNarrowHeight = 2562.0f;
 constexpr float kSettingsHeight = 1882.0f;
 constexpr float kOverlayHeight = 2422.0f;
-// «Баланс» и «Система»: карточки фиксированной высоты, экран целиком влезает
-// в окно 800 px по высоте, поэтому прокрутка появляется только в узком окне.
-constexpr float kBottleneckHeight = 902.0f;
-constexpr float kBottleneckNarrowHeight = 1184.0f;
-constexpr float kSystemHeight = 696.0f;
-constexpr float kSystemNarrowHeight = 1356.0f;
 
 
 constexpr float kCardRadius = 20.0f;
@@ -34,6 +30,12 @@ std::wstring wideText(std::string_view utf8);
 std::wstring wideNumber(double value, MetricUnit unit, std::uint8_t decimals);
 std::wstring wideMetric(MetricId id, double value);
 std::wstring formatClock(std::uint64_t milliseconds);
+
+// Высота экрана «Баланс»: карточки фиксированные, растёт только список рекомендаций —
+// иначе на machines с пятью советами текст упирался бы в край карточки.
+float balanceHeight(std::size_t adviceCount, bool narrow);
+// То же для «Системы»: там всё постоянно, только узкий окно добавляет два ряда.
+float systemHeight(bool narrow);
 
 // Карточка: фон, тонкая рамка и мягкая тень отсутствует — интерфейс «плоский», как в прототипе.
 void drawCard(Renderer& renderer, const Rect& rect, const Theme& theme);

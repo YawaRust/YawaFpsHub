@@ -296,8 +296,10 @@ void drawSystemView(Renderer& renderer, const AppModel& model, const Theme& them
     const Columns columns{ area };
     // Тот же порог перестройки, что у обзора и у прототипа: ниже 900 px карточки идут по одной.
     const bool narrow = area.width() < kDashboardNarrowWidth;
-    const float rowHeight = 214.0f;
-    const float memoryHeight = 264.0f;
+    // Размеры сняты с demo-system-tall.png: ряд карточек — 274 px, память с таблицей
+    // модулей — 416 px, подвал про источники — 143 px.
+    const float rowHeight = 274.0f;
+    const float memoryHeight = 416.0f;
 
     const float wideTop = area.top;
     const float narrowStep = rowHeight + kGap;
@@ -309,12 +311,12 @@ void drawSystemView(Renderer& renderer, const AppModel& model, const Theme& them
 
     const float memoryTop = narrow ? wideTop + 3.0f * narrowStep : wideTop + rowHeight + kGap;
     drawMemoryCard(renderer, model, theme, columns.span(0.0f, narrow ? 12.0f : 8.0f, memoryTop, memoryHeight));
+    const float monitorHeight = narrow ? 190.0f : memoryHeight;
     drawDisplayCard(renderer, model, theme, columns.span(narrow ? 0.0f : 8.0f, narrow ? 12.0f : 4.0f,
-        narrow ? memoryTop + memoryHeight + kGap : memoryTop, narrow ? 190.0f : memoryHeight));
+        narrow ? memoryTop + memoryHeight + kGap : memoryTop, monitorHeight));
 
-    const float noteTop = narrow ? memoryTop + memoryHeight + 190.0f + 2.0f * kGap : memoryTop + memoryHeight + kGap;
-    const float designHeight = narrow ? kSystemNarrowHeight : kSystemHeight;
-    const Rect note = columns.span(0.0f, 12.0f, noteTop, area.top + designHeight - 8.0f - noteTop);
+    const float noteTop = memoryTop + memoryHeight + kGap + (narrow ? monitorHeight + kGap : 0.0f);
+    const Rect note = columns.span(0.0f, 12.0f, noteTop, area.top + systemHeight(narrow) - 8.0f - noteTop);
     drawCard(renderer, note, theme);
     const Rect inner = note.inset(kCardPadding);
     drawCardHeader(renderer, note, L"Откуда эти числа",

@@ -103,6 +103,39 @@ void drawChip(Renderer& renderer, const Rect& rect, std::wstring_view label, boo
         TextAlign::Center);
 }
 
+namespace {
+
+// Ряды карточек «Баланса» и «Системы»: высота снята с demo-*-tall.png, шаг списка —
+// из той же разметки прототипа.
+constexpr float kBalanceVerdict = 204.0f;
+constexpr float kBalancePair = 363.0f;
+constexpr float kBalanceAdviceRow = 57.0f;
+constexpr float kBalanceAdviceHead = 42.0f;
+constexpr float kBalanceAdviceMin = 249.0f;
+constexpr float kBalanceNote = 144.0f;
+constexpr float kSystemRow = 274.0f;
+constexpr float kSystemMemory = 416.0f;
+constexpr float kSystemMonitor = 190.0f;
+constexpr float kSystemNote = 143.0f;
+
+} // namespace
+
+float balanceHeight(std::size_t adviceCount, bool narrow)
+{
+    const float advice = std::max(kBalanceAdviceMin,
+        kBalanceAdviceHead + kBalanceAdviceRow * static_cast<float>(adviceCount) + 12.0f);
+    const float extraRow = narrow ? kBalancePair + kGap : 0.0f;
+    return 8.0f + kBalanceVerdict + kGap + kBalancePair + kGap + advice + kGap + kBalanceNote + extraRow + 8.0f;
+}
+
+float systemHeight(bool narrow)
+{
+    if (narrow) {
+        return 8.0f + 3.0f * (kSystemRow + kGap) + kSystemMemory + kGap + kSystemMonitor + kGap + kSystemNote + 8.0f;
+    }
+    return 8.0f + kSystemRow + kGap + kSystemMemory + kGap + kSystemNote + 8.0f;
+}
+
 float drawCardHeader(Renderer& renderer, const Rect& card, std::wstring_view title, std::wstring_view subtitle,
     const Theme& theme)
 {

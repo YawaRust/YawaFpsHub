@@ -833,9 +833,9 @@ float MainWindow::contentDesignHeight() const
     case View::Settings:
         return kSettingsHeight;
     case View::Bottleneck:
-        return contentArea().width() < kDashboardNarrowWidth ? kBottleneckNarrowHeight : kBottleneckHeight;
+        return balanceHeight(m_model.balance.advice.size(), contentArea().width() < kDashboardNarrowWidth);
     case View::System:
-        return contentArea().width() < kDashboardNarrowWidth ? kSystemNarrowHeight : kSystemHeight;
+        return systemHeight(contentArea().width() < kDashboardNarrowWidth);
     }
     return kDashboardHeight;
 }
@@ -1322,7 +1322,7 @@ void MainWindow::applyAction(const UiHit& hit)
         break;
 
     case ActionKind::OpenSettingsFolder:
-        revealInExplorer(executableDirectory());
+        revealInExplorer(dataDirectory());
         break;
 
     case ActionKind::ResetSettings:

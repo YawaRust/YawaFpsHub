@@ -115,6 +115,12 @@ void migrateLegacyFile(const std::wstring& from, const std::wstring& to)
 
 } // namespace
 
+std::string dataDirectory()
+{
+    const std::wstring directory = dataDirectoryWide();
+    return directory.empty() ? executableDirectory() : toUtf8(directory);
+}
+
 std::string settingsPath()
 {
     const std::wstring directory = dataDirectoryWide();
