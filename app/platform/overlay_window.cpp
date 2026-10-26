@@ -88,7 +88,7 @@ LRESULT CALLBACK OverlayWindow::windowProc(HWND window, UINT message, WPARAM wPa
         break;
 
     case WM_LBUTTONDOWN:
-        if (self != nullptr) {
+        if (self != nullptr && !self->m_settings.clickThrough) {
             self->beginDrag(GET_X_LPARAM(lParam) + static_cast<int>(self->m_monitorRect.left),
                 GET_Y_LPARAM(lParam) + static_cast<int>(self->m_monitorRect.top));
             SetCapture(window);
@@ -98,7 +98,7 @@ LRESULT CALLBACK OverlayWindow::windowProc(HWND window, UINT message, WPARAM wPa
 
     case WM_RBUTTONUP:
         // Вернуться в приложение можно прямо с оверлея, не разыскивая иконку в трее.
-        if (self != nullptr && self->m_owner != nullptr) {
+        if (self != nullptr && !self->m_settings.clickThrough && self->m_owner != nullptr) {
             ShowWindow(self->m_owner, SW_RESTORE);
             SetForegroundWindow(self->m_owner);
             return 0;
@@ -159,11 +159,10 @@ bool OverlayWindow::create(HINSTANCE instance, std::string& error)
     const int screenWidth = m_monitorRect.right - m_monitorRect.left;
     const int screenHeight = m_monitorRect.bottom - m_monitorRect.top;
 
-    // WS_EX_TRANSPARENT не годится: он полностью отсекает мышь, и Ctrl+перетаскивание
-    // становится невозможным. Прозрачность для игры даёт WM_NCHITTEST -> HTTRANSPARENT.
-    m_window = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-        kClassName, L"YawaFpsHub overlay", WS_POPUP, m_monitorRect.left, m_monitorRect.top, screenWidth,
-        screenHeight, nullptr, nullptr, instance, this);
+    const DWORD extendedStyle = WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE
+        | (m_settings.clickThrough ? WS_EX_TRANSPARENT : 0);
+    m_window = CreateWindowExW(extendedStyle, kClassName, L"YawaFpsHub overlay", WS_POPUP, m_monitorRect.left,
+        m_monitorRect.top, screenWidth, screenHeight, nullptr, nullptr, instance, this);
 
     if (m_window == nullptr) {
         error = "не удалось создать окно оверлея";
@@ -267,6 +266,26 @@ void OverlayWindow::setSettings(const OverlaySettings& settings)
         || settings.backgroundOpacityPercent != m_settings.backgroundOpacityPercent;
     const bool movedOnly = settings.offsetX != m_settings.offsetX || settings.offsetY != m_settings.offsetY;
     m_settings = settings;
+    if (m_window != nullptr) {
+        // HTTRANSPARENT передаёт hit-test только окнам того же потока. Для игры
+        // в другом процессе layered-окну нужен WS_EX_TRANSPARENT.
+        const LONG_PTR extendedStyle = GetWindowLongPtrW(m_window, GWL_EXSTYLE);
+        const LONG_PTR nextStyle = settings.clickThrough
+            ? extendedStyle | WS_EX_TRANSPARENT
+            : extendedStyle & ~static_cast<LONG_PTR>(WS_EX_TRANSPARENT);
+        if (nextStyle != extendedStyle) {
+            SetWindowLongPtrW(m_window, GWL_EXSTYLE, nextStyle);
+            SetWindowPos(m_window, nullptr, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        }
+        if (settings.clickThrough) {
+            if (GetCapture() == m_window) {
+                ReleaseCapture();
+            }
+            endDrag();
+        }
+    }
+
     // Сдвиг и «мелкие» настройки рисуем сразу, без анимации.
     if (movedOnly || (!styleChanged && !chromeChanged)) {
         repaint();
@@ -521,29 +540,10 @@ void OverlayWindow::repaint()
 
 
 
-OverlayValues OverlayWindow::currentValues() const
-{
-    OverlayValues values;
-    values.fps = m_fps.currentFps;
-    values.low1 = m_fps.low1Fps;
-    values.cpuLoad = m_store.value(MetricId::CpuLoad);
-    values.cpuTemp = m_store.value(MetricId::CpuTemp);
-    values.hasCpuTemp = values.cpuTemp > 0.0;
-    values.gpuLoad = m_store.value(MetricId::GpuLoad);
-    values.gpuTemp = m_store.value(MetricId::GpuTemp);
-    values.hasGpuTemp = values.gpuTemp > 0.0;
-    values.ramUsed = m_store.value(MetricId::RamUsed);
-    values.ramTotal = m_store.value(MetricId::RamUsed) + m_store.value(MetricId::RamFree);
-    values.vramUsed = m_store.value(MetricId::VramUsed);
-    values.vramTotal = m_store.value(MetricId::VramTotal);
-    values.hasVram = values.vramTotal > 0.0;
-    return values;
-}
-
 void OverlayWindow::drawScene(float scale)
 {
     OverlayFormats formats{ m_dwrite, m_keyFormat, m_valueFormat, m_smallFormat, m_monoFormat };
-    const OverlayText text = makeOverlayText(m_settings, currentValues());
+    const OverlayText text = makeOverlayText(m_settings, m_store);
     const Rect bounds{ 0.0f, 0.0f, static_cast<float>(m_bitmapWidth), static_cast<float>(m_bitmapHeight) };
     m_contentRectD2D = D2D1::RectF(0.0f, 0.0f, 0.0f, 0.0f);
 

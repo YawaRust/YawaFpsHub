@@ -1,0 +1,11 @@
+// Подписанные файлы включаются как есть: пересборка драйвера здесь не выполняется.
+#pragma code_page(65001)
+#include <windows.h>
+#include "@YAWA_PAWNIO_IDS@"
+
+IDR_PAWNIO_SYS RCDATA "@YAWA_PAWNIO_DIR@/PawnIO.sys"
+IDR_PAWNIO_CAT RCDATA "@YAWA_PAWNIO_DIR@/pawnio.cat"
+IDR_PAWNIO_INF RCDATA "@YAWA_PAWNIO_DIR@/PawnIO.inf"
+IDR_PAWNIO_INTEL RCDATA "@YAWA_PAWNIO_DIR@/IntelMSR.bin"
+IDR_PAWNIO_AMD RCDATA "@YAWA_PAWNIO_DIR@/AMDFamily17.bin"
+IDR_PAWNIO_SOURCES RCDATA "@YAWA_PAWNIO_DIR@/sources.zip"

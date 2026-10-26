@@ -7,3 +7,4 @@ out/
 *.vcxproj.filters
 *.log
 ui-prototype/.cache/
+.venv/

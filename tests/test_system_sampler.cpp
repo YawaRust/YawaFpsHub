@@ -1,5 +1,8 @@
+#include "metrics/cpu_telemetry.h"
 #include "metrics/system_sampler.h"
 #include "test_support.h"
+
+#include <limits>
 
 namespace yawa::test {
 
@@ -123,6 +126,7 @@ void testApplySnapshotFillsStore()
     MetricStore store;
     SystemSnapshot snapshot = baseSnapshot();
     snapshot.cpuTemperature = 64.0;
+    snapshot.cpuPowerWatts = 85.0;
     snapshot.gpuTemperature = 71.0;
     snapshot.gpuFanRpm = 1940;
     snapshot.diskReadBytesPerSecond = 184.0 * 1024 * 1024;
@@ -141,6 +145,7 @@ void testApplySnapshotFillsStore()
     CHECK_NEAR(store.value(MetricId::Fps), 142.0, 1e-6);
     CHECK_NEAR(store.value(MetricId::CpuLoad), 44.0, 1e-6);
     CHECK_NEAR(store.value(MetricId::CpuTemp), 64.0, 1e-6);
+    CHECK_NEAR(store.value(MetricId::CpuPower), 85.0, 1e-6);
     CHECK_NEAR(store.value(MetricId::GpuTemp), 71.0, 1e-6);
     CHECK_NEAR(store.value(MetricId::GpuFan), 1940.0, 1e-6);
     CHECK_NEAR(store.value(MetricId::RamUsed), 33.0, 1e-6);
@@ -149,10 +154,51 @@ void testApplySnapshotFillsStore()
     CHECK_NEAR(store.value(MetricId::SelfRam), 24.0 / 1024.0, 1e-6);
 }
 
+void testCpuTemperatureRegisters()
+{
+    CHECK(!intelPackageTemperature(0, 100ull << 16));
+    CHECK_NEAR(
+        intelPackageTemperature((1ull << 31) | (30ull << 16), 100ull << 16).value_or(-999), 70.0, 1e-9);
+    CHECK(!intelPackageTemperature(1ull << 31, 0));
+    CHECK(!intelPackageTemperature((1ull << 31) | (127ull << 16), 100ull << 16));
+    CHECK(!amdControlTemperature(0));
+    CHECK(!amdControlTemperature(0xffffffffu));
+    CHECK_NEAR(amdControlTemperature(640u << 21).value_or(-999), 80.0, 1e-9);
+    CHECK_NEAR(amdControlTemperature((1000u << 21) | (1u << 19)).value_or(-999), 76.0, 1e-9);
+    CHECK_NEAR(amdControlTemperature((1000u << 21) | (3u << 16)).value_or(-999), 76.0, 1e-9);
+}
+
+void testPackageEnergy()
+{
+    CpuEnergyCounter energy;
+    CHECK(!energy.sample(100, 14, 1.0));
+    const auto power = energy.sample(8292, 14, 1.5);
+    CHECK_NEAR(power.value_or(-999), 1.0, 1e-9);
+    CHECK(!energy.sample(8293, 14, 1.5));
+    CHECK(!energy.sample(8294, 14, 20.0));
+    energy.reset();
+    CHECK(!energy.sample(0xfffffff0u, 10, 21.0));
+    const auto wrapped = energy.sample(0x10u, 10, 21.5);
+    CHECK_NEAR(wrapped.value_or(-999), 0.0625, 1e-9);
+    CHECK(!energy.sample(0x20u, 11, 22.0));
+    CHECK(!energy.sample(0x30u, 32, 22.5));
+    CHECK(!energy.sample(0x40u, 10, 23.0));
+    CHECK(!energy.sample(0xffffffffu, 10, 23.5));
+    energy.reset();
+    CHECK(!energy.sample(1, 31, 30.0));
+    CHECK(!energy.sample(2, 31, 31.0));
+    CHECK(!energy.sample(3, 10, std::numeric_limits<double>::quiet_NaN()));
+    CHECK(!energy.sample(4, 10, 32.0));
+    CHECK(!energy.sample(5, 10, 31.0));
+    CHECK(!energy.sample(6, 10, -1.0));
+}
+
 } // namespace
 
 void runSystemSamplerTests()
 {
+    testCpuTemperatureRegisters();
+    testPackageEnergy();
     testFirstSampleHasNoBaseline();
     testCpuLoadFromTicks();
     testIdleTicksLargerThanTotalDoNotOverflow();

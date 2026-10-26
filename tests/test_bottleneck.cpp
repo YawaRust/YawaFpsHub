@@ -27,7 +27,6 @@ HardwareIdentity demoMachine()
     info.memory.type = "DDR4";
     info.memory.ratedMt = 3600.0;
     info.memory.configuredMt = 3600.0;
-    info.memory.channels = 2;
     for (int index = 0; index < 2; ++index) {
         MemoryModule module;
         module.populated = true;
@@ -199,15 +198,14 @@ void testMemoryDescription()
     const std::string text = describeMemory(machine.memory);
     CHECK(contains(text, "2×16"));
     CHECK(contains(text, "DDR4-3600"));
-    CHECK(contains(text, "2 канала"));
+        CHECK(!contains(text, "канал"));
 
     HardwareIdentity single = demoMachine();
     single.memory.modules.resize(1);
     single.memory.totalGb = 16.0;
-    single.memory.channels = 1;
     const std::string singleText = describeMemory(single.memory);
     CHECK(contains(singleText, "1×16"));
-    CHECK(contains(singleText, "один канал"));
+        CHECK(!contains(singleText, "канал"));
 
     MemoryIdentity unknown;
     CHECK(describeMemory(unknown) == "нет данных");

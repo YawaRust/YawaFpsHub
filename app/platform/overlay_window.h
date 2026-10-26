@@ -60,7 +60,6 @@ private:
     // на любой экран, а не только в пределах того, где он появился.
     RECT screenRect() const;
     void drawScene(float scale);
-    OverlayValues currentValues() const;
     void drawPlates(float scale);
     void drawLine(float scale);
     void drawBackground(const D2D1_RECT_F& frame, float scale);

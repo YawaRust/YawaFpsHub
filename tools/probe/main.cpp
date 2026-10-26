@@ -95,8 +95,8 @@ void printMachine(const yawa::SystemSensors& sensors, const yawa::MetricStore& s
     }
     std::printf("  RAM: %s\n", yawa::describeMemory(info.memory).c_str());
     const double tck = info.memory.cycleTimeNs();
-    std::printf("       частота %.0f МТ/с (паспорт %.0f), tCK %.3f нс, профиль %s\n", info.memory.configuredMt,
-        info.memory.ratedMt, tck, info.memory.profileEnabled ? "включён" : "не включён");
+    std::printf("       частота %.0f МТ/с (паспорт %.0f), tCK %.3f нс, XMP/EXPO: не определяется из SMBIOS\n",
+        info.memory.configuredMt, info.memory.ratedMt, tck);
     std::printf("       тайминги SPD (tCL-tRCD-tRP-tRAS) без драйвера недоступны — показываем частоты\n");
     for (const yawa::DisplayIdentity& display : info.displays) {
         std::printf("  экран: %s%s\n", yawa::describeDisplay(display).c_str(), display.primary ? " (основной)" : "");

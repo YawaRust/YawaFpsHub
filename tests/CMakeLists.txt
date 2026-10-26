@@ -4,6 +4,7 @@ add_executable(metrics_tests
     test_units.cpp
     test_metric_store.cpp
     test_system_sampler.cpp
+    test_hardware_telemetry.cpp
     test_frame_tracker.cpp
     test_settings.cpp
     test_gpu_registry.cpp

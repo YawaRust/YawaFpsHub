@@ -42,7 +42,7 @@ public:
     bool isAvailable() const { return m_initialized; }
 
     // nameHint — имя адаптера из DXGI: у ноутбуков с Optimus NVML может отдавать
-    // устройства в другом порядке, поэтому сверяем по имени.
+    // устройства в другом порядке, поэтому сверяем по имени. Неоднозначность даёт «нет данных».
     void selectDevice(const std::wstring& nameHint);
     GpuSensorReading read() const;
 

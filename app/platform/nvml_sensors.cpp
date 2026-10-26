@@ -1,12 +1,14 @@
 #include "platform/nvml_sensors.h"
+#include "metrics/gpu_registry.h"
 #include "platform/win_util.h"
 
+#include <shlobj.h>
 #include <windows.h>
 
 #include <algorithm>
-#include <cctype>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace yawa {
 namespace {
@@ -23,6 +25,14 @@ constexpr unsigned kBoundedBufferSize = 96;
 constexpr int kNvmlPcieTxBytes = 0;
 constexpr int kNvmlPcieRxBytes = 1;
 
+struct NvmlFanSpeedInfo
+{
+    unsigned version = (1u << 24) | 12u;
+    unsigned fan = 0;
+    unsigned speed = 0;
+};
+static_assert(sizeof(NvmlFanSpeedInfo) == 12);
+
 struct NvmlApi {
     HMODULE module = nullptr;
 
@@ -35,7 +45,7 @@ struct NvmlApi {
     NvmlReturn (*deviceGetClockInfo)(NvmlDevice, int, unsigned*) = nullptr;
     NvmlReturn (*deviceGetPowerUsage)(NvmlDevice, unsigned*) = nullptr;
     NvmlReturn (*deviceGetFanSpeed)(NvmlDevice, unsigned*) = nullptr;
-    NvmlReturn (*deviceGetFanSpeedRpm)(NvmlDevice, unsigned*) = nullptr;
+    NvmlReturn (*deviceGetFanSpeedRpm)(NvmlDevice, NvmlFanSpeedInfo*) = nullptr;
     NvmlReturn (*deviceGetEncoderUtilization)(NvmlDevice, unsigned*, unsigned*) = nullptr;
     NvmlReturn (*deviceGetDecoderUtilization)(NvmlDevice, unsigned*, unsigned*) = nullptr;
     NvmlReturn (*deviceGetPcieThroughput)(NvmlDevice, int, unsigned*) = nullptr;
@@ -43,41 +53,20 @@ struct NvmlApi {
     NvmlReturn (*deviceGetCurrPcieLinkGeneration)(NvmlDevice, unsigned*) = nullptr;
 };
 
-std::wstring lowercase(std::string_view text)
-{
-    std::wstring result;
-    result.reserve(text.size());
-    for (const char symbol : text) {
-        result.push_back(static_cast<wchar_t>(std::tolower(static_cast<unsigned char>(symbol))));
-    }
-    return result;
-}
-
 // nvml.dll лежит в System32 только у новых драйверов; у большинства установок
 // он остаётся в папке NVSMI, поэтому ищем по известным местам, а не только в PATH.
 HMODULE loadNvmlLibrary()
 {
-    if (HMODULE module = LoadLibraryW(L"nvml.dll"); module != nullptr) {
+    if (HMODULE module = LoadLibraryExW(L"nvml.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+        module != nullptr) {
         return module;
     }
-
-    wchar_t buffer[MAX_PATH]{};
-    if (GetSystemDirectoryW(buffer, MAX_PATH) != 0) {
-        const std::wstring path = std::wstring(buffer) + L"\\nvml.dll";
-        if (HMODULE module = LoadLibraryW(path.c_str()); module != nullptr) {
-            return module;
-        }
-    }
-
-    const wchar_t* roots[] = { L"ProgramW6432", L"ProgramFiles" };
-    for (const wchar_t* root : roots) {
-        if (GetEnvironmentVariableW(root, buffer, MAX_PATH) == 0) {
-            continue;
-        }
-        const std::wstring path = std::wstring(buffer) + L"\\NVIDIA Corporation\\NVSMI\\nvml.dll";
-        if (HMODULE module = LoadLibraryW(path.c_str()); module != nullptr) {
-            return module;
-        }
+    PWSTR root = nullptr;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_ProgramFiles, 0, nullptr, &root))) {
+        const std::wstring path = std::wstring(root) + L"\\NVIDIA Corporation\\NVSMI\\nvml.dll";
+        CoTaskMemFree(root);
+        return LoadLibraryExW(
+            path.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
     }
     return nullptr;
 }
@@ -95,6 +84,7 @@ struct NvmlSensors::Impl {
     NvmlApi api;
     NvmlDevice device = nullptr;
     unsigned deviceCount = 0;
+    bool started = false;
 };
 
 NvmlSensors::~NvmlSensors()
@@ -115,15 +105,15 @@ bool NvmlSensors::initialize(std::string& error)
     m_impl = new Impl();
     m_impl->api.module = module;
 
-    bool ok = loadSymbol(module, "nvmlInit_v2", m_impl->api.init)
+    const bool ok = loadSymbol(module, "nvmlInit_v2", m_impl->api.init)
         && loadSymbol(module, "nvmlShutdown", m_impl->api.shutdown)
         && loadSymbol(module, "nvmlDeviceGetCount_v2", m_impl->api.deviceGetCount)
         && loadSymbol(module, "nvmlDeviceGetHandleByIndex_v2", m_impl->api.deviceGetHandleByIndex)
-        && loadSymbol(module, "nvmlDeviceGetName", m_impl->api.deviceGetName)
-        && loadSymbol(module, "nvmlDeviceGetTemperature", m_impl->api.deviceGetTemperature)
-        && loadSymbol(module, "nvmlDeviceGetClockInfo", m_impl->api.deviceGetClockInfo)
-        && loadSymbol(module, "nvmlDeviceGetPowerUsage", m_impl->api.deviceGetPowerUsage)
-        && loadSymbol(module, "nvmlDeviceGetFanSpeed", m_impl->api.deviceGetFanSpeed);
+        && loadSymbol(module, "nvmlDeviceGetName", m_impl->api.deviceGetName);
+    loadSymbol(module, "nvmlDeviceGetTemperature", m_impl->api.deviceGetTemperature);
+    loadSymbol(module, "nvmlDeviceGetClockInfo", m_impl->api.deviceGetClockInfo);
+    loadSymbol(module, "nvmlDeviceGetPowerUsage", m_impl->api.deviceGetPowerUsage);
+    loadSymbol(module, "nvmlDeviceGetFanSpeed", m_impl->api.deviceGetFanSpeed);
 
     // Версия RPM-вентилятора появилась в NVML 12: на старых драйверах её просто нет.
     loadSymbol(module, "nvmlDeviceGetFanSpeedRPM", m_impl->api.deviceGetFanSpeedRpm);
@@ -146,7 +136,9 @@ bool NvmlSensors::initialize(std::string& error)
         return false;
     }
 
-    if (m_impl->api.deviceGetCount(&m_impl->deviceCount) != kNvmlSuccess || m_impl->deviceCount == 0) {
+    m_impl->started = true;
+    if (m_impl->api.deviceGetCount(&m_impl->deviceCount) != kNvmlSuccess || m_impl->deviceCount == 0
+        || m_impl->deviceCount > 128) {
         error = "NVML не нашёл ни одного устройства NVIDIA";
         shutdown();
         return false;
@@ -160,7 +152,7 @@ bool NvmlSensors::initialize(std::string& error)
 void NvmlSensors::shutdown()
 {
     if (m_impl != nullptr) {
-        if (m_initialized && m_impl->api.shutdown != nullptr) {
+        if (m_impl->started && m_impl->api.shutdown != nullptr) {
             m_impl->api.shutdown();
         }
         if (m_impl->api.module != nullptr) {
@@ -178,28 +170,25 @@ void NvmlSensors::selectDevice(const std::wstring& nameHint)
         return;
     }
 
-    const std::wstring hint = lowercase(narrow(nameHint));
+    m_impl->device = nullptr;
+    if (nameHint.empty()) {
+        return;
+    }
+    std::vector<std::wstring> names(m_impl->deviceCount);
+    std::vector<NvmlDevice> devices(m_impl->deviceCount, nullptr);
     for (unsigned index = 0; index < m_impl->deviceCount; ++index) {
-        NvmlDevice device = nullptr;
-        if (m_impl->api.deviceGetHandleByIndex(index, &device) != kNvmlSuccess || device == nullptr) {
+        if (m_impl->api.deviceGetHandleByIndex(index, &devices[index]) != kNvmlSuccess || !devices[index]) {
             continue;
         }
-
         char name[kBoundedBufferSize]{};
-        if (m_impl->api.deviceGetName(device, name, kBoundedBufferSize) != kNvmlSuccess) {
-            continue;
-        }
-
-        const std::wstring deviceName = lowercase(name);
-        if (!hint.empty() && (deviceName.find(hint) != std::wstring::npos
-                                 || hint.find(deviceName) != std::wstring::npos)) {
-            m_impl->device = device;
-            return;
+        if (m_impl->api.deviceGetName(devices[index], name, kBoundedBufferSize) == kNvmlSuccess) {
+            name[kBoundedBufferSize - 1] = 0;
+            names[index] = widen(name);
         }
     }
-
-    if (m_impl->device == nullptr) {
-        m_impl->api.deviceGetHandleByIndex(0, &m_impl->device);
+    const auto selected = uniqueGpuNameMatch(nameHint, names);
+    if (selected) {
+        m_impl->device = devices[*selected];
     }
 }
 
@@ -213,17 +202,21 @@ GpuSensorReading NvmlSensors::read() const
     const NvmlApi& api = m_impl->api;
     unsigned value = 0;
 
-    if (api.deviceGetTemperature(m_impl->device, kNvmlTemperatureGpu, &value) == kNvmlSuccess) {
+    if (api.deviceGetTemperature != nullptr
+        && api.deviceGetTemperature(m_impl->device, kNvmlTemperatureGpu, &value) == kNvmlSuccess) {
         reading.temperature = static_cast<double>(value);
         reading.available = true;
     }
-    if (api.deviceGetClockInfo(m_impl->device, kNvmlClockGraphics, &value) == kNvmlSuccess) {
+    if (api.deviceGetClockInfo != nullptr
+        && api.deviceGetClockInfo(m_impl->device, kNvmlClockGraphics, &value) == kNvmlSuccess) {
         reading.graphicsClockMhz = static_cast<double>(value);
     }
-    if (api.deviceGetClockInfo(m_impl->device, kNvmlClockMemory, &value) == kNvmlSuccess) {
+    if (api.deviceGetClockInfo != nullptr
+        && api.deviceGetClockInfo(m_impl->device, kNvmlClockMemory, &value) == kNvmlSuccess) {
         reading.memoryClockMhz = static_cast<double>(value);
     }
-    if (api.deviceGetPowerUsage(m_impl->device, &value) == kNvmlSuccess) {
+    if (api.deviceGetPowerUsage != nullptr
+        && api.deviceGetPowerUsage(m_impl->device, &value) == kNvmlSuccess) {
         reading.powerWatts = static_cast<double>(value) / 1000.0;
     }
     // Занятость медиа-движков и пропускная способность PCI-e.
@@ -257,15 +250,17 @@ GpuSensorReading NvmlSensors::read() const
         reading.pcieLinkGeneration = link;
     }
 
+    NvmlFanSpeedInfo fan;
     if (api.deviceGetFanSpeedRpm != nullptr
-        && api.deviceGetFanSpeedRpm(m_impl->device, &value) == kNvmlSuccess) {
-        reading.fanRpm = value;
+        && api.deviceGetFanSpeedRpm(m_impl->device, &fan) == kNvmlSuccess) {
+        reading.fanRpm = fan.speed;
     } else if (api.deviceGetFanSpeed != nullptr
         && api.deviceGetFanSpeed(m_impl->device, &value) == kNvmlSuccess) {
         // Старый API умеет только проценты: показываем их как 0 об/мин, чтобы не врать числом.
         reading.fanRpm = 0;
     }
 
+    reading.available = reading.available || reading.graphicsClockMhz > 0 || reading.powerWatts > 0;
     return reading;
 }
 

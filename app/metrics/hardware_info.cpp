@@ -54,13 +54,13 @@ std::string describeMemory(const MemoryIdentity& memory)
         const bool uniform = std::all_of(sizes.begin(), sizes.end(),
             [smallest](double size) { return std::abs(size - smallest) < 0.5; });
         if (uniform) {
-            text = std::to_string(sizes.size()) + "×" + formatValue(smallest, 0) + " ГБ";
+            text = std::to_string(sizes.size()) + "×" + formatValue(smallest, smallest < 1.0 ? 1 : 0) + " ГБ";
         } else {
             for (std::size_t index = 0; index < sizes.size(); ++index) {
                 if (index > 0) {
                     text += " + ";
                 }
-                text += formatValue(sizes[index], 0) + " ГБ";
+                text += formatValue(sizes[index], sizes[index] < 1.0 ? 1 : 0) + " ГБ";
             }
         }
         if (memory.totalGb > 0.0) {
@@ -80,13 +80,6 @@ std::string describeMemory(const MemoryIdentity& memory)
         if (memory.configuredMt > 0.0) {
             text += "-" + std::to_string(static_cast<int>(std::lround(memory.configuredMt)));
         }
-    }
-    // Число каналов BIOS не сообщает: его выводим из раскладки слотов и показываем
-    // только когда в именах слотов есть буквы каналов, иначе «нет данных» честнее.
-    if (memory.channels == 1) {
-        text += ", один канал";
-    } else if (memory.channels > 1) {
-        text += ", " + std::to_string(memory.channels) + " канала";
     }
     return text;
 }

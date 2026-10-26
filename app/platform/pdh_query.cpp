@@ -112,7 +112,7 @@ bool PdhWildcardCounter::collect()
     DWORD itemCount = 0;
     PDH_STATUS status = PdhGetFormattedCounterArrayW(static_cast<PDH_HCOUNTER>(m_counter),
         PDH_FMT_DOUBLE | PDH_FMT_NOCAP100, &bufferSize, &itemCount, nullptr);
-    if (status != PDH_MORE_DATA || bufferSize == 0) {
+    if (status != static_cast<PDH_STATUS>(PDH_MORE_DATA) || bufferSize == 0) {
         m_values.clear();
         return status == ERROR_SUCCESS;
     }

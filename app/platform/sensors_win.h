@@ -4,7 +4,10 @@
 #include "metrics/system_sampler.h"
 #include "platform/dxgi_adapters.h"
 #include "platform/nvml_sensors.h"
+#include "platform/pawnio_sensors.h"
 #include "platform/pdh_query.h"
+#include "platform/storage_sensors.h"
+#include "platform/vendor_gpu_sensors.h"
 
 #include <array>
 #include <cstddef>
@@ -65,11 +68,8 @@ private:
     void initializeCpu(Log& log);
     bool initializeGpu(Log& log, std::string& error);
     void sampleCpu(SystemSnapshot& snapshot);
+    void selectGpuSensors();
     void sampleGameThread(SystemSnapshot& snapshot);
-    // ACPI-термозона через WMI: работает там, где PDH-счётчик тепловых зон молчит.
-    bool queryWmiTemperature(double& celsius);
-    // Один WMI-запрос: значение свойства из первого объекта, переведённое в градусы.
-    bool queryWmiValue(const wchar_t* query, const wchar_t* property, bool tenthsOfKelvin, double& celsius);
     void sampleMemory(SystemSnapshot& snapshot);
     void sampleDiskAndNetwork(SystemSnapshot& snapshot);
     void sampleGpu(SystemSnapshot& snapshot);
@@ -77,6 +77,9 @@ private:
 
     DxgiAdapterList m_adapters;
     NvmlSensors m_nvml;
+    PawnioSensors m_pawnio;
+    StorageSensors m_storage;
+    VendorGpuSensors m_vendorGpu;
     PdhCounter m_cpuPerformance;
     PdhCounter m_diskRead;
     PdhCounter m_diskWrite;
@@ -84,7 +87,6 @@ private:
     PdhWildcardCounter m_netSent;
     PdhWildcardCounter m_gpuEngine;
     // ACPI-термозона: отдаёт температуру без прав администратора и без MSR-драйвера.
-    PdhWildcardCounter m_thermalZone;
     // Загрузка ядер считается по NtQuerySystemInformation(SystemProcessorPerformanceInformation):
     // этот источник есть на любой Windows и не зависит от локали и набора счётчиков PDH,
     // поэтому «Датчики» больше не остаются пустыми на машинах без нужных счётчиков.
@@ -104,11 +106,6 @@ private:
     std::uint32_t m_nominalCpuMhz = 0;
     std::uint32_t m_coreCount = 0;
     // Кэш WMI-температуры: запрос дорогой, поэтому не чаще раза в 15 секунд.
-    double m_wmiTemperature = 0.0;
-    std::uint64_t m_wmiQueriedAt = 0;
-    bool m_wmiAvailable = false;
-    // WMI недоступен на этой машине: не повторяем дорогой запрос каждые 15 секунд.
-    bool m_wmiFailed = false;
     double m_gpuLoad = 0.0;
 
     // Поток игры: главный поток активного окна. Считаем по разнице времён, как диспетчер задач.

@@ -1,4 +1,5 @@
 #include "ui/settings.h"
+#include "metrics/overlay_metric.h"
 
 #include <algorithm>
 #include <charconv>
@@ -98,6 +99,94 @@ std::string sanitizeLabel(std::string_view text)
 }
 
 } // namespace
+
+std::array<bool, kMetricCount> defaultOverlayMetrics()
+{
+    std::array<bool, kMetricCount> selected { };
+    for (MetricId id : { MetricId::Fps, MetricId::Low1Fps, MetricId::CpuLoad, MetricId::CpuTemp,
+             MetricId::GpuLoad, MetricId::GpuTemp, MetricId::RamUsed, MetricId::VramUsed }) {
+        selected[static_cast<std::size_t>(id)] = true;
+    }
+    return selected;
+}
+
+std::array<MetricId, kMetricCount> defaultOverlayOrder()
+{
+    std::array<MetricId, kMetricCount> order { };
+    for (std::size_t i = 0; i < order.size(); ++i) {
+        order[i] = static_cast<MetricId>(i);
+    }
+    return order;
+}
+
+std::array<int, kMetricCount> defaultOverlayMetricColors()
+{
+    std::array<int, kMetricCount> colors { };
+    colors.fill(-1);
+    return colors;
+}
+
+void setOverlayMetricLabel(OverlaySettings& settings, MetricId id, std::string label)
+{
+    const std::size_t index = static_cast<std::size_t>(id);
+    if (index >= kMetricCount) { return; }
+    // Не обрезаем UTF-8 посередине символа; переводы строк не должны ломать INI.
+    std::string clean;
+    std::size_t characters = 0;
+    for (std::size_t i = 0; i < label.size() && characters < 32;) {
+        const unsigned char byte = static_cast<unsigned char>(label[i]);
+        const std::size_t length = byte < 0x80 ? 1 : byte < 0xe0 ? 2 : byte < 0xf0 ? 3 : 4;
+        if (i + length > label.size()) { break; }
+        if (byte != '\n' && byte != '\r' && byte != '=' && byte != '[' && byte != ']') {
+            clean.append(label, i, length);
+            ++characters;
+        }
+        i += length;
+    }
+    settings.customLabels[index] = std::move(clean);
+    settings.customLabelSet[index] = true;
+}
+
+void moveOverlayMetric(OverlaySettings& settings, MetricId moved, MetricId before)
+{
+    const auto source = std::find(settings.order.begin(), settings.order.end(), displayMetric(moved));
+    const auto target = std::find(settings.order.begin(), settings.order.end(), displayMetric(before));
+    if (source == settings.order.end() || target == settings.order.end() || source == target) {
+        return;
+    }
+    const MetricId value = *source;
+    if (source < target) {
+        std::move(source + 1, target + 1, source);
+        *target = value;
+    } else {
+        std::move_backward(target, source, source + 1);
+        *target = value;
+    }
+}
+
+void enableOverlayPixelLayout(OverlaySettings& settings)
+{
+    int row = 0;
+    for (MetricId id : settings.order) {
+        if (static_cast<std::size_t>(id) >= kMetricCount || displayMetric(id) != id) {
+            continue;
+        }
+        bool selected = settings.metrics[static_cast<std::size_t>(id)];
+        for (MetricId detail : kPairedMetricDetails) {
+            if (displayMetric(detail) == id) {
+                selected |= settings.metrics[static_cast<std::size_t>(detail)];
+            }
+        }
+        if (!selected) {
+            continue;
+        }
+        if (settings.rowPositions[static_cast<std::size_t>(id)].y < 0) {
+            settings.rowPositions[static_cast<std::size_t>(id)].y = std::min(12 + row * 28, 1490);
+        }
+        ++row;
+    }
+    settings.pixelLayout = true;
+}
 
 Settings defaultSettings()
 {
@@ -297,6 +386,7 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
 
     std::string section;
     std::size_t lineNumber = 0;
+    bool hasMetricSelection = false;
 
     while (!text.empty()) {
         const std::size_t lineEnd = text.find('\n');
@@ -320,6 +410,9 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                 return false;
             }
             section = std::string(trim(line.substr(1, close - 1)));
+            if (section == "overlay_metrics") {
+                hasMetricSelection = true;
+            }
             continue;
         }
 
@@ -330,7 +423,7 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
         }
 
         const std::string key(trim(line.substr(0, separator)));
-        const std::string_view value = trim(line.substr(separator + 1));
+        std::string_view value = trim(line.substr(separator + 1));
 
         if (section == "capture") {
             if (key == "interval_ms") {
@@ -363,6 +456,8 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                 target.overlay.opacityPercent = std::clamp(parseInt(value, target.overlay.opacityPercent), 0, 100);
             } else if (key == "offset_x") {
                 target.overlay.offsetX = std::clamp(parseInt(value, target.overlay.offsetX), -2000, 2000);
+            } else if (key == "pixel_layout") {
+                target.overlay.pixelLayout = parseBool(value, target.overlay.pixelLayout);
             } else if (key == "offset_y") {
                 target.overlay.offsetY = std::clamp(parseInt(value, target.overlay.offsetY), -2000, 2000);
             } else if (key == "background") {
@@ -427,6 +522,75 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                     }
                 }
             }
+        } else if (section == "overlay_metrics") {
+            for (const MetricInfo& metric : kMetricTable) {
+                if (key == metric.key) {
+                    const auto index = static_cast<std::size_t>(metric.id);
+                    target.overlay.metrics[index] = parseBool(value, target.overlay.metrics[index]);
+                }
+            }
+        } else if (section == "overlay_order") {
+            if (key == "rows") {
+                std::array<MetricId, kMetricCount> parsed { };
+                std::array<bool, kMetricCount> seen { };
+                bool valid = true;
+                std::size_t index = 0;
+                while (!value.empty() && index < kMetricCount) {
+                    const std::size_t comma = value.find(',');
+                    const auto token = trim(value.substr(0, comma));
+                    const auto entry = std::find_if(kMetricTable.begin(), kMetricTable.end(),
+                        [token](const MetricInfo& info) { return info.key == token; });
+                    if (entry == kMetricTable.end() || seen[static_cast<std::size_t>(entry->id)]) {
+                        valid = false;
+                        break;
+                    }
+                    parsed[index++] = entry->id;
+                    seen[static_cast<std::size_t>(entry->id)] = true;
+                    if (comma == std::string_view::npos) {
+                        break;
+                    }
+                    if (index == kMetricCount || comma + 1 == value.size()) {
+                        valid = false;
+                        break;
+                    }
+                    value.remove_prefix(comma + 1);
+                }
+                if (valid && index == kMetricCount
+                    && std::all_of(seen.begin(), seen.end(), [](bool included) { return included; })) {
+                    target.overlay.order = parsed;
+                }
+            }
+        } else if (section == "overlay_positions") {
+            const auto entry = std::find_if(kMetricTable.begin(), kMetricTable.end(),
+                [&key](const MetricInfo& info) { return info.key == key; });
+            if (entry != kMetricTable.end()) {
+                const std::size_t first = value.find(',');
+                const std::size_t second
+                    = first == std::string_view::npos ? first : value.find(',', first + 1);
+                if (first != std::string_view::npos && second != std::string_view::npos
+                    && value.find(',', second + 1) == std::string_view::npos) {
+                    int label = parseInt(trim(value.substr(0, first)), -1);
+                    int number = parseInt(trim(value.substr(first + 1, second - first - 1)), -1);
+                    int y = parseInt(trim(value.substr(second + 1)), -1);
+                    if (label >= 0 && label <= 470 && number >= 0 && number <= 470 && y >= 0 && y <= 1490) {
+                        target.overlay.rowPositions[static_cast<std::size_t>(entry->id)]
+                            = { label, number, y };
+                    }
+                }
+            }
+        } else if (section == "overlay_metric_colors") {
+            const auto entry = std::find_if(kMetricTable.begin(), kMetricTable.end(),
+                [&key](const MetricInfo& info) { return info.key == key; });
+            if (entry != kMetricTable.end()) {
+                target.overlay.metricColors[static_cast<std::size_t>(entry->id)]
+                    = std::clamp(parseInt(value, -1), -1, 5);
+            }
+        } else if (section == "overlay_labels") {
+            const auto entry = std::find_if(kMetricTable.begin(), kMetricTable.end(),
+                [&key](const MetricInfo& info) { return info.key == key; });
+            if (entry != kMetricTable.end()) {
+                setOverlayMetricLabel(target.overlay, entry->id, std::string(value));
+            }
         } else if (section == "hotkeys") {
             if (key == "overlay") {
                 target.hotkeys.overlay = static_cast<unsigned int>(std::clamp(parseInt(value, 0), 0, 254));
@@ -465,6 +629,15 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
         }
     }
 
+    if (!hasMetricSelection) {
+        for (std::size_t index = 0; index < kLabelCount; ++index) {
+            target.overlay.metrics[static_cast<std::size_t>(kOverlayPrimaryMetrics[index])]
+                = target.overlay.visible[index];
+        }
+        target.overlay.metrics[static_cast<std::size_t>(MetricId::Low1Fps)] = target.overlay.visible[0];
+        target.overlay.metrics[static_cast<std::size_t>(MetricId::CpuTemp)] = target.overlay.visible[1];
+        target.overlay.metrics[static_cast<std::size_t>(MetricId::GpuTemp)] = target.overlay.visible[2];
+    }
     return true;
 }
 
@@ -494,6 +667,7 @@ std::string serializeSettings(const Settings& settings)
     text += "opacity = " + std::to_string(settings.overlay.opacityPercent) + "\n";
     text += "offset_x = " + std::to_string(settings.overlay.offsetX) + "\n";
     text += "offset_y = " + std::to_string(settings.overlay.offsetY) + "\n";
+    text += std::string("pixel_layout = ") + (settings.overlay.pixelLayout ? "1" : "0") + "\n";
     text += std::string("background = ") + (settings.overlay.showBackground ? "1" : "0") + "\n";
     text += std::string("border = ") + (settings.overlay.showBorder ? "1" : "0") + "\n";
     text += std::string("shadow = ") + (settings.overlay.showShadow ? "1" : "0") + "\n";
@@ -524,11 +698,44 @@ std::string serializeSettings(const Settings& settings)
     for (std::size_t index = 0; index < kLabelCount; ++index) {
         const auto field = static_cast<LabelField>(index);
         text += std::string("show_") + std::string(labelKey(field)) + " = "
-            + (settings.overlay.visible[index] ? "1" : "0") + "\n";
+            + (settings.overlay.metrics[static_cast<std::size_t>(kOverlayPrimaryMetrics[index])] ? "1" : "0")
+            + "\n";
     }
     text += "\n";
 
-    text += "[labels]\n";
+    text += "[overlay_metrics]\n";
+    for (const MetricInfo& metric : kMetricTable) {
+        text += std::string(metric.key) + " = "
+            + (settings.overlay.metrics[static_cast<std::size_t>(metric.id)] ? "1" : "0") + "\n";
+    }
+    text += "\n[overlay_order]\nrows = ";
+    for (std::size_t i = 0; i < kMetricCount; ++i) {
+        if (i != 0) {
+            text += ",";
+        }
+        text += metricInfo(settings.overlay.order[i]).key;
+    }
+    text += "\n[overlay_positions]\n";
+    for (const MetricInfo& metric : kMetricTable) {
+        const auto& pos = settings.overlay.rowPositions[static_cast<std::size_t>(metric.id)];
+        if (pos.y >= 0) {
+            text += std::string(metric.key) + " = " + std::to_string(pos.labelX) + ","
+                + std::to_string(pos.valueX) + "," + std::to_string(pos.y) + "\n";
+        }
+    }
+    text += "\n[overlay_metric_colors]\n";
+    for (const MetricInfo& metric : kMetricTable) {
+        const int color = settings.overlay.metricColors[static_cast<std::size_t>(metric.id)];
+        if (color >= 0) { text += std::string(metric.key) + " = " + std::to_string(color) + "\n"; }
+    }
+    text += "\n[overlay_labels]\n";
+    for (const MetricInfo& metric : kMetricTable) {
+        const std::size_t index = static_cast<std::size_t>(metric.id);
+        if (settings.overlay.customLabelSet[index]) {
+            text += std::string(metric.key) + " = " + settings.overlay.customLabels[index] + "\n";
+        }
+    }
+    text += "\n[labels]\n";
     for (std::size_t index = 0; index < kLabelCount; ++index) {
         const auto field = static_cast<LabelField>(index);
         text += std::string(labelKey(field)) + " = " + labelValue(settings.overlay, field) + "\n";

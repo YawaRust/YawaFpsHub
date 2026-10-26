@@ -151,8 +151,7 @@ void drawPairCard(Renderer& renderer, const AppModel& model, const Theme& theme,
     }
     {
         const MemoryIdentity& memory = model.hardware.memory;
-        rows.push_back(Row{ L"Память", wideText(describeMemory(memory)),
-            memory.profileEnabled ? L"профиль памяти активен" : L"XMP/EXPO не включён",
+        rows.push_back(Row{ L"Память", wideText(describeMemory(memory)), L"XMP/EXPO из SMBIOS не определяется",
             static_cast<float>(std::clamp(memory.totalGb / 64.0, 0.0, 1.0)), theme.ram });
     }
     if (const DisplayIdentity* display = model.hardware.primaryDisplay(); display != nullptr) {
@@ -278,11 +277,14 @@ void drawBottleneckView(Renderer& renderer, const AppModel& model, const Theme& 
     drawCardHeader(renderer, note, L"Как считаем",
         L"оба источника показаны отдельно: живые замеры точнее любого справочника", theme);
     drawWrappedText(renderer,
-        L"Во время игры берём загрузку процессора (с учётом самого занятого ядра) и видеокарты: узкое место — тот узел, "
-        L"что ближе к 100 %, а процент показывает, насколько простаивает второй. Если игры нет, считаем прогноз по "
-        L"индексам производительности и разрешения экрана: потолок CPU от пикселей почти не зависит, потолок GPU падает "
+        L"Во время игры берём загрузку процессора (с учётом самого занятого ядра) и видеокарты: узкое место "
+        L"— тот узел, "
+        L"что ближе к 100 %, а процент показывает, насколько простаивает второй. Если игры нет, считаем "
+        L"прогноз по "
+        L"индексам производительности и разрешения экрана: потолок CPU от пикселей почти не зависит, потолок "
+        L"GPU падает "
         L"при росте разрешения. Прогноз — оценка ±15 % и живые замеры он не заменяет.",
-        Rect{ inner.left, inner.top + 40.0f, inner.right, inner.bottom }, TextRole::Small, theme.textDim, 15.0f, 3);
+        Rect { inner.left, inner.top + 40.0f, inner.right, inner.bottom }, TextRole::Small, theme.textDim, 15.0f, 3);
 }
 
 } // namespace yawa

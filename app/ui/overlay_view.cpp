@@ -1,4 +1,5 @@
 #include "ui/overlay_view.h"
+#include "metrics/overlay_metric.h"
 #include "render/overlay_painter.h"
 #include "ui/hotkey_text.h"
 #include "ui/layout.h"
@@ -18,23 +19,6 @@ constexpr std::array<std::wstring_view, 4> kPositionNames{ L"Слева свер
     L"Справа снизу" };
 constexpr std::array<std::wstring_view, 5> kFieldNames{ L"Кадры в секунду", L"Загрузка процессора",
     L"Загрузка видеокарты", L"Занятая память", L"Видеопамять" };
-
-OverlayValues currentValues(const AppModel& model)
-{
-    OverlayValues values;
-    values.fps = model.fps.currentFps;
-    values.low1 = model.fps.low1Fps;
-    values.cpuLoad = model.store.value(MetricId::CpuLoad);
-    values.cpuTemp = model.store.value(MetricId::CpuTemp);
-    values.hasCpuTemp = model.availability.cpuTemperature;
-    values.gpuLoad = model.store.value(MetricId::GpuLoad);
-    values.gpuTemp = model.store.value(MetricId::GpuTemp);
-    values.hasGpuTemp = model.availability.gpuTemperature;
-    values.ramUsed = model.store.value(MetricId::RamUsed);
-    values.vramUsed = model.store.value(MetricId::VramUsed);
-    values.hasVram = model.store.value(MetricId::VramTotal) > 0.0;
-    return values;
-}
 
 void drawSlider(Renderer& renderer, const Rect& row, int value, int minimum, int maximum, std::wstring_view caption,
     const Theme& theme, std::vector<UiHit>& hits, ActionKind action, std::wstring_view suffix)
@@ -335,7 +319,7 @@ void drawPreviewCard(Renderer& renderer, const AppModel& model, const Theme& the
     const OverlayFormats formats{ renderer.dwrite(), renderer.textFormat(TextRole::Heading),
         renderer.textFormat(TextRole::Value), renderer.textFormat(TextRole::Small),
         renderer.textFormat(TextRole::Mono) };
-    const OverlayText text = makeOverlayText(model.settings.overlay, currentValues(model));
+    const OverlayText text = makeOverlayText(model.settings.overlay, model.store);
     const float scale = static_cast<float>(model.settings.overlay.scalePercent) / 100.0f * 0.9f;
     paintOverlay(renderer.target(), model.settings.overlay, theme, text, scene, scale, formats);
 
@@ -407,8 +391,13 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
 
     renderer.text(L"Настройка оверлея", Rect{ inner.left, inner.top, inner.right, inner.top + 22.0f },
         TextRole::Heading, theme.text);
-    renderer.text(L"изменения сразу видны в предпросмотре",
-        Rect{ inner.left, inner.top + 20.0f, inner.right, inner.top + 36.0f }, TextRole::Tiny, theme.textFaint);
+    const bool hardToRead = overlay.opacityPercent < 30
+        || (!overlay.showBackground && overlay.textOutline == 0 && !overlay.showShadow);
+    renderer.text(hardToRead
+            ? L"Текст может сливаться с игрой: включите фон/тень или повысьте непрозрачность"
+            : L"изменения сразу видны в предпросмотре",
+        Rect{ inner.left, inner.top + 20.0f, inner.right, inner.top + 36.0f }, TextRole::Tiny,
+        hardToRead ? theme.warn : theme.textFaint);
 
     float top = inner.top + 40.0f;
 
@@ -615,8 +604,9 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
         if (top + 24.0f > inner.bottom) {
             break;
         }
-        drawToggleRow(renderer, Rect{ inner.left, top, inner.right, top + 24.0f }, kFieldNames[index],
-            overlay.visible[index], theme, hits, ActionKind::ToggleMetric, static_cast<int>(index));
+        drawToggleRow(renderer, Rect { inner.left, top, inner.right, top + 24.0f }, kFieldNames[index],
+            overlay.metrics[static_cast<std::size_t>(kOverlayPrimaryMetrics[index])], theme, hits,
+            ActionKind::ToggleMetric, static_cast<int>(index));
         top += 25.0f;
     }
 }
@@ -672,37 +662,117 @@ void drawLabelsCard(Renderer& renderer, const AppModel& model, const Theme& them
     }
 }
 
-} // namespace
-
-void drawOverlayView(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area,
+void drawOrderCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card,
     std::vector<UiHit>& hits)
 {
-    // Как в демо: одна колонка карточек фиксированной высоты. Экран получает
-    // демо-высоту целиком, поэтому при сжатии окна карточки не наезжают друг на друга,
-    // а прокручиваются.
-    const auto drawClipped = [&](const Rect& card, const auto& draw) {
-        renderer.pushClip(card);
-        draw(card);
-        renderer.popClip();
-    };
+    drawCard(renderer, card, theme);
+    renderer.text(L"Порядок строк оверлея · перетащите ≡",
+        Rect{ card.left + 18.0f, card.top + 10.0f, card.right - 18.0f, card.top + 34.0f },
+        TextRole::Heading, theme.text);
+    float top = card.top + 40.0f;
+    for (MetricId id : model.settings.overlay.order) {
+        if (displayMetric(id) != id) {
+            continue;
+        }
+        bool selected = model.settings.overlay.metrics[static_cast<std::size_t>(id)];
+        for (MetricId detail : kPairedMetricDetails) {
+            if (displayMetric(detail) == id) {
+                selected |= model.settings.overlay.metrics[static_cast<std::size_t>(detail)];
+            }
+        }
+        if (!selected) {
+            continue;
+        }
+        const Rect row{ card.left + 18.0f, top, card.right - 18.0f, top + 24.0f };
+        renderer.fillRoundRect(row, 5.0f, isHovered(model, row) ? theme.accentSoft : theme.panelSoft);
+        renderer.text(L"≡", Rect{ row.left + 8.0f, top, row.left + 30.0f, top + 24.0f }, TextRole::Small,
+            theme.accent);
+        renderer.text(wideText(metricInfo(id).label),
+            Rect{ row.left + 34.0f, top, row.right - 16.0f, top + 24.0f }, TextRole::Small, theme.text);
+        hits.push_back(UiHit{ row, ActionKind::ReorderMetric, static_cast<int>(id) });
+        top += 27.0f;
+    }
+}
 
+} // namespace
+
+float overlayOrderCardHeight(const OverlaySettings& settings)
+{
+    std::size_t count = 0;
+    for (MetricId id : settings.order) {
+        if (displayMetric(id) != id) {
+            continue;
+        }
+        bool selected = settings.metrics[static_cast<std::size_t>(id)];
+        for (MetricId detail : kPairedMetricDetails) {
+            if (displayMetric(detail) == id) {
+                selected |= settings.metrics[static_cast<std::size_t>(detail)];
+            }
+        }
+        if (selected) {
+            ++count;
+        }
+    }
+    return 52.0f + 27.0f * static_cast<float>(count);
+}
+
+float overlayEditorControlsHeight(const OverlaySettings& settings)
+{
+    return 268.0f + 1450.0f + 232.0f + overlayOrderCardHeight(settings) + 4.0f * kGap;
+}
+
+void drawOverlayEditorPreview(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card)
+{
+    std::vector<UiHit> unused;
+    drawPreviewCard(renderer, model, theme, card, unused);
+}
+
+void drawOverlayEditorControls(Renderer& renderer, const AppModel& model, const Theme& theme,
+    const Rect& area, std::vector<UiHit>& hits)
+{
     float top = area.top;
     const auto place = [&](float height) {
         const Rect card{ area.left, top, area.right, top + height };
         top += height + kGap;
         return card;
     };
+    const Rect gallery = place(268.0f);
+    renderer.pushClip(gallery);
+    drawCard(renderer, gallery, theme);
+    drawStyleGallery(renderer, model, theme, gallery.inset(kCardPadding), hits);
+    renderer.popClip();
+    const Rect controls = place(1450.0f);
+    renderer.pushClip(controls);
+    drawControlsCard(renderer, model, theme, controls, hits);
+    renderer.popClip();
+    const Rect labels = place(232.0f);
+    renderer.pushClip(labels);
+    drawLabelsCard(renderer, model, theme, labels, hits);
+    renderer.popClip();
+    const Rect order = place(overlayOrderCardHeight(model.settings.overlay));
+    renderer.pushClip(order);
+    drawOrderCard(renderer, model, theme, order, hits);
+    renderer.popClip();
+}
 
-    drawClipped(place(430.0f),
-        [&](const Rect& card) { drawPreviewCard(renderer, model, theme, card, hits); });
-    drawClipped(place(1450.0f),
-        [&](const Rect& card) { drawControlsCard(renderer, model, theme, card, hits); });
-    drawClipped(place(232.0f),
-        [&](const Rect& card) { drawLabelsCard(renderer, model, theme, card, hits); });
-    drawClipped(place(268.0f), [&](const Rect& card) {
-        drawCard(renderer, card, theme);
-        drawStyleGallery(renderer, model, theme, card.inset(kCardPadding), hits);
-    });
+void drawOverlayView(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area,
+    std::vector<UiHit>& hits)
+{
+    const Rect preview{ area.left, area.top, area.right, area.top + 430.0f };
+    renderer.pushClip(preview);
+    drawPreviewCard(renderer, model, theme, preview, hits);
+    renderer.popClip();
+    const Rect card{ area.left, preview.bottom + kGap, area.right, preview.bottom + kGap + 158.0f };
+    drawCard(renderer, card, theme);
+    renderer.text(L"Мастерская оверлея",
+        Rect{ card.left + 20.0f, card.top + 16.0f, card.right - 20.0f, card.top + 36.0f },
+        TextRole::Heading, theme.text);
+    renderer.text(L"Стили, текст, цвета, прозрачность, датчики и пиксельная раскладка — в одном окне.",
+        Rect{ card.left + 20.0f, card.top + 42.0f, card.right - 20.0f, card.top + 68.0f },
+        TextRole::Small, theme.textDim);
+    const Rect button{ card.left + 20.0f, card.top + 90.0f, card.left + 270.0f, card.top + 128.0f };
+    drawChip(renderer, button, L"Открыть редактор  ↗", true, theme, TextRole::Small);
+    hits.push_back(UiHit{ button, ActionKind::OpenOverlayEditor, 0 });
 }
 
 } // namespace yawa

@@ -1,0 +1,6 @@
+# Сторонние ABI-заголовки и подписанный INF сохраняются побайтово из upstream.
+third_party/gpu_sdk/adl/*.h -text -diff
+third_party/gpu_sdk/igcl/igcl_api.h -text -diff
+third_party/gpu_sdk/igcl/LICENSE -text -diff
+third_party/gpu_sdk/igcl/License.txt -text -diff
+third_party/pawnio/PawnIO.inf -text -diff

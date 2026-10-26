@@ -1,5 +1,7 @@
 #pragma once
 
+#include "metrics/metric_id.h"
+
 #include <array>
 #include <cstdint>
 #include <string>
@@ -16,6 +18,19 @@ enum class Accent : std::uint8_t { Mint, Ice, Violet, Amber, Coral };
 
 enum class LabelField : std::uint8_t { Fps, Cpu, Gpu, Ram, Vram };
 constexpr std::size_t kLabelCount = 5;
+inline constexpr std::array<MetricId, kLabelCount> kOverlayPrimaryMetrics { MetricId::Fps, MetricId::CpuLoad,
+    MetricId::GpuLoad, MetricId::RamUsed, MetricId::VramUsed };
+
+std::array<bool, kMetricCount> defaultOverlayMetrics();
+std::array<MetricId, kMetricCount> defaultOverlayOrder();
+std::array<int, kMetricCount> defaultOverlayMetricColors();
+
+struct OverlayRowPosition
+{
+    int labelX = 12;
+    int valueX = 252;
+    int y = -1;
+};
 
 struct CaptureSettings {
     int intervalMs = 1000;
@@ -81,7 +96,14 @@ struct OverlaySettings {
     // Сквозной клик: окно оверлея полностью пропускает мышь в игру. Выключается хоткеем,
     // когда оверлей нужно перетащить.
     bool clickThrough = false;
-    // Состав: какие строки вообще показывать (fps, cpu, gpu, ram, vram).
+    // visible оставлен только для переноса настроек из старого ini.
+    std::array<bool, kMetricCount> metrics = defaultOverlayMetrics();
+    std::array<MetricId, kMetricCount> order = defaultOverlayOrder();
+    bool pixelLayout = false;
+    std::array<OverlayRowPosition, kMetricCount> rowPositions { };
+    std::array<int, kMetricCount> metricColors = defaultOverlayMetricColors(); // -1 — палитра стиля
+    std::array<bool, kMetricCount> customLabelSet { };
+    std::array<std::string, kMetricCount> customLabels { };
     std::array<bool, kLabelCount> visible{ true, true, true, true, true };
     std::array<std::string, kLabelCount> labels{ "FPS", "CPU", "GPU", "RAM", "VRAM" };
 };
@@ -120,6 +142,9 @@ struct Settings {
 };
 
 Settings defaultSettings();
+void moveOverlayMetric(OverlaySettings& settings, MetricId moved, MetricId before);
+void enableOverlayPixelLayout(OverlaySettings& settings);
+void setOverlayMetricLabel(OverlaySettings& settings, MetricId id, std::string label);
 
 // Формат — docs/settings.md. Неизвестные ключи пропускаются, отсутствующие остаются
 // значениями по умолчанию: файл мог остаться от прошлой версии.
