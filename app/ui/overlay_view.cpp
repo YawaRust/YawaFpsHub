@@ -275,6 +275,14 @@ void drawSceneBackdrop(Renderer& renderer, const Rect& scene, const Theme& theme
     renderer.fillRect(Rect{ scene.left, skyBottom - 1.0f, scene.right, skyBottom + 2.0f },
         fromRgba(0xFFFFA45C).withAlpha(0.16f));
 
+    // Миникарта в правом верхнем углу: кольцо и зелёный сектор, как в прототипе.
+    const float mapRadius = std::max(scene.height() * 0.085f, 14.0f);
+    const float mapX = scene.right - scene.width() * 0.045f - mapRadius;
+    const float mapY = scene.top + scene.height() * 0.06f + mapRadius;
+    renderer.fillCircle(mapX, mapY, mapRadius, fromRgba(0xFF0C1018).withAlpha(0.55f));
+    renderer.strokeCircle(mapX, mapY, mapRadius, fromRgba(0xFFFFFFFF).withAlpha(0.22f), 1.0f);
+    renderer.drawArc(mapX, mapY, mapRadius - 1.5f, 3.0f, 0.24f, theme.accent.withAlpha(0.6f));
+
     // Прицел в центре и карточка задания снизу.
     const float crossY = scene.top + scene.height() * 0.46f;
     renderer.drawLine(scene.centerX() - 7.0f, crossY, scene.centerX() + 7.0f, crossY,
@@ -308,7 +316,8 @@ void drawPreviewCard(Renderer& renderer, const AppModel& model, const Theme& the
 
     renderer.text(L"Оверлей поверх игры", Rect{ inner.left, inner.top, inner.right, inner.top + 22.0f },
         TextRole::Heading, theme.text);
-    renderer.text(L"перетаскивание — прямо по оверлею; правый клик по нему возвращает это окно",
+    // Подпись карточки — как в прототипе; про перетаскивание говорит подсказка внизу.
+    renderer.text(L"Предпросмотр. В приложении — отдельное topmost-окно",
         Rect{ inner.left, inner.top + 20.0f, inner.right - 60.0f, inner.top + 38.0f }, TextRole::Tiny, theme.textFaint);
 
     const Rect tag{ inner.right - 72.0f, inner.top, inner.right, inner.top + 20.0f };

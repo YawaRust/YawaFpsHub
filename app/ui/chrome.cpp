@@ -193,7 +193,7 @@ std::string_view viewTitle(View view)
     case View::Overlay:
         return "Оверлей";
     case View::Settings:
-        return "Настройки";
+        return "Поведение и вид";
     }
     return "Обзор";
 }
@@ -203,12 +203,13 @@ std::string_view viewEyebrow(View view)
     switch (view) {
     case View::Dashboard:
         return "МОНИТОРИНГ";
+    // Надзаголовки совпадают с прототипом слово в слово: демо — эталон вида.
     case View::Sensors:
-        return "ДАТЧИКИ";
+        return "ПОКАЗАТЕЛИ";
     case View::Overlay:
-        return "НАЛОЖЕНИЕ ПОВЕРХ ИГРЫ";
+        return "ПОВЕРХ ИГРЫ";
     case View::Settings:
-        return "ПРИЛОЖЕНИЕ";
+        return "НАСТРОЙКИ";
     }
     return "МОНИТОРИНГ";
 }
