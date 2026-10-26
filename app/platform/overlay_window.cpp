@@ -254,13 +254,25 @@ void OverlayWindow::setSettings(const OverlaySettings& settings)
     // иначе анимировать было бы нечего. Сдвиг и подписи не анимируем — при
     // перетаскивании setSettings приходит на каждое движение мыши.
     const OverlaySettings previous = animatedSettings();
+    // Анимируем только «крупные» изменения: стиль, геометрию и прозрачность. Цвета,
+    // отступы, шрифт и подписи применяются сразу — иначе каждый пиксель ползунка
+    // перезапускал анимацию, и оверлей дрожал вместо плавного изменения.
+    const bool styleChanged = settings.style != m_settings.style;
+    const bool chromeChanged = settings.layout != m_settings.layout
+        || settings.position != m_settings.position || settings.showBackground != m_settings.showBackground
+        || settings.showBorder != m_settings.showBorder || settings.showShadow != m_settings.showShadow
+        || settings.cornerRadius != m_settings.cornerRadius
+        || settings.scalePercent != m_settings.scalePercent
+        || settings.opacityPercent != m_settings.opacityPercent
+        || settings.backgroundOpacityPercent != m_settings.backgroundOpacityPercent;
+    const bool movedOnly = settings.offsetX != m_settings.offsetX || settings.offsetY != m_settings.offsetY;
     m_settings = settings;
-    const bool movedOnly = settings.offsetX != previous.offsetX || settings.offsetY != previous.offsetY;
-    if (movedOnly) {
+    // Сдвиг и «мелкие» настройки рисуем сразу, без анимации.
+    if (movedOnly || (!styleChanged && !chromeChanged)) {
         repaint();
         return;
     }
-    startAnimation(previous);
+    startAnimation(previous, styleChanged);
     repaint();
 }
 
@@ -305,7 +317,7 @@ void OverlayWindow::endDrag()
     }
 }
 
-void OverlayWindow::startAnimation(const OverlaySettings& from)
+void OverlayWindow::startAnimation(const OverlaySettings& from, bool fadeContent)
 {
     if (!m_visible) {
         m_animProgress = 1.0f;
@@ -320,8 +332,12 @@ void OverlayWindow::startAnimation(const OverlaySettings& from)
     m_animToScale = static_cast<float>(m_settings.scalePercent) / 100.0f;
     m_animToOpacity = static_cast<float>(m_settings.opacityPercent) / 100.0f;
     m_animToRadius = static_cast<float>(m_settings.cornerRadius);
-    m_animProgress = 0.0f;
-    m_fade = 0.0f;
+    // Если анимация уже идёт, продолжаем с середины: значения догоняют ползунок
+    // без рывка и без паузы в четверть секунды.
+    m_animProgress = m_animating ? 0.35f : 0.0f;
+    if (fadeContent) {
+        m_fade = 0.0f;
+    }
     m_animating = true;
     if (m_window != nullptr) {
         SetTimer(m_window, 1, 16, nullptr);

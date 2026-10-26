@@ -986,7 +986,8 @@ body.is-compact .chart-wrap--frames canvas { height: 96px; }
   transform: translate(var(--osd-shift-x, 0px), var(--osd-shift-y, 0px)) scale(var(--osd-scale, 1));
   font-variant-numeric: tabular-nums;
   box-shadow: 0 12px 30px -18px rgba(0, 0, 0, 0.9);
-  transition: transform 180ms ease, background 180ms ease, inset 220ms ease;
+  transition: transform 180ms ease, background 180ms ease, inset 220ms ease, padding 180ms ease,
+    row-gap 180ms ease, color 180ms ease;
   max-width: 46%;
 }
 
@@ -1016,7 +1017,7 @@ body.is-compact .chart-wrap--frames canvas { height: 96px; }
 .swatch.is-active { outline: 2px solid rgba(94, 242, 155, 0.6); outline-offset: 1px; color: #e9eef4; }
 
 .osd { --osd-text: 1; }
-.osd .osd__val { font-size: calc(18px * var(--osd-text, 1)); }
+.osd .osd__val { font-size: calc(18px * var(--osd-text, 1)); transition: font-size 180ms ease; }
 .osd .osd__val--sm { font-size: calc(12.5px * var(--osd-text, 1)); }
 .osd .osd__key { font-size: calc(9.5px * var(--osd-text, 1)); }
 .osd .osd__unit { font-size: calc(9.5px * var(--osd-text, 1)); }

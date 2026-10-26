@@ -93,9 +93,10 @@ void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
     // Заголовок карточки занимает 36 px: крупное число начинается ниже, иначе
     // подзаголовок «игра · цель 60 Гц» проступал сквозь цифры.
     const float numberTop = inner.top + 54.0f;
-    // Без запущенной игры честнее прочерк: «0 fps» читалось как реальный ноль кадров.
+    // Число показываем всегда: прочерк крупным кеглем читался как сломанный шрифт.
+    // Что кадров ещё нет, объясняет подпись под числом.
     const bool hasFrames = model.etwRunning && model.fps.currentFps > 0.0;
-    const std::wstring value = hasFrames ? wideNumber(model.fps.currentFps, MetricUnit::Count, 0) : L"—";
+    const std::wstring value = wideNumber(model.fps.currentFps, MetricUnit::Count, 0);
     const float valueWidth = renderer.measureText(value, TextRole::Display);
     renderer.text(value, Rect{ inner.left - 2.0f, numberTop, inner.left + valueWidth + 8.0f, numberTop + 84.0f },
         TextRole::Display, model.etwRunning ? theme.accent : theme.textFaint);

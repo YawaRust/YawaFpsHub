@@ -86,6 +86,13 @@ RTSS, а не по одному последнему кадру: иначе зн
 `HKLM\HARDWARE\DESCRIPTION\System\CentralProcessor\0\ProcessorNameString`, чистится от
 `(R)`, `(TM)`, «CPU», «N-Core Processor» и «@ x.xxGHz» — остаётся «Ryzen 7 7800X3D».
 
+## Монитор
+
+Разрешение и герцовка основного экрана читаются через `EnumDisplaySettingsW(ENUM_CURRENT_SETTINGS)`,
+имя — через `EnumDisplayDevicesW`. Они показываются в подзаголовке карточки «Кадры в секунду»,
+на экране «Настройки» и служат целью кадра по умолчанию (`target_auto = 1`), чтобы бюджет кадра
+считался от реальной герцовки, а не от константы 60 Гц.
+
 ## Остальное
 
 - **PDH** `\Processor Information(_Total)\% Processor Performance` × номинальная частота из

@@ -69,7 +69,7 @@ private:
     void beginDrag(int screenX, int screenY);
     void updateDrag(int screenX, int screenY);
     void endDrag();
-    void startAnimation(const OverlaySettings& from);
+    void startAnimation(const OverlaySettings& from, bool fadeContent);
     void tickAnimation();
     OverlaySettings animatedSettings() const;
 
