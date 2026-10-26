@@ -1,4 +1,6 @@
+#include "metrics/overlay_metric.h"
 #include "metrics/overlay_rows.h"
+#include "metrics/smbios_memory.h"
 #include "ui/settings.h"
 
 #include "test_support.h"
@@ -38,15 +40,15 @@ namespace {
             store.set(metric.id, 42.0);
         }
         auto rows = overlayMetricRows(settings, store);
-        CHECK(rows.size() == kMetricCount);
+        CHECK(rows.size() == kMetricCount - kPairedMetricDetails.size());
         for (const MetricInfo& metric : kMetricTable) {
             CHECK(std::count_if(rows.begin(), rows.end(), [&](const auto& row) {
-                return row.id == metric.id;
+                return row.id == displayMetric(metric.id);
             }) == 1);
         }
         settings.metrics[static_cast<std::size_t>(MetricId::CpuTemp)] = false;
         rows = overlayMetricRows(settings, store);
-        CHECK(rows.size() == kMetricCount - 1);
+        CHECK(rows.size() == kMetricCount - kPairedMetricDetails.size() - 1);
         CHECK(std::none_of(
             rows.begin(), rows.end(), [](const auto& row) { return row.id == MetricId::CpuTemp; }));
         CHECK(std::any_of(
@@ -57,7 +59,7 @@ namespace {
             settings.metrics[static_cast<std::size_t>(metric.id)] = true;
             rows = overlayMetricRows(settings, store);
             CHECK(rows.size() == 1);
-            CHECK(rows[0].id == metric.id);
+            CHECK(rows[0].id == displayMetric(metric.id));
             CHECK(!rows[0].value.empty());
             settings.metrics[static_cast<std::size_t>(metric.id)] = false;
         }
@@ -99,6 +101,78 @@ namespace {
         Settings parsed;
         CHECK(parseSettings(serializeSettings(settings), parsed, error));
         CHECK(parsed.overlay.metrics == settings.overlay.metrics);
+    }
+
+void testPairedMetricsAndOrder()
+{
+    OverlaySettings settings;
+    MetricStore store;
+    settings.metrics.fill(false);
+    store.set(MetricId::VramUsed, 2.0);
+    store.set(MetricId::VramTotal, 8.0);
+    store.set(MetricId::RamUsed, 6.0);
+    store.set(MetricId::RamFree, 10.0);
+    store.set(MetricId::PageFile, 3.0);
+    store.set(MetricId::PageFileTotal, 12.0);
+    store.set(MetricId::CpuLoad, 45.0);
+    store.set(MetricId::CpuPeakLoad, 89.0);
+    for (MetricId detail : kPairedMetricDetails) {
+        settings.metrics[static_cast<std::size_t>(detail)] = true;
+    }
+    auto rows = overlayMetricRows(settings, store);
+    CHECK(rows.size() == 4);
+    CHECK(rows[0].value.find("45") != std::string::npos);
+    CHECK(rows[0].value.find("89") != std::string::npos);
+    const auto vram = std::find_if(
+        rows.begin(), rows.end(), [](const auto& row) { return row.id == MetricId::VramUsed; });
+    CHECK(vram != rows.end());
+    if (vram != rows.end()) {
+        CHECK(vram->value.find("2,0 / 8,0") != std::string::npos);
+    }
+    moveOverlayMetric(settings, MetricId::VramTotal, MetricId::CpuLoad);
+    rows = overlayMetricRows(settings, store);
+    CHECK(rows.front().id == MetricId::VramUsed);
+    Settings saved;
+    saved.overlay = settings;
+    enableOverlayPixelLayout(saved.overlay);
+    saved.overlay.rowPositions[static_cast<std::size_t>(MetricId::VramUsed)] = { 30, 320, 17 };
+    Settings parsed;
+    std::string error;
+    CHECK(parseSettings(serializeSettings(saved), parsed, error));
+    CHECK(parsed.overlay.order == saved.overlay.order);
+    CHECK(parsed.overlay.pixelLayout);
+    CHECK(parsed.overlay.rowPositions[static_cast<std::size_t>(MetricId::VramUsed)].valueX == 320);
+    CHECK(parsed.overlay.rowPositions[static_cast<std::size_t>(MetricId::VramUsed)].y == 17);
+    CHECK(parseSettings("[overlay_order]\nrows = fps,fps\n", parsed, error));
+    CHECK(parsed.overlay.order == defaultOverlayOrder());
+    std::string extra = "[overlay_order]\nrows = ";
+    for (const MetricInfo& metric : kMetricTable) {
+        if (extra.back() != ' ') { extra += ','; }
+        extra += metric.key;
+    }
+    extra += ",fps\n";
+    CHECK(parseSettings(extra, parsed, error));
+    CHECK(parsed.overlay.order == defaultOverlayOrder());
+    extra.erase(extra.size() - 4); // после последней запятой — пустое поле
+    extra += "\n";
+    CHECK(parseSettings(extra, parsed, error));
+    CHECK(parsed.overlay.order == defaultOverlayOrder());
+    CHECK(parseSettings("[overlay_positions]\nvram_used = -50,999,17\n", parsed, error));
+    CHECK(parsed.overlay.rowPositions[static_cast<std::size_t>(MetricId::VramUsed)].y == -1);
+}
+
+void testSmbiosModuleSizes()
+{
+    CHECK(smbiosModuleSizeGb(0x7fff, 32768) == 32.0);
+    CHECK(smbiosModuleSizeGb(0x7fff, 0) == 0.0);
+    CHECK(smbiosModuleSizeGb(0x7fff, 1024) == 1.0);
+    CHECK(smbiosModuleSizeGb(0x8200, 0) == 0.0);
+    CHECK(smbiosModuleSizeGb(0xffff, 0) == 0.0);
+    CHECK(smbiosModuleSizeGb(0, 0) == 0.0);
+    CHECK(smbiosModuleSizeGb(0x8001, 0) == 0.0);
+    CHECK(smbiosSizesPlausible(32.0, 31.5));
+    CHECK(!smbiosSizesPlausible(2.0, 16.0));
+    CHECK(!smbiosSizesPlausible(64.0, 16.0));
     }
 
 void testDefaultsRoundTrip()
@@ -309,6 +383,8 @@ void runSettingsTests()
     testEverySelectedSensorReachesOverlay();
     testUnavailableAndZeroOverlaySensors();
     testLegacyOverlaySelection();
+    testPairedMetricsAndOrder();
+    testSmbiosModuleSizes();
     testDefaultsRoundTrip();
     testOverlayCustomization();
     testOverlayCustomizationClamps();

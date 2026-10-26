@@ -946,21 +946,11 @@ std::array<Color, kOverlayColorCount> overlayColorPalette()
 OverlayText makeOverlayText(const OverlaySettings& settings, const MetricStore& store)
 {
     OverlayText text;
-    text.labels.resize(kLabelCount);
-    text.values.resize(kLabelCount);
-    text.visible.resize(kLabelCount, false);
     for (const OverlayMetricRow& row : overlayMetricRows(settings, store)) {
-        const auto primary = std::find(kOverlayPrimaryMetrics.begin(), kOverlayPrimaryMetrics.end(), row.id);
-        std::size_t index = static_cast<std::size_t>(primary - kOverlayPrimaryMetrics.begin());
-        if (primary == kOverlayPrimaryMetrics.end()) {
-            index = text.labels.size();
-            text.labels.emplace_back();
-            text.values.emplace_back();
-            text.visible.push_back(false);
-        }
-        text.labels[index] = wideLabel(row.label);
-        text.values[index] = wideLabel(row.value);
-        text.visible[index] = true;
+        text.labels.push_back(wideLabel(row.label));
+        text.values.push_back(wideLabel(row.value));
+        text.visible.push_back(true);
+        text.ids.push_back(row.id);
     }
     return text;
 }
@@ -1008,6 +998,10 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
         look.separators = settings.separatorsMode == 1;
     }
     look.letterSpacing *= static_cast<float>(std::clamp(settings.letterSpacing, 0, 200)) / 100.0f;
+    // Увеличенный шрифт требует большего шага строк: иначе цифры перекрывают друг друга.
+    if (settings.layout == OverlayLayout::Plates && settings.textScalePercent > 100) {
+        look.rowGap += static_cast<float>(settings.textScalePercent - 100) * 0.18f;
+    }
     // Размер шрифта отдельно от масштаба плашки: 85…130 %.
     const float textFactor = static_cast<float>(std::clamp(settings.textScalePercent, 85, 130)) / 100.0f;
     const float backgroundOpacity = settings.backgroundOpacityPercent >= 0
@@ -1108,6 +1102,14 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
         const float step = settings.style == OverlayStyle::Rtss ? 19.0f : 18.0f + look.rowGap;
         spec.height = std::max(spec.height, head + bodyRows * step + look.padding + 8.0f);
     }
+    if (settings.pixelLayout && !text.ids.empty()) {
+        spec.width = 520.0f;
+        spec.height = 80.0f;
+        for (MetricId id : text.ids) {
+            const auto& row = settings.rowPositions[static_cast<std::size_t>(id)];
+            spec.height = std::max(spec.height, static_cast<float>((row.y >= 0 ? row.y : 12) + 30));
+        }
+    }
     const float width = spec.width * scale;
     const float height = spec.height * scale;
     // Не обрезаем длинный список границами монитора или предпросмотра.
@@ -1139,7 +1141,25 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
     Painter painter(target, theme, scaled, scale, opacity, chrome, settings.textOutline);
     painter.setBackgroundOpacity(backgroundOpacity);
 
-    if (settings.layout == OverlayLayout::Line) {
+    if (settings.pixelLayout && !text.ids.empty()) {
+        painter.plate(frame, look.radius * scale, look.background);
+        painter.outline(frame, look.radius * scale, look.border, 1.0f);
+        for (std::size_t i = 0; i < text.ids.size(); ++i) {
+            if (!rowShown(text, i)) {
+                continue;
+            }
+            const auto& row = settings.rowPositions[static_cast<std::size_t>(text.ids[i])];
+            const float y
+                = frame.top + static_cast<float>(row.y >= 0 ? row.y : 12 + static_cast<int>(i) * 28) * scale;
+            painter.text(text.labels[i],
+                Rect { frame.left + row.labelX * scale, y, frame.left + (row.labelX + 230) * scale,
+                    y + 26.0f * scale },
+                TextRole::Small, look.label);
+            painter.text(text.values[i],
+                Rect { frame.left + row.valueX * scale, y, frame.left + 505.0f * scale, y + 26.0f * scale },
+                TextRole::Small, look.palette[i % kLabelCount]);
+        }
+    } else if (settings.layout == OverlayLayout::Line) {
         drawInline(painter, settings, text, frame, look);
     } else {
         switch (settings.style) {

@@ -4,6 +4,7 @@
 // производителей и сети приложение не требует.
 #include "platform/hardware_info_win.h"
 #include "metrics/gpu_registry.h"
+#include "metrics/smbios_memory.h"
 #include "platform/win_util.h"
 
 #include <windows.h>
@@ -244,7 +245,6 @@ void collectSmbiosMemory(HardwareIdentity& info)
     // SMBIOS 2.7 перешёл с мегагерц на мегаперехваты в секунду; до него удваиваем.
     const bool speedInMhz = table[1] < 2 || (table[1] == 2 && table[2] < 7);
     const double speedScale = speedInMhz ? 2.0 : 1.0;
-    std::string channelLetters;
     while (cursor + 4 <= limit) {
         const BYTE type = cursor[0];
         const BYTE length = cursor[1];
@@ -292,29 +292,16 @@ void collectSmbiosMemory(HardwareIdentity& info)
             const WORD devices = at(0x10);
             slots = std::max<std::uint32_t>(slots, devices);
         } else if (type == 17 && length >= 0x13) {
-            // Память по DMTF: размер — 10h, тип — 16h, скорость SPD — 19h, строки
+            // Память по DMTF: размер — 10h, тип — 16h, заявленная скорость — 19h, строки
             // слота/вендора/партномера — 14h/1Bh/1Eh, конфигурационная частота — 24h.
             const WORD rawSize = at(0x10);
             MemoryModule module;
-            if (rawSize != 0 && rawSize != 0xFFFF) {
-                const double megabytes = (rawSize & 0x8000) != 0
-                    ? static_cast<double>(rawSize & 0x7FFF) / 1024.0
-                    : static_cast<double>(rawSize);
-                double sizeGb = megabytes / 1024.0;
-                if (sizeGb <= 0.0 && length >= 0x24) {
-                    // 20h — расширенный размер в МБ для планок больше 32 ГБ.
-                    DWORD extended = 0;
-                    if (cursor + 0x24 <= limit) {
-                        std::memcpy(&extended, cursor + 0x20, sizeof(extended));
-                    }
-                    sizeGb = static_cast<double>(extended) / 1024.0;
-                }
-                if (sizeGb <= 0.0) {
-                    module.populated = false;
-                }
-                module.sizeGb = sizeGb;
-                module.populated = sizeGb > 0.0;
+            std::uint32_t extendedMb = 0;
+            if (rawSize == 0x7fff && length >= 0x24) {
+                std::memcpy(&extendedMb, cursor + 0x20, sizeof(extendedMb));
             }
+            module.sizeGb = smbiosModuleSizeGb(rawSize, extendedMb);
+            module.populated = rawSize != 0 && rawSize != 0xffff;
 
             if (module.populated) {
                 const WORD rated = at(0x19);
@@ -327,12 +314,6 @@ void collectSmbiosMemory(HardwareIdentity& info)
                 module.slot = stringAt(byteAt(0x14));
                 module.vendor = stringAt(byteAt(0x1B));
                 module.part = stringAt(byteAt(0x1E));
-                for (const char symbol : module.slot) {
-                    const char upper = static_cast<char>(std::toupper(static_cast<unsigned char>(symbol)));
-                    if (upper >= 'A' && upper <= 'H' && channelLetters.find(upper) == std::string::npos) {
-                        channelLetters.push_back(upper);
-                    }
-                }
                 modules.push_back(module);
             }
         }
@@ -345,10 +326,21 @@ void collectSmbiosMemory(HardwareIdentity& info)
         cursor = scan + 2;
     }
 
+    // Некоторые BIOS сообщают ранги как отдельные планки по 1 ГБ. Если сумма
+    // Type 17 расходится с доступным физическим объёмом, не показываем ложный размер слота.
+    double reportedGb = 0.0;
+    for (const auto& module : modules) {
+        reportedGb += module.sizeGb;
+    }
+    if (!modules.empty() && !smbiosSizesPlausible(reportedGb, info.memory.totalGb)) {
+        for (auto& module : modules) {
+            module.sizeGb = 0.0;
+        }
+    }
+
     if (!modules.empty()) {
         info.memory.modules = modules;
         info.memory.slots = std::max<std::uint32_t>(slots, static_cast<std::uint32_t>(modules.size()));
-        info.memory.channels = static_cast<std::uint32_t>(channelLetters.size());
     }
 }
 
@@ -363,15 +355,12 @@ void collectMemory(HardwareIdentity& info)
     // SMBIOS даёт раскладку по слотам; если он молчит (виртуалка, старый BIOS),
     // остаются только гигабайты из GlobalMemoryStatusEx.
     collectSmbiosMemory(info);
-
-    std::uint32_t populated = 0;
     double rated = 0.0;
     double configured = 0.0;
     for (const MemoryModule& module : info.memory.modules) {
         if (!module.populated) {
             continue;
         }
-        ++populated;
         rated = std::max(rated, module.ratedMt);
         configured = std::max(configured, module.configuredMt);
         if (info.memory.type.empty()) {
@@ -381,11 +370,6 @@ void collectMemory(HardwareIdentity& info)
 
     info.memory.ratedMt = rated;
     info.memory.configuredMt = configured > 0.0 ? configured : rated;
-    // Разница паспортной и рабочей частот — и есть признак невыключенного XMP/EXPO.
-    info.memory.profileEnabled = rated <= 0.0 || configured <= 0.0 || configured + 1.0 >= rated;
-    // Один заселённый слот из двух и больше — это одноканальный режим, его можно
-    // утверждать. Сколько именно каналов при двух планках — сказать без SMBus нельзя.
-    info.memory.singleChannel = populated == 1 && (info.memory.slots == 0 || info.memory.slots >= 2);
 }
 
 void collectDisplays(HardwareIdentity& info)
@@ -427,7 +411,7 @@ void collectDisplays(HardwareIdentity& info)
 
 void collectDisks(HardwareIdentity& info)
 {
-    // Диски — из WMI, как и температуры, но без драйвера: Win32_DiskDrive отдаёт
+    // Диски — из WMI без драйвера: Win32_DiskDrive отдаёт
     // модель, тип интерфейса и размер любого накопителя, будь то NVMe, SATA или USB.
     const HRESULT comResult = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     const bool comReady = SUCCEEDED(comResult) || comResult == RPC_E_CHANGED_MODE;

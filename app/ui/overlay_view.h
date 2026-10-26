@@ -8,6 +8,8 @@
 
 namespace yawa {
 
+float overlayOrderCardHeight(const OverlaySettings& settings);
+
 void drawOverlayView(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area,
     std::vector<UiHit>& hits);
 

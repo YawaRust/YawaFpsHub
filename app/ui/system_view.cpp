@@ -169,10 +169,7 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
     }
 
     const double tck = memory.cycleTimeNs();
-    std::wstring profile = memory.profileEnabled ? L"включён" : L"не включён";
-    if (memory.ratedMt <= 0.0) {
-        profile = L"нет данных";
-    }
+    const std::wstring profile = L"не определяется из SMBIOS";
 
     std::wstring slots = L"—";
     if (memory.slots > 0) {
@@ -209,8 +206,9 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
             break;
         }
 
-        std::wstring left = (module.slot.empty() ? std::wstring(L"слот") : wideText(module.slot))
-            + L" · " + wideText(formatValue(module.sizeGb, 0) + " ГБ");
+        std::wstring left = (module.slot.empty() ? std::wstring(L"слот") : wideText(module.slot)) + L" · ";
+        left += module.sizeGb > 0.0 ? wideText(formatValue(module.sizeGb, module.sizeGb < 1.0 ? 1 : 0) + " ГБ")
+                                    : L"объём не подтверждён";
         if (!module.type.empty()) {
             left += wideText(" " + module.type);
         }
@@ -245,9 +243,9 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
 
     if (top + 30.0f <= inner.bottom) {
         drawWrappedText(renderer,
-            L"Точные тайминги (tCL-tRCD-tRP-tRAS) лежат в SPD на шине SMBus: их нельзя прочитать "
-            L"без драйвера, а драйверы приложение не ставит и не грузит.",
-            Rect{ inner.left, inner.bottom - 28.0f, inner.right, inner.bottom }, TextRole::Tiny, theme.textFaint,
+                L"Текущие tCL-tRCD-tRP-tRAS не сообщает SMBIOS; tCK вычислен из скорости. "
+                L"PawnIO не содержит безопасного декодера SPD/контроллера памяти: тайминги пока недоступны.",
+                Rect { inner.left, inner.bottom - 28.0f, inner.right, inner.bottom }, TextRole::Tiny, theme.textFaint,
             12.0f, 2);
     }
 }
@@ -380,12 +378,16 @@ void drawSystemView(Renderer& renderer, const AppModel& model, const Theme& them
     drawCardHeader(renderer, note, L"Откуда эти числа",
         L"реестр, CPUID, SMBIOS, DXGI и EnumDisplaySettings — без драйверов и без сети", theme);
     drawWrappedText(renderer,
-        L"Версию Windows берём из CurrentVersion — оттуда же её берёт winver, поэтому карточка и окно «О системе» "
-        L"совпадают. Модель процессора читается прямо из CPUID, ядра и кэш — из GetLogicalProcessorInformationEx. "
-        L"Видеокарты перечисляет DXGI, а версию драйвера добавляет реестр класса Display. Модули памяти и их частоты "
-        L"приложение берёт из таблиц SMBIOS, которые BIOS собирает из SPD: именно так видно «2×16 ГБ», а не только "
+        L"Версию Windows берём из CurrentVersion — оттуда же её берёт winver, поэтому карточка и окно «О "
+        L"системе» "
+        L"совпадают. Модель процессора читается прямо из CPUID, ядра и кэш — из "
+        L"GetLogicalProcessorInformationEx. "
+        L"Видеокарты перечисляет DXGI, а версию драйвера добавляет реестр класса Display. Модули памяти и их "
+        L"частоты "
+        L"приложение берёт из таблиц SMBIOS, которые BIOS собирает из SPD: именно так видно «2×16 ГБ», а не "
+        L"только "
         L"«32 ГБ» суммарно.",
-        Rect{ inner.left, inner.top + 40.0f, inner.right, inner.bottom }, TextRole::Small, theme.textDim, 15.0f, 4);
+        Rect { inner.left, inner.top + 40.0f, inner.right, inner.bottom }, TextRole::Small, theme.textDim, 15.0f, 4);
 }
 
 } // namespace yawa

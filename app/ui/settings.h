@@ -22,6 +22,14 @@ inline constexpr std::array<MetricId, kLabelCount> kOverlayPrimaryMetrics { Metr
     MetricId::GpuLoad, MetricId::RamUsed, MetricId::VramUsed };
 
 std::array<bool, kMetricCount> defaultOverlayMetrics();
+std::array<MetricId, kMetricCount> defaultOverlayOrder();
+
+struct OverlayRowPosition
+{
+    int labelX = 12;
+    int valueX = 252;
+    int y = -1;
+};
 
 struct CaptureSettings {
     int intervalMs = 1000;
@@ -89,6 +97,9 @@ struct OverlaySettings {
     bool clickThrough = false;
     // visible оставлен только для переноса настроек из старого ini.
     std::array<bool, kMetricCount> metrics = defaultOverlayMetrics();
+    std::array<MetricId, kMetricCount> order = defaultOverlayOrder();
+    bool pixelLayout = false;
+    std::array<OverlayRowPosition, kMetricCount> rowPositions { };
     std::array<bool, kLabelCount> visible{ true, true, true, true, true };
     std::array<std::string, kLabelCount> labels{ "FPS", "CPU", "GPU", "RAM", "VRAM" };
 };
@@ -127,6 +138,8 @@ struct Settings {
 };
 
 Settings defaultSettings();
+void moveOverlayMetric(OverlaySettings& settings, MetricId moved, MetricId before);
+void enableOverlayPixelLayout(OverlaySettings& settings);
 
 // Формат — docs/settings.md. Неизвестные ключи пропускаются, отсутствующие остаются
 // значениями по умолчанию: файл мог остаться от прошлой версии.

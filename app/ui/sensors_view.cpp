@@ -1,6 +1,7 @@
 #include "ui/sensors_view.h"
 #include "ui/layout.h"
 
+#include "metrics/overlay_metric.h"
 #include "metrics/units.h"
 
 #include <algorithm>
@@ -31,12 +32,14 @@ constexpr float kGroupHeight = 30.0f;
 
 std::vector<Group> makeGroups(std::uint32_t cores)
 {
-    std::vector<MetricId> cpu { MetricId::CpuLoad, MetricId::CpuTemp, MetricId::CpuClock, MetricId::CpuPower,
-        MetricId::CpuPeakLoad, MetricId::GameThreadLoad };
+    std::vector<MetricId> cpu { MetricId::CpuLoad };
     // Ядра добавляются только реально существующие: пустых строк «Ядро 17» быть не должно.
     for (std::uint32_t index = 0; index < std::min<std::uint32_t>(cores, 16); ++index) {
         cpu.push_back(static_cast<MetricId>(static_cast<std::size_t>(MetricId::Core0Load) + index));
     }
+
+    cpu.insert(cpu.end(),
+        { MetricId::CpuTemp, MetricId::CpuClock, MetricId::CpuPower, MetricId::GameThreadLoad });
 
     return {
         { L"Кадры", { MetricId::Fps, MetricId::FrameTime, MetricId::Low1Fps, MetricId::Low01Fps, MetricId::AvgFps,
@@ -44,9 +47,9 @@ std::vector<Group> makeGroups(std::uint32_t cores)
         { L"Процессор", std::move(cpu) },
         { L"Видеокарта", { MetricId::GpuLoad, MetricId::GpuTemp, MetricId::GpuHotspot, MetricId::GpuClock,
                              MetricId::GpuMemClock, MetricId::GpuPower, MetricId::GpuFan, MetricId::GpuEncode,
-                             MetricId::GpuDecode, MetricId::PcieLoad, MetricId::VramUsed, MetricId::VramTotal } },
-        { L"Память", { MetricId::RamUsed, MetricId::RamLoad, MetricId::RamCache, MetricId::RamFree,
-                         MetricId::PageFile, MetricId::PageFileTotal, MetricId::PageFileLoad } },
+                             MetricId::GpuDecode, MetricId::PcieLoad, MetricId::VramUsed } },
+        { L"Память", { MetricId::RamUsed, MetricId::RamLoad, MetricId::RamCache, MetricId::PageFile,
+                         MetricId::PageFileLoad } },
         { L"Диски и сеть", { MetricId::DiskRead, MetricId::DiskWrite, MetricId::DiskTemp, MetricId::NetDown,
                                MetricId::NetUp } },
         { L"Система", { MetricId::ChipsetTemp, MetricId::SelfCpu, MetricId::SelfRam, MetricId::SelfThreads } },
@@ -296,7 +299,13 @@ void drawSensors(Renderer& renderer, AppModel& model, const Theme& theme, const 
             if (!matchesQuery(id, group.title, query)) {
                 continue;
             }
-            if (model.overlayOnly && !model.settings.overlay.metrics[static_cast<std::size_t>(id)]) {
+            bool pinned = model.settings.overlay.metrics[static_cast<std::size_t>(id)];
+            for (MetricId detail : kPairedMetricDetails) {
+                if (displayMetric(detail) == id) {
+                    pinned |= model.settings.overlay.metrics[static_cast<std::size_t>(detail)];
+                }
+            }
+            if (model.overlayOnly && !pinned) {
                 continue;
             }
             if (!started) {
@@ -370,15 +379,24 @@ void drawSensors(Renderer& renderer, AppModel& model, const Theme& theme, const 
 
             // Пип группы и название.
             renderer.fillCircle(nameX + 3.0f, rowTop + kRowHeight * 0.5f, 3.0f, pipColor(entries[index].group, theme));
-            renderer.text(wideText(info.label), Rect{ nameX + 14.0f, rowTop, valueRight - 120.0f,
+            renderer.text(id == MetricId::VramUsed ? L"Видеопамять занято / всего"
+                    : id == MetricId::RamUsed      ? L"ОЗУ занято / всего"
+                    : id == MetricId::PageFile     ? L"Файл подкачки занято / всего"
+                    : id == MetricId::CpuLoad      ? L"CPU общий / пик ядра"
+                                                   : wideText(info.label),
+                Rect{ nameX + 14.0f, rowTop, valueRight - 120.0f,
                                                      rowTop + kRowHeight },
                 TextRole::Small, known ? theme.textDim : theme.textFaint);
 
             // Значение крупнее остальных, единица — мелким шрифтом через пробел.
             // Недоступный датчик пишет причину словами: прочерк читался как сломанный интерфейс.
-            const std::wstring value = known ? wideText(formatValue(slot.stats.current, info.decimals))
+            const bool combined = id == MetricId::VramUsed || id == MetricId::RamUsed
+                || id == MetricId::PageFile || id == MetricId::CpuLoad;
+            const std::wstring value = known
+                ? wideText(combined ? displayMetricValue(id, model.store)
+                                    : formatValue(slot.stats.current, info.decimals))
                                              : L"нет данных";
-            const std::wstring unit = known ? wideText(unitSuffix(info.unit)) : std::wstring();
+            const std::wstring unit = known && !combined ? wideText(unitSuffix(info.unit)) : std::wstring();
             const float unitWidth = unit.empty() ? 0.0f : renderer.measureText(unit, TextRole::Tiny) + 4.0f;
             // Значение — главное в строке: крупнее подписи, как в демо.
             renderer.text(value, Rect{ valueRight - 130.0f - unitWidth, rowTop, valueRight - unitWidth,
@@ -418,7 +436,12 @@ void drawSensors(Renderer& renderer, AppModel& model, const Theme& theme, const 
             // 26×30 мышью было почти невозможно.
             const Rect eyeHit{ rowRight - 40.0f, rowTop, rowRight - 2.0f, rowTop + kRowHeight };
             const Rect eye{ rowRight - 34.0f, rowTop + 4.0f, rowRight - 6.0f, rowTop + kRowHeight - 4.0f };
-            const bool pinned = model.settings.overlay.metrics[metricIndex];
+            bool pinned = model.settings.overlay.metrics[metricIndex];
+            for (MetricId detail : kPairedMetricDetails) {
+                if (displayMetric(detail) == id) {
+                    pinned |= model.settings.overlay.metrics[static_cast<std::size_t>(detail)];
+                }
+            }
             const bool eyeHover = isHovered(model, eyeHit);
             // Как в демо: выключенный «глаз» — серый перечёркнутый контур, включённый — зелёный чип.
             const Color eyeColor = pinned ? theme.accent : (eyeHover ? theme.textDim : theme.textFaint);

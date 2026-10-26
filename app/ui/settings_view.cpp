@@ -327,8 +327,8 @@ void drawSourcesCard(Renderer& renderer, const AppModel& model, const Theme& the
             L"ядро драйвера, без установки" },
         { L"NVML · температура и питание GPU", L"nvml.dll из драйвера NVIDIA", availability.gpuTemperature,
             L"только NVIDIA" },
-        { L"Датчики CPU и чипсета", L"ACPI-термозона и PDH, без MSR-драйвера", availability.cpuTemperature,
-            L"драйвер не нужен" } };
+        { L"Датчики CPU и чипсета", L"CPU: PawnIO + администратор; ACPI не кристалл",
+                availability.cpuTemperature, L"драйвер не нужен" } };
 
     // Две колонки по три источника: шесть строк в одну не помещаются на 1040x790.
     const float columnWidth = (inner.width() - 24.0f) / 2.0f;

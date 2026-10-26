@@ -22,7 +22,7 @@ target_link_libraries(yawa-probe PRIVATE
     dxgi
     pdh
     psapi
-    # WMI-фолбэк температуры CPU живёт в sensors_win.cpp, поэтому probe линкует те же библиотеки.
+    # COM используется для других системных сведений; температуру CPU берём только из аппаратного источника.
     ole32
     oleaut32
     wbemuuid

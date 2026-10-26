@@ -1,4 +1,5 @@
 #include "ui/overlay_view.h"
+#include "metrics/overlay_metric.h"
 #include "render/overlay_painter.h"
 #include "ui/hotkey_text.h"
 #include "ui/layout.h"
@@ -388,10 +389,18 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
     const Rect inner = card.inset(kCardPadding);
     const OverlaySettings& overlay = model.settings.overlay;
 
-    renderer.text(L"Настройка оверлея", Rect{ inner.left, inner.top, inner.right, inner.top + 22.0f },
+    renderer.text(L"Настройка оверлея", Rect{ inner.left, inner.top, inner.right - 140.0f, inner.top + 22.0f },
         TextRole::Heading, theme.text);
-    renderer.text(L"изменения сразу видны в предпросмотре",
-        Rect{ inner.left, inner.top + 20.0f, inner.right, inner.top + 36.0f }, TextRole::Tiny, theme.textFaint);
+    const Rect editorButton{ inner.right - 136.0f, inner.top, inner.right, inner.top + 24.0f };
+    drawChip(renderer, editorButton, L"Редактор ↗", overlay.pixelLayout, theme, TextRole::Tiny);
+    hits.push_back(UiHit{ editorButton, ActionKind::OpenOverlayEditor, 0 });
+    const bool hardToRead = overlay.opacityPercent < 30
+        || (!overlay.showBackground && overlay.textOutline == 0 && !overlay.showShadow);
+    renderer.text(hardToRead
+            ? L"Текст может сливаться с игрой: включите фон/тень или повысьте непрозрачность"
+            : L"изменения сразу видны в предпросмотре",
+        Rect{ inner.left, inner.top + 20.0f, inner.right, inner.top + 36.0f }, TextRole::Tiny,
+        hardToRead ? theme.warn : theme.textFaint);
 
     float top = inner.top + 40.0f;
 
@@ -656,7 +665,59 @@ void drawLabelsCard(Renderer& renderer, const AppModel& model, const Theme& them
     }
 }
 
+void drawOrderCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card,
+    std::vector<UiHit>& hits)
+{
+    drawCard(renderer, card, theme);
+    renderer.text(L"Порядок строк оверлея · перетащите ≡",
+        Rect{ card.left + 18.0f, card.top + 10.0f, card.right - 18.0f, card.top + 34.0f },
+        TextRole::Heading, theme.text);
+    float top = card.top + 40.0f;
+    for (MetricId id : model.settings.overlay.order) {
+        if (displayMetric(id) != id) {
+            continue;
+        }
+        bool selected = model.settings.overlay.metrics[static_cast<std::size_t>(id)];
+        for (MetricId detail : kPairedMetricDetails) {
+            if (displayMetric(detail) == id) {
+                selected |= model.settings.overlay.metrics[static_cast<std::size_t>(detail)];
+            }
+        }
+        if (!selected) {
+            continue;
+        }
+        const Rect row{ card.left + 18.0f, top, card.right - 18.0f, top + 24.0f };
+        renderer.fillRoundRect(row, 5.0f, isHovered(model, row) ? theme.accentSoft : theme.panelSoft);
+        renderer.text(L"≡", Rect{ row.left + 8.0f, top, row.left + 30.0f, top + 24.0f }, TextRole::Small,
+            theme.accent);
+        renderer.text(wideText(metricInfo(id).label),
+            Rect{ row.left + 34.0f, top, row.right - 16.0f, top + 24.0f }, TextRole::Small, theme.text);
+        hits.push_back(UiHit{ row, ActionKind::ReorderMetric, static_cast<int>(id) });
+        top += 27.0f;
+    }
+}
+
 } // namespace
+
+float overlayOrderCardHeight(const OverlaySettings& settings)
+{
+    std::size_t count = 0;
+    for (MetricId id : settings.order) {
+        if (displayMetric(id) != id) {
+            continue;
+        }
+        bool selected = settings.metrics[static_cast<std::size_t>(id)];
+        for (MetricId detail : kPairedMetricDetails) {
+            if (displayMetric(detail) == id) {
+                selected |= settings.metrics[static_cast<std::size_t>(detail)];
+            }
+        }
+        if (selected) {
+            ++count;
+        }
+    }
+    return 52.0f + 27.0f * static_cast<float>(count);
+}
 
 void drawOverlayView(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area,
     std::vector<UiHit>& hits)
@@ -687,6 +748,8 @@ void drawOverlayView(Renderer& renderer, const AppModel& model, const Theme& the
         drawCard(renderer, card, theme);
         drawStyleGallery(renderer, model, theme, card.inset(kCardPadding), hits);
     });
+    drawClipped(place(overlayOrderCardHeight(model.settings.overlay)),
+        [&](const Rect& card) { drawOrderCard(renderer, model, theme, card, hits); });
 }
 
 } // namespace yawa

@@ -4,6 +4,7 @@
 #include "metrics/system_sampler.h"
 #include "platform/etw_frames.h"
 #include "platform/log.h"
+#include "platform/overlay_editor.h"
 #include "platform/overlay_window.h"
 #include "platform/sensors_win.h"
 #include "render/d2d.h"
@@ -99,6 +100,7 @@ private:
 
     Renderer m_renderer;
     OverlayWindow m_overlay;
+    OverlayEditor m_overlayEditor;
     SystemSensors m_sensors;
     EtwFrameSession m_etw;
 
@@ -112,6 +114,7 @@ private:
     bool m_draggingScroll = false;
     bool m_draggingSensors = false;
     ActionKind m_dragAction = ActionKind::None;
+    MetricId m_dragMetric = MetricId::Fps;
     Rect m_dragRect;
     float m_dragStartX = 0.0f;
     float m_dragStartY = 0.0f;

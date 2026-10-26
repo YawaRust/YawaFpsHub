@@ -17,6 +17,7 @@ add_executable(YawaFpsHub WIN32
     platform/log.cpp
     platform/main_window.cpp
     platform/nvml_sensors.cpp
+    platform/overlay_editor.cpp
     platform/overlay_window.cpp
     platform/pawnio_sensors.cpp
     platform/pawnio_package.cpp

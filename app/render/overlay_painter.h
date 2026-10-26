@@ -16,6 +16,7 @@ struct OverlayText {
     std::vector<std::wstring> labels;
     std::vector<std::wstring> values;
     std::vector<bool> visible;
+    std::vector<MetricId> ids;
 };
 
 struct OverlayFormats {

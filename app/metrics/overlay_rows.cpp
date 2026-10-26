@@ -1,4 +1,5 @@
 #include "metrics/overlay_rows.h"
+#include "metrics/overlay_metric.h"
 #include "metrics/units.h"
 
 #include <algorithm>
@@ -27,8 +28,18 @@ namespace {
 std::vector<OverlayMetricRow> overlayMetricRows(const OverlaySettings& settings, const MetricStore& store)
 {
     std::vector<OverlayMetricRow> rows;
-    for (const MetricInfo& metric : kMetricTable) {
-        if (!settings.metrics[static_cast<std::size_t>(metric.id)]) {
+    for (MetricId id : settings.order) {
+        if (static_cast<std::size_t>(id) >= kMetricCount || displayMetric(id) != id) {
+            continue;
+        }
+        const MetricInfo& metric = metricInfo(id);
+        bool selected = settings.metrics[static_cast<std::size_t>(id)];
+        for (MetricId detail : kPairedMetricDetails) {
+            if (displayMetric(detail) == id) {
+                selected |= settings.metrics[static_cast<std::size_t>(detail)];
+            }
+        }
+        if (!selected) {
             continue;
         }
         std::string label(metric.label);
@@ -42,8 +53,12 @@ std::vector<OverlayMetricRow> overlayMetricRows(const OverlaySettings& settings,
             || metric.id == MetricId::AvgFps) {
             decimals = static_cast<std::uint8_t>(std::clamp(settings.fpsDecimals, 0, 2));
         }
+        const bool paired = std::any_of(kPairedMetricDetails.begin(), kPairedMetricDetails.end(),
+            [id](MetricId detail) { return displayMetric(detail) == id; });
         rows.push_back({ metric.id, label,
-            metricKnown(store, metric) ? formatWithUnit(store.value(metric.id), metric.unit, decimals)
+            metricKnown(store, metric)
+                ? (paired ? displayMetricValue(id, store)
+                          : formatWithUnit(store.value(metric.id), metric.unit, decimals))
                                        : "нет данных" });
     }
     return rows;

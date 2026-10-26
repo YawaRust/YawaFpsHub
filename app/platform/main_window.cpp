@@ -7,6 +7,7 @@
 #include "ui/chrome.h"
 #include "ui/overlay_view.h"
 #include "render/overlay_painter.h"
+#include "metrics/overlay_metric.h"
 #include "ui/dashboard_view.h"
 #include "ui/layout.h"
 #include "ui/sensors_view.h"
@@ -53,6 +54,7 @@ MainWindow::~MainWindow()
 {
     stopSampling();
     destroyTrayIcon();
+    m_overlayEditor.close();
     m_overlay.destroy();
     m_sensors.shutdown();
     m_renderer.shutdown();
@@ -506,6 +508,12 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             if (!hit.rect.contains(x, y)) {
                 continue;
             }
+            if (hit.action == ActionKind::ReorderMetric) {
+                m_dragAction = ActionKind::ReorderMetric;
+                m_dragMetric = static_cast<MetricId>(hit.value);
+                SetCapture(m_window);
+                return 0;
+            }
             if (hit.action == ActionKind::DragOverlay) {
                 m_dragAction = ActionKind::DragOverlay;
                 m_dragStartX = x;
@@ -614,6 +622,20 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
                 m_model.contentScroll = limit * fraction;
             }
             InvalidateRect(m_window, nullptr, FALSE);
+            return 0;
+        }
+
+        if (m_dragAction == ActionKind::ReorderMetric) {
+            for (const UiHit& hit : m_hits) {
+                if (hit.action == ActionKind::ReorderMetric && hit.value != static_cast<int>(m_dragMetric)
+                    && hit.rect.contains(cursorX, cursorY)) {
+                    moveOverlayMetric(m_model.settings.overlay, m_dragMetric,
+                        static_cast<MetricId>(hit.value));
+                    m_overlay.setSettings(m_model.settings.overlay);
+                    InvalidateRect(m_window, nullptr, FALSE);
+                    break;
+                }
+            }
             return 0;
         }
 
@@ -829,7 +851,7 @@ float MainWindow::contentDesignHeight() const
     case View::Sensors:
         return contentArea().height();
     case View::Overlay:
-        return kOverlayHeight;
+        return kOverlayHeight + kGap + overlayOrderCardHeight(m_model.settings.overlay);
     case View::Settings:
         return kSettingsHeight;
     case View::Bottleneck:
@@ -1433,8 +1455,25 @@ void MainWindow::applyAction(const UiHit& hit)
     case ActionKind::ToggleSensor:
         if (hit.value >= 0 && hit.value < static_cast<int>(kMetricCount)) {
             auto& selected = m_model.settings.overlay.metrics[static_cast<std::size_t>(hit.value)];
-            selected = !selected;
+            bool active = selected;
+            for (MetricId detail : kPairedMetricDetails) {
+                if (displayMetric(detail) == static_cast<MetricId>(hit.value)) {
+                    active |= m_model.settings.overlay.metrics[static_cast<std::size_t>(detail)];
+                }
+            }
+            selected = !active;
+            // У старых профилей «всего» было отдельным датчиком: глаз пары
+            // отключает и старую вторую строку, иначе она самопроизвольно вернётся.
+            for (MetricId detail : kPairedMetricDetails) {
+                if (displayMetric(detail) == static_cast<MetricId>(hit.value)) {
+                    m_model.settings.overlay.metrics[static_cast<std::size_t>(detail)] = false;
+                }
+            }
+            if (m_model.settings.overlay.pixelLayout) {
+                enableOverlayPixelLayout(m_model.settings.overlay);
+            }
             m_overlay.setSettings(m_model.settings.overlay);
+            m_overlayEditor.refresh();
             saveSettings();
         }
         break;
@@ -1488,6 +1527,23 @@ void MainWindow::applyAction(const UiHit& hit)
     case ActionKind::ToggleOverlayOnly:
         m_model.overlayOnly = !m_model.overlayOnly;
         m_model.sensorScroll = 0;
+        break;
+
+    case ActionKind::OpenOverlayEditor:
+        if (!m_overlayEditor.open(m_window, m_instance, m_model.settings.overlay, m_model.store,
+                [this](bool finished) {
+                    m_overlay.setSettings(m_model.settings.overlay);
+                    if (finished) {
+                        saveSettings();
+                    }
+                    InvalidateRect(m_window, nullptr, FALSE);
+                })
+            && m_log) {
+            m_log->warning("не удалось открыть редактор оверлея");
+        }
+        break;
+
+    case ActionKind::ReorderMetric:
         break;
 
     case ActionKind::DragOverlay:
@@ -1708,6 +1764,7 @@ void MainWindow::onTick()
     }
 
     m_overlay.repaint();
+    m_overlayEditor.refresh();
 
     // Свёрнутое или скрытое в трей окно не перерисовываем: это экономит CPU в простое.
     if (IsWindowVisible(m_window) != FALSE && IsIconic(m_window) == FALSE) {
