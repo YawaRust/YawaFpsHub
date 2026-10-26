@@ -118,6 +118,7 @@
     rowGap: null,
     valueColor: null,
     labelColor: null,
+    clickThrough: false,
     labels: { ...DEFAULT_LABELS }
   };
 
@@ -560,6 +561,8 @@
       ? `0 0 ${overlayState.outline}px #000, 0 0 ${overlayState.outline * 2}px #000`
       : "none");
 
+    // Сквозной клик: предпросмотр перестаёт ловить мышь, как настоящее окно поверх игры.
+    osd.classList.toggle("osd--click-through", overlayState.clickThrough);
     osd.classList.toggle("no-background", !overlayState.background);
     osd.classList.toggle("no-border", !overlayState.border);
     osd.classList.toggle("no-shadow", !overlayState.shadow);
@@ -675,7 +678,7 @@
     Space: "Space", Insert: "Insert", Delete: "Delete", Home: "Home", End: "End",
     PageUp: "PgUp", PageDown: "PgDn", PrintScreen: "PrtScr", Pause: "Pause", ScrollLock: "ScrollLock"
   };
-  const hotkeys = { overlay: "F10", position: "F11", window: "F12" };
+  const hotkeys = { overlay: "F10", position: "F11", window: "F12", clickThrough: "F9" };
   let hotkeyEditing = null;
 
   function bindHotkeys() {

@@ -53,6 +53,10 @@ LRESULT CALLBACK OverlayWindow::windowProc(HWND window, UINT message, WPARAM wPa
     case WM_NCHITTEST:
         // Окно прозрачно для мыши везде, кроме самого оверлея: клики по игре проходят,
         // а оверлей можно взять обычным нажатием левой кнопки и перетащить куда угодно.
+        if (self != nullptr && self->m_settings.clickThrough) {
+            // Сквозной клик: окно не забирает мышь даже над оверлеем, всё уходит в игру.
+            return HTTRANSPARENT;
+        }
         if (self != nullptr) {
             POINT point{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
             ScreenToClient(window, &point);
@@ -67,7 +71,7 @@ LRESULT CALLBACK OverlayWindow::windowProc(HWND window, UINT message, WPARAM wPa
         return HTTRANSPARENT;
 
     case WM_SETCURSOR:
-        if (self != nullptr) {
+        if (self != nullptr && !self->m_settings.clickThrough) {
             POINT cursor{};
             GetCursorPos(&cursor);
             ScreenToClient(window, &cursor);

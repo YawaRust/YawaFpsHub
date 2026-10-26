@@ -26,6 +26,8 @@ struct CaptureSettings {
     // 60 Гц — самый частый случай: на 120-герцовом профиле бюджет кадра считался бы
     // проваленным для любой игры, которая честно держит 60 кадров.
     int targetHz = 60;
+    // Авто: цель кадра берётся из герцовки монитора, определённой при запуске.
+    bool targetAuto = true;
 };
 
 struct OverlaySettings {
@@ -61,6 +63,9 @@ struct OverlaySettings {
     // -1 — цвет из пресета, 0…5 — цвет палитры для значений и для подписей.
     int valueColor = -1;
     int labelColor = -1;
+    // Сквозной клик: окно оверлея полностью пропускает мышь в игру. Выключается хоткеем,
+    // когда оверлей нужно перетащить.
+    bool clickThrough = false;
     // Состав: какие строки вообще показывать (fps, cpu, gpu, ram, vram).
     std::array<bool, kLabelCount> visible{ true, true, true, true, true };
     std::array<std::string, kLabelCount> labels{ "FPS", "CPU", "GPU", "RAM", "VRAM" };
@@ -85,6 +90,8 @@ struct HotkeySettings {
     unsigned int overlay = 0x79;
     unsigned int position = 0x7A;
     unsigned int window = 0x7B;
+    // F9 переключает сквозной клик по оверлею.
+    unsigned int clickThrough = 0x78;
 };
 
 struct Settings {

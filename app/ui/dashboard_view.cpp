@@ -80,8 +80,13 @@ void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
     const Rect inner = card.inset(kCardPadding);
 
     const std::wstring game = model.foregroundApp.empty() ? L"игр не запущено" : model.foregroundApp;
-    const std::wstring subtitle
-        = game + L" · цель " + wideText(std::to_string(model.settings.capture.targetHz) + " Гц");
+    // Разрешение и герцовка монитора рядом с игрой: приложение определяет их само.
+    std::wstring subtitle = game;
+    if (model.displayWidth > 0 && model.displayHeight > 0) {
+        subtitle += L" · " + std::to_wstring(model.displayWidth) + L"×" + std::to_wstring(model.displayHeight);
+    }
+    const int shownHz = model.displayRefreshHz > 0 ? model.displayRefreshHz : model.settings.capture.targetHz;
+    subtitle += L" · " + wideText(std::to_string(shownHz) + " Гц");
     drawCardHeader(renderer, card, L"Кадры в секунду", subtitle, theme);
     drawTag(renderer, card, model.etwRunning ? L"LIVE" : L"НЕТ ДАННЫХ", model.etwRunning, theme);
 
@@ -178,7 +183,7 @@ void drawSessionCard(Renderer& renderer, const AppModel& model, const Theme& the
     const Rect inner = card.inset(kCardPadding);
     drawCardHeader(renderer, card, L"Сессия", L"профиль включается по запуску игры", theme);
     // В демо строки начинаются ниже подзаголовка: 73 px от внутреннего края карточки.
-    float rowTop = inner.top + 73.0f;
+    float rowTop = inner.top + 62.0f;
 
     // Чип с временем сессии в правом верхнем углу карточки.
     {
@@ -210,7 +215,7 @@ void drawSessionCard(Renderer& renderer, const AppModel& model, const Theme& the
             return;
         }
         drawLabelValue(renderer, Rect{ inner.left, rowTop, inner.right, rowTop + 16.0f }, label, value, theme);
-        rowTop += 33.0f;
+        rowTop += 28.0f;
     }
 }
 
@@ -371,6 +376,20 @@ void drawGpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
 
         if (model.gpuMenuOpen) {
             const float listTop = inner.top + 34.0f;
+            // Список — отдельная непрозрачная панель: иначе строки адаптеров ложились
+            // поверх значений карточки и читались как наложение.
+            float drawnHeight = 0.0f;
+            for (std::size_t index = 0; index < model.gpuNames.size(); ++index) {
+                if (listTop + static_cast<float>(index) * 26.0f + 24.0f > inner.bottom - 30.0f) {
+                    break;
+                }
+                drawnHeight += 26.0f;
+            }
+            const Rect panel{ inner.left - 4.0f, listTop - 6.0f, inner.right + 4.0f,
+                listTop + std::max(drawnHeight, 26.0f) + 2.0f };
+            renderer.fillRoundRect(panel, 10.0f, theme.panel);
+            renderer.strokeRoundRect(panel, 10.0f, theme.lineStrong, 1.0f);
+
             for (std::size_t index = 0; index < model.gpuNames.size(); ++index) {
                 const float optionTop = listTop + static_cast<float>(index) * 26.0f;
                 if (optionTop + 24.0f > inner.bottom - 30.0f) {
@@ -648,16 +667,17 @@ void drawDashboard(Renderer& renderer, const AppModel& model, const Theme& theme
         return card;
     };
 
-    drawClipped(place(344.0f), [&](const Rect& card) { drawFpsCard(renderer, model, theme, card); });
-    drawClipped(place(350.0f), [&](const Rect& card) { drawSessionCard(renderer, model, theme, card); });
-    drawClipped(place(280.0f), [&](const Rect& card) { drawCpuCard(renderer, model, theme, card); });
-    drawClipped(place(246.0f), [&](const Rect& card) { drawGpuCard(renderer, model, theme, card, hits); });
-    drawClipped(place(286.0f), [&](const Rect& card) { drawMemoryCard(renderer, model, theme, card); });
-    drawClipped(place(288.0f), [&](const Rect& card) { drawPerformanceCard(renderer, model, theme, card); });
-    drawClipped(place(347.0f), [&](const Rect& card) { drawDiskNetCard(renderer, model, theme, card); });
-    drawClipped(columns.span(0.0f, 6.0f, top, 286.0f),
+    // Компактные высоты: на экран помещается больше карточек, прокрутка нужна реже.
+    drawClipped(place(300.0f), [&](const Rect& card) { drawFpsCard(renderer, model, theme, card); });
+    drawClipped(place(300.0f), [&](const Rect& card) { drawSessionCard(renderer, model, theme, card); });
+    drawClipped(place(250.0f), [&](const Rect& card) { drawCpuCard(renderer, model, theme, card); });
+    drawClipped(place(230.0f), [&](const Rect& card) { drawGpuCard(renderer, model, theme, card, hits); });
+    drawClipped(place(250.0f), [&](const Rect& card) { drawMemoryCard(renderer, model, theme, card); });
+    drawClipped(place(250.0f), [&](const Rect& card) { drawPerformanceCard(renderer, model, theme, card); });
+    drawClipped(place(300.0f), [&](const Rect& card) { drawDiskNetCard(renderer, model, theme, card); });
+    drawClipped(columns.span(0.0f, 6.0f, top, 250.0f),
         [&](const Rect& card) { drawTemperaturesCard(renderer, model, theme, card); });
-    drawClipped(columns.span(6.0f, 6.0f, top, 286.0f),
+    drawClipped(columns.span(6.0f, 6.0f, top, 250.0f),
         [&](const Rect& card) { drawAlertsCard(renderer, model, theme, card); });
 }
 

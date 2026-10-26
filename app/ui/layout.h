@@ -12,8 +12,8 @@ namespace yawa {
 
 // Высота экрана как в прототипе: содержимое не сжимается под окно, а прокручивается.
 // Значения сняты с демо при ширине кадра 1044 px (см. demo-<view>-tall.png в CI).
-constexpr float kDashboardHeight = 2539.0f;
-constexpr float kSettingsHeight = 1852.0f;
+constexpr float kDashboardHeight = 2242.0f;
+constexpr float kSettingsHeight = 1882.0f;
 constexpr float kOverlayHeight = 1852.0f;
 
 

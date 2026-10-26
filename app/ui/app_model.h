@@ -71,6 +71,7 @@ enum class ActionKind : std::uint8_t {
     SetOverlayRowGap,
     SetValueColor,
     SetLabelColor,
+    ToggleOverlayClickThrough,
     // Полосы прокрутки: бегунок тянется мышью, дорожка листает на страницу.
     ScrollContentTrack,
     ScrollContentThumb,
@@ -131,6 +132,10 @@ struct AppModel {
     Rect sensorScrollTrack{};
     // Прокрутка содержимого: экран рисуется в «демо-высоте», окно показывает его часть.
     float contentScroll = 0.0f;
+    // Режим монитора, определённый при запуске: показываем его и берём из него цель кадра.
+    int displayWidth = 0;
+    int displayHeight = 0;
+    int displayRefreshHz = 0;
     float contentHeight = 0.0f;
     // Состояние окна для своего заголовка: перетаскивание и кнопки рисуются вручную.
     bool maximized = false;

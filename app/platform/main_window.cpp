@@ -1,5 +1,6 @@
 #include "platform/main_window.h"
 #include "platform/app_paths.h"
+#include "platform/display_info.h"
 #include "platform/win_util.h"
 #include "ui/chrome.h"
 #include "ui/overlay_view.h"
@@ -41,6 +42,7 @@ void removeDwmBorder(HWND window)
 constexpr int kHotkeyOverlay = 1;
 constexpr int kHotkeyPosition = 2;
 constexpr int kHotkeyWindow = 3;
+constexpr int kHotkeyClickThrough = 4;
 
 } // namespace
 
@@ -126,6 +128,18 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
         log.info("ini не найден, создаём новый");
         m_model.settings = defaultSettings();
         saveSettings();
+    }
+
+    // Разрешение и герцовку приложение определяет само: они нужны в подписях и как
+    // цель кадра по умолчанию, чтобы бюджет кадра не был заведомо провальным.
+    const DisplayMode display = currentDisplayMode();
+    m_model.displayWidth = display.width;
+    m_model.displayHeight = display.height;
+    m_model.displayRefreshHz = display.refreshHz;
+    if (m_model.settings.capture.targetAuto && display.refreshHz > 0) {
+        m_model.settings.capture.targetHz = std::clamp(display.refreshHz, 30, 480);
+        log.info("монитор: " + std::to_string(display.width) + "x" + std::to_string(display.height) + ", "
+            + std::to_string(display.refreshHz) + " Гц — цель кадра из монитора");
     }
 
     m_model.settingsPath = settingsPath();
@@ -675,6 +689,8 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
                 slot = &m_model.settings.hotkeys.position;
             } else if (m_model.hotkeyEditing == 2) {
                 slot = &m_model.settings.hotkeys.window;
+            } else if (m_model.hotkeyEditing == 3) {
+                slot = &m_model.settings.hotkeys.clickThrough;
             }
 
             if (wParam == VK_ESCAPE || slot == nullptr) {
@@ -721,6 +737,11 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             InvalidateRect(m_window, nullptr, FALSE);
         } else if (wParam == static_cast<WPARAM>(kHotkeyWindow)) {
             toggleVisibilityFromTray();
+        } else if (wParam == static_cast<WPARAM>(kHotkeyClickThrough)) {
+            m_model.settings.overlay.clickThrough = !m_model.settings.overlay.clickThrough;
+            m_overlay.setSettings(m_model.settings.overlay);
+            saveSettings();
+            InvalidateRect(m_window, nullptr, FALSE);
         }
         return 0;
 
@@ -969,10 +990,10 @@ void MainWindow::applySlider(ActionKind action, const Rect& rect, float x)
     UiHit hit{ rect, action, 0 };
 
     if (action == ActionKind::SetScale) {
-        // Шаг 5 %: значения остаются ровными и хорошо читаются в ini.
-        hit.value = 70 + static_cast<int>(std::lround(fraction * 90.0f / 5.0f)) * 5;
+        // Шаг 1 %: ползунок идёт за курсором без рывков.
+        hit.value = 70 + static_cast<int>(std::lround(fraction * 90.0f));
     } else if (action == ActionKind::SetOverlayTextScale) {
-        hit.value = 85 + static_cast<int>(std::lround(fraction * 45.0f / 5.0f)) * 5;
+        hit.value = 85 + static_cast<int>(std::lround(fraction * 45.0f));
     } else if (action == ActionKind::SetOverlayPadding) {
         hit.value = static_cast<int>(std::lround(fraction * 28.0f));
     } else if (action == ActionKind::SetOverlayRowGap) {
@@ -1061,7 +1082,15 @@ void MainWindow::applyAction(const UiHit& hit)
         break;
 
     case ActionKind::SetTargetHz:
-        m_model.settings.capture.targetHz = std::clamp(hit.value, 30, 480);
+        // Ноль — чип «Авто»: цель кадра берётся из герцовки монитора.
+        m_model.settings.capture.targetAuto = hit.value == 0;
+        if (hit.value == 0) {
+            m_model.settings.capture.targetHz = m_model.displayRefreshHz > 0
+                ? std::clamp(m_model.displayRefreshHz, 30, 480)
+                : m_model.settings.capture.targetHz;
+        } else {
+            m_model.settings.capture.targetHz = std::clamp(hit.value, 30, 480);
+        }
         saveSettings();
         break;
 
@@ -1084,7 +1113,7 @@ void MainWindow::applyAction(const UiHit& hit)
         break;
 
     case ActionKind::CaptureHotkey:
-        m_model.hotkeyEditing = std::clamp(hit.value, 0, 2);
+        m_model.hotkeyEditing = std::clamp(hit.value, 0, 3);
         break;
 
     case ActionKind::ToggleOverlayBackground:
@@ -1095,6 +1124,12 @@ void MainWindow::applyAction(const UiHit& hit)
 
     case ActionKind::ToggleOverlayBorder:
         m_model.settings.overlay.showBorder = !m_model.settings.overlay.showBorder;
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
+    case ActionKind::ToggleOverlayClickThrough:
+        m_model.settings.overlay.clickThrough = !m_model.settings.overlay.clickThrough;
         m_overlay.setSettings(m_model.settings.overlay);
         saveSettings();
         break;
@@ -1652,6 +1687,7 @@ void MainWindow::registerHotkeys()
     bind(kHotkeyOverlay, m_model.settings.hotkeys.overlay);
     bind(kHotkeyPosition, m_model.settings.hotkeys.position);
     bind(kHotkeyWindow, m_model.settings.hotkeys.window);
+    bind(kHotkeyClickThrough, m_model.settings.hotkeys.clickThrough);
 }
 
 } // namespace yawa

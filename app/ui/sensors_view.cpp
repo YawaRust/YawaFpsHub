@@ -261,8 +261,11 @@ void drawSensors(Renderer& renderer, AppModel& model, const Theme& theme, const 
     const float avgRight = inner.left + width * 0.73f;
     const float maxRight = inner.left + width * 0.84f;
     const float sparkLeft = inner.left + width * 0.85f;
-    // Справа оставляем жёлоб под полосу прокрутки, иначе она наезжает на «глаз».
-    const float sparkRight = inner.right - 46.0f;
+    // Справа жёлоб под полосу прокрутки: строки и подсветка заканчиваются до неё,
+    // поэтому полоса больше не ложится поверх текста и плашки наведения.
+    constexpr float kScrollGutter = 14.0f;
+    const float rowRight = inner.right - kScrollGutter;
+    const float sparkRight = rowRight - 36.0f;
 
     renderer.text(L"ДАТЧИК", Rect{ nameX, inner.top, inner.left + width * 0.3f, inner.top + 14.0f }, TextRole::Tiny,
         theme.textFaint);
@@ -275,7 +278,7 @@ void drawSensors(Renderer& renderer, AppModel& model, const Theme& theme, const 
     }
     renderer.text(L"60 С", Rect{ sparkLeft, inner.top, sparkRight, inner.top + 14.0f }, TextRole::Tiny,
         theme.textFaint, TextAlign::Right);
-    renderer.drawLine(inner.left, inner.top + 20.0f, inner.right, inner.top + 20.0f, theme.line, 1.0f);
+    renderer.drawLine(inner.left, inner.top + 20.0f, rowRight, inner.top + 20.0f, theme.line, 1.0f);
 
     const std::vector<Group> groups = makeGroups(model.cpuCores);
     const std::wstring query = lowerCopy(wideText(model.sensorQuery));
@@ -339,7 +342,7 @@ void drawSensors(Renderer& renderer, AppModel& model, const Theme& theme, const 
             }
             if (top + kGroupHeight > viewport.top) {
                 renderer.text(upperCopy(groups[groupIndexes[nextGroupStart]].title),
-                    Rect{ inner.left + 14.0f, top, inner.right, top + kGroupHeight - 4.0f }, TextRole::Tiny,
+                    Rect{ inner.left + 14.0f, top, rowRight, top + kGroupHeight - 4.0f }, TextRole::Tiny,
                     theme.accent);
             }
             top += kGroupHeight;
@@ -352,11 +355,11 @@ void drawSensors(Renderer& renderer, AppModel& model, const Theme& theme, const 
         // Рисуем только целиком видимые строки: раньше внизу оставалась обрезанная
         // пополам строка, и таблица выглядела сломанной.
         if (rowTop + kRowHeight > viewport.top && rowTop + kRowHeight <= viewport.bottom + 0.5f) {
-            const Rect row{ inner.left, rowTop, inner.right, rowTop + kRowHeight };
+            const Rect row{ inner.left, rowTop, rowRight, rowTop + kRowHeight };
             const bool hover = isHovered(model, row);
             // Тонкая линия под строкой: таблица читается построчно, как в демо.
             if (!hover) {
-                renderer.drawLine(inner.left + 10.0f, rowTop + kRowHeight - 0.5f, inner.right - 12.0f,
+                renderer.drawLine(inner.left + 10.0f, rowTop + kRowHeight - 0.5f, rowRight - 10.0f,
                     rowTop + kRowHeight - 0.5f, theme.line.withAlpha(0.45f), 1.0f);
             }
             if (hover) {
@@ -414,24 +417,27 @@ void drawSensors(Renderer& renderer, AppModel& model, const Theme& theme, const 
                     spark, 0.0f, maximum, 1.4f);
             }
 
-            // «Глаз»: датчик показан в оверлее. Только у строк, которые туда попадают.
+            // «Глаз» есть у каждой строки, как в демо: серый — датчик не в оверлее,
+            // зелёный — показывается. Строки, которых нет в оверлее, рисуют неактивный глаз.
             const int field = overlayField(id);
+            const Rect eye{ rowRight - 34.0f, rowTop + 4.0f, rowRight - 6.0f, rowTop + kRowHeight - 4.0f };
+            const bool pinned = field >= 0
+                && model.settings.overlay.visible[static_cast<std::size_t>(field)];
+            const bool eyeHover = field >= 0 && isHovered(model, eye);
+            const Color eyeColor = pinned ? theme.accent : (field < 0 ? theme.line.withAlpha(0.9f) : theme.textFaint);
+            renderer.fillRoundRect(eye, 8.0f,
+                pinned ? theme.accentSoft : (eyeHover ? theme.panelSoft : theme.panelSoft.withAlpha(0.35f)));
+            if (pinned) {
+                renderer.strokeRoundRect(eye, 8.0f, theme.accentGlow, 1.0f);
+            }
+            const float centerX = eye.centerX();
+            const float centerY = eye.centerY();
+            renderer.strokeCircle(centerX, centerY, 4.5f, eyeColor, 1.2f);
+            renderer.fillCircle(centerX, centerY, 1.8f, eyeColor);
+            if (!pinned) {
+                renderer.drawLine(centerX - 5.0f, centerY + 5.0f, centerX + 5.0f, centerY - 5.0f, eyeColor, 1.1f);
+            }
             if (field >= 0) {
-                const Rect eye{ inner.right - 40.0f, rowTop + 3.0f, inner.right - 14.0f, rowTop + kRowHeight - 3.0f };
-                const bool pinned = model.settings.overlay.visible[static_cast<std::size_t>(field)];
-                const bool eyeHover = isHovered(model, eye);
-                if (pinned || eyeHover) {
-                    renderer.fillRoundRect(eye, 7.0f, pinned ? theme.accentSoft : theme.panelSoft);
-                }
-                // Иконка глаза: овал и зрачок; у выключенного — перечёркнут.
-                const float centerX = eye.centerX();
-                const float centerY = eye.centerY();
-                renderer.strokeCircle(centerX, centerY, 4.5f, pinned ? theme.accent : theme.textFaint, 1.2f);
-                renderer.fillCircle(centerX, centerY, 1.8f, pinned ? theme.accent : theme.textFaint);
-                if (!pinned) {
-                    renderer.drawLine(centerX - 5.0f, centerY + 5.0f, centerX + 5.0f, centerY - 5.0f, theme.textFaint,
-                        1.1f);
-                }
                 hits.push_back(UiHit{ eye, ActionKind::ToggleMetric, field });
             }
 
@@ -445,7 +451,7 @@ void drawSensors(Renderer& renderer, AppModel& model, const Theme& theme, const 
     // Полоса прокрутки: бегунок тянется мышью, клик по дорожке листает на страницу.
     model.sensorScrollMax = maxScroll;
     model.sensorViewportHeight = viewport.height();
-    model.sensorScrollTrack = Rect{ inner.right - 11.0f, viewport.top, inner.right - 5.0f, viewport.bottom };
+    model.sensorScrollTrack = Rect{ inner.right - 9.0f, viewport.top, inner.right - 3.0f, viewport.bottom };
     if (contentHeight > viewport.height() && viewport.height() > 0.0f && maxScroll > 0.0f) {
         const float thumbHeight = std::max(24.0f, viewport.height() * (viewport.height() / contentHeight));
         const float thumbTop = viewport.top + (viewport.height() - thumbHeight) * (offset / maxScroll);

@@ -392,14 +392,16 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
     // Оформление: то, что нельзя выразить пресетом, но нужно для своей картинки.
     renderer.text(L"Оформление", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
     top += 18.0f;
-    const std::array<std::pair<std::wstring_view, bool>, 3> switches{
+    const std::array<std::pair<std::wstring_view, bool>, 4> switches{
         std::pair<std::wstring_view, bool>{ L"Фон", overlay.showBackground },
         std::pair<std::wstring_view, bool>{ L"Рамка", overlay.showBorder },
-        std::pair<std::wstring_view, bool>{ L"Тень", overlay.showShadow }
+        std::pair<std::wstring_view, bool>{ L"Тень", overlay.showShadow },
+        std::pair<std::wstring_view, bool>{ L"Сквозной клик", overlay.clickThrough }
     };
-    const std::array<ActionKind, 3> switchActions{ ActionKind::ToggleOverlayBackground,
-        ActionKind::ToggleOverlayBorder, ActionKind::ToggleOverlayShadow };
-    const float switchWidth = (inner.width() - 2.0f * 6.0f) / 3.0f;
+    const std::array<ActionKind, 4> switchActions{ ActionKind::ToggleOverlayBackground,
+        ActionKind::ToggleOverlayBorder, ActionKind::ToggleOverlayShadow,
+        ActionKind::ToggleOverlayClickThrough };
+    const float switchWidth = (inner.width() - 3.0f * 6.0f) / 4.0f;
     for (std::size_t index = 0; index < switches.size(); ++index) {
         const Rect chip{ inner.left + static_cast<float>(index) * (switchWidth + 6.0f), top,
             inner.left + static_cast<float>(index) * (switchWidth + 6.0f) + switchWidth, top + 24.0f };

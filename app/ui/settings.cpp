@@ -338,6 +338,8 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                 target.capture.includeDiskNet = parseBool(value, target.capture.includeDiskNet);
             } else if (key == "target_hz") {
                 target.capture.targetHz = std::clamp(parseInt(value, target.capture.targetHz), 30, 480);
+            } else if (key == "target_auto") {
+                target.capture.targetAuto = parseBool(value, target.capture.targetAuto);
             }
         } else if (section == "overlay") {
             if (key == "position") {
@@ -385,6 +387,8 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                 target.overlay.valueColor = std::clamp(parseInt(value, target.overlay.valueColor), -1, 5);
             } else if (key == "label_color") {
                 target.overlay.labelColor = std::clamp(parseInt(value, target.overlay.labelColor), -1, 5);
+            } else if (key == "click_through") {
+                target.overlay.clickThrough = parseBool(value, target.overlay.clickThrough);
             } else if (key.size() > 5 && key.substr(0, 5) == "show_") {
                 for (std::size_t index = 0; index < kLabelCount; ++index) {
                     const auto field = static_cast<LabelField>(index);
@@ -400,6 +404,8 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                 target.hotkeys.position = static_cast<unsigned int>(std::clamp(parseInt(value, 0), 0, 254));
             } else if (key == "window") {
                 target.hotkeys.window = static_cast<unsigned int>(std::clamp(parseInt(value, 0), 0, 254));
+            } else if (key == "click_through") {
+                target.hotkeys.clickThrough = static_cast<unsigned int>(std::clamp(parseInt(value, 0), 0, 254));
             }
         } else if (section == "labels") {
             for (std::size_t index = 0; index < kLabelCount; ++index) {
@@ -443,7 +449,8 @@ std::string serializeSettings(const Settings& settings)
     text += std::string("etw_enabled = ") + (settings.capture.etwEnabled ? "1" : "0") + "\n";
     text += std::string("pause_when_idle = ") + (settings.capture.pauseWhenIdle ? "1" : "0") + "\n";
     text += std::string("include_disk_net = ") + (settings.capture.includeDiskNet ? "1" : "0") + "\n";
-    text += "target_hz = " + std::to_string(settings.capture.targetHz) + "\n\n";
+    text += "target_hz = " + std::to_string(settings.capture.targetHz) + "\n";
+    text += std::string("target_auto = ") + (settings.capture.targetAuto ? "1" : "0") + "\n\n";
 
     text += "[gpu]\n";
     text += "luid_low = " + std::to_string(settings.gpu.luidLow) + "\n";
@@ -471,6 +478,7 @@ std::string serializeSettings(const Settings& settings)
     text += "row_gap = " + std::to_string(settings.overlay.rowGapPx) + "\n";
     text += "value_color = " + std::to_string(settings.overlay.valueColor) + "\n";
     text += "label_color = " + std::to_string(settings.overlay.labelColor) + "\n";
+    text += std::string("click_through = ") + (settings.overlay.clickThrough ? "1" : "0") + "\n";
     for (std::size_t index = 0; index < kLabelCount; ++index) {
         const auto field = static_cast<LabelField>(index);
         text += std::string("show_") + std::string(labelKey(field)) + " = "
@@ -488,7 +496,8 @@ std::string serializeSettings(const Settings& settings)
     text += "[hotkeys]\n";
     text += "overlay = " + std::to_string(settings.hotkeys.overlay) + "\n";
     text += "position = " + std::to_string(settings.hotkeys.position) + "\n";
-    text += "window = " + std::to_string(settings.hotkeys.window) + "\n\n";
+    text += "window = " + std::to_string(settings.hotkeys.window) + "\n";
+    text += "click_through = " + std::to_string(settings.hotkeys.clickThrough) + "\n\n";
 
     text += "[ui]\n";
     text += "accent = " + std::string(accentKey(settings.ui.accent)) + "\n";

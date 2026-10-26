@@ -90,15 +90,28 @@ void drawCaptureCard(Renderer& renderer, const AppModel& model, const Theme& the
     top += 36.0f;
     renderer.text(L"Цель кадра", Rect{ inner.left, top, inner.left + 90.0f, top + 16.0f }, TextRole::Small,
         theme.textDim);
-    renderer.text(L"для бюджета кадра", Rect{ inner.left + 96.0f, top, inner.right, top + 16.0f }, TextRole::Tiny,
+    const std::wstring monitor = model.displayWidth > 0
+        ? L"монитор " + std::to_wstring(model.displayWidth) + L"×" + std::to_wstring(model.displayHeight)
+            + (model.displayRefreshHz > 0 ? L" · " + std::to_wstring(model.displayRefreshHz) + L" Гц" : L"")
+        : L"определяем при запуске";
+    renderer.text(monitor, Rect{ inner.left + 96.0f, top, inner.right, top + 16.0f }, TextRole::Tiny,
         theme.textFaint);
     top += 18.0f;
-    const float targetWidth = (inner.width() - 3.0f * 8.0f) / 4.0f;
+    // Пять чипов: «Авто» (герцовка монитора) и четыре частых значения.
+    const float targetWidth = (inner.width() - 4.0f * 8.0f) / 5.0f;
+    const std::wstring autoLabel = model.displayRefreshHz > 0
+        ? L"Авто " + std::to_wstring(model.displayRefreshHz)
+        : L"Авто";
+    const Rect autoChip{ inner.left, top, inner.left + targetWidth, top + 26.0f };
+    drawChip(renderer, autoChip, autoLabel, model.settings.capture.targetAuto, theme, TextRole::Tiny);
+    hits.push_back(UiHit{ autoChip, ActionKind::SetTargetHz, 0 });
     for (std::size_t index = 0; index < kTargets.size(); ++index) {
-        const Rect chip{ inner.left + static_cast<float>(index) * (targetWidth + 8.0f), top,
-            inner.left + static_cast<float>(index) * (targetWidth + 8.0f) + targetWidth, top + 26.0f };
+        const std::size_t slot = index + 1;
+        const Rect chip{ inner.left + static_cast<float>(slot) * (targetWidth + 8.0f), top,
+            inner.left + static_cast<float>(slot) * (targetWidth + 8.0f) + targetWidth, top + 26.0f };
         drawChip(renderer, chip, wideText(std::to_string(kTargets[index]) + " Гц"),
-            model.settings.capture.targetHz == kTargets[index], theme);
+            !model.settings.capture.targetAuto && model.settings.capture.targetHz == kTargets[index], theme,
+            TextRole::Tiny);
         hits.push_back(UiHit{ chip, ActionKind::SetTargetHz, kTargets[index] });
     }
 
@@ -256,9 +269,10 @@ void drawHotkeyCard(Renderer& renderer, const AppModel& model, const Theme& them
     float top = drawCardHeader(renderer, card, L"Горячие клавиши",
         L"нажмите строку и введите клавишу · Esc — отмена · Delete — выключить", theme);
 
-    const std::array<std::wstring_view, 3> names{ L"Оверлей", L"Положение оверлея", L"Показать или скрыть окно" };
-    const std::array<unsigned int, 3> keys{ model.settings.hotkeys.overlay, model.settings.hotkeys.position,
-        model.settings.hotkeys.window };
+    const std::array<std::wstring_view, 4> names{ L"Оверлей", L"Положение оверлея", L"Показать или скрыть окно",
+        L"Сквозной клик по оверлею" };
+    const std::array<unsigned int, 4> keys{ model.settings.hotkeys.overlay, model.settings.hotkeys.position,
+        model.settings.hotkeys.window, model.settings.hotkeys.clickThrough };
 
     for (std::size_t index = 0; index < names.size(); ++index) {
         if (top + 28.0f > inner.bottom) {
@@ -355,7 +369,7 @@ void drawSettings(Renderer& renderer, const AppModel& model, const Theme& theme,
     drawClipped(place(385.0f), [&](const Rect& card) { drawCaptureCard(renderer, model, theme, card, hits); });
     drawClipped(place(389.0f), [&](const Rect& card) { drawAppearanceCard(renderer, model, theme, card, hits); });
     drawClipped(place(260.0f), [&](const Rect& card) { drawSourcesCard(renderer, model, theme, card); });
-    drawClipped(place(232.0f), [&](const Rect& card) { drawHotkeyCard(renderer, model, theme, card, hits); });
+    drawClipped(place(262.0f), [&](const Rect& card) { drawHotkeyCard(renderer, model, theme, card, hits); });
     drawClipped(place(316.0f), [&](const Rect& card) { drawPortableCard(renderer, model, theme, card, hits); });
     drawClipped(place(200.0f), [&](const Rect& card) { drawAboutCard(renderer, model, theme, card, hits); });
 }
