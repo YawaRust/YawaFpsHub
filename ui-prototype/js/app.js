@@ -1235,6 +1235,20 @@
   buildSensorTable();
   applySensorFilter();
   bindNavigation();
+
+  // Прямые ссылки для скриншотов: ?view=sensors открывает нужный экран,
+  // ?nofx=1 выключает анимации. Это делается сразу после навигации: если
+  // дальше что-то не поднимется (например, canvas в headless-браузере),
+  // снимок всё равно попадёт на нужный экран, а не на «Обзор».
+  const params = new URLSearchParams(window.location.search);
+  const deepView = params.get("view");
+  if (deepView && VIEWS[deepView]) {
+    switchView(deepView);
+  }
+  if (params.get("nofx") === "1") {
+    document.body.classList.add("no-fx");
+  }
+
   bindPause();
   bindAccents();
   bindOverlay();
@@ -1256,18 +1270,9 @@
 
   window.Sim.subscribe(onData);
 
-  // Прямые ссылки для скриншотов: ?view=sensors открывает нужный экран,
-  // ?nofx=1 выключает анимации, чтобы снимки были детерминированными.
-  const params = new URLSearchParams(window.location.search);
-  const deepView = params.get("view");
-  if (deepView && VIEWS[deepView]) {
-    switchView(deepView);
-  }
-  if (params.get("nofx") === "1") {
-    document.body.classList.add("no-fx");
-  }
   if (params.get("shot") === "1") {
     // Один статичный кадр: таймер симулятора останавливаем, CSS-переходы уже выключены.
     window.Sim.stop();
   }
+
 })();
