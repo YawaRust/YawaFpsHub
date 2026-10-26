@@ -84,10 +84,13 @@ void drawCard(Renderer& renderer, const Rect& rect, const Theme& theme)
 void drawLabelValue(Renderer& renderer, const Rect& rect, std::wstring_view label, std::wstring_view value,
     const Theme& theme)
 {
-    renderer.text(label, Rect{ rect.left, rect.top, rect.centerX(), rect.top + 16.0f }, TextRole::Small,
-        theme.textFaint);
-    renderer.text(value, Rect{ rect.centerX(), rect.top, rect.right, rect.top + 16.0f }, TextRole::Body,
-        theme.text, TextAlign::Right);
+    const float valueWidth
+        = std::min(rect.width() * 0.7f, std::max(56.0f, renderer.measureText(value, TextRole::Body) + 4.0f));
+    const float split = std::clamp(rect.right - valueWidth, rect.left + 24.0f, rect.right - 24.0f);
+    renderer.text(clipText(renderer, label, TextRole::Small, split - rect.left - 6.0f),
+        Rect { rect.left, rect.top, split - 4.0f, rect.top + 16.0f }, TextRole::Small, theme.textFaint);
+    renderer.text(clipText(renderer, value, TextRole::Body, rect.right - split),
+        Rect { split, rect.top, rect.right, rect.top + 16.0f }, TextRole::Body, theme.text, TextAlign::Right);
 }
 
 void drawChip(Renderer& renderer, const Rect& rect, std::wstring_view label, bool active, const Theme& theme,

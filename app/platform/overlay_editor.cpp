@@ -4,6 +4,7 @@
 #include "metrics/overlay_rows.h"
 #include "platform/win_util.h"
 #include "render/overlay_painter.h"
+#include "ui/layout.h"
 #include "ui/overlay_view.h"
 
 #include <windowsx.h>
@@ -130,6 +131,8 @@ void OverlayEditor::layout()
     GetClientRect(m_window, &client);
     const float height = static_cast<float>(client.bottom);
     m_canvas = Rect { 20.0f, 307.0f, 20.0f + kCanvasWidth, height - 213.0f };
+    m_canvasScroll
+        = std::clamp(m_canvasScroll, 0, std::max(0, kMaxY + 26 - static_cast<int>(m_canvas.height())));
     m_inspector = Rect { 20.0f, height - 198.0f, 540.0f, height - 20.0f };
     m_controls = Rect { 564.0f, 112.0f, static_cast<float>(client.right - 18), height - 20.0f };
     m_catalog = Rect { static_cast<float>(client.right - 386), 50.0f, static_cast<float>(client.right - 18),
@@ -169,6 +172,10 @@ void OverlayEditor::syncFields()
     input(m_valueX, std::to_wstring(row.valueX).c_str());
     input(m_y, std::to_wstring(row.y).c_str());
     m_syncing = false;
+    const bool isLine = settings.layout == OverlayLayout::Line;
+    EnableWindow(m_labelX, !isLine);
+    EnableWindow(m_valueX, !isLine);
+    EnableWindow(m_y, !isLine);
 }
 
 void OverlayEditor::select(MetricId id, bool value)
@@ -223,20 +230,42 @@ void OverlayEditor::move(int x, int y)
     if (!m_dragging) {
         return;
     }
-    preparePixelLayout();
     auto& settings = m_model->settings.overlay;
-    auto& row = settings.rowPositions[static_cast<std::size_t>(m_selected)];
-    int& left = m_value ? row.valueX : row.labelX;
-    left = std::clamp(x - static_cast<int>(m_canvas.left) - m_grabX, 0, 470);
-    row.y = std::clamp(y - static_cast<int>(m_canvas.top) + m_canvasScroll - m_grabY, 0, kMaxY);
-    settings.pixelLayout = true;
-    syncFields();
+    if (m_dragLine) {
+        const Rect inner = m_canvas.inset(kCardPadding);
+        const Rect scene { inner.left, inner.top + 46.0f, inner.right, inner.bottom };
+        settings.offsetX = std::clamp(m_offsetStartX
+                + scaledOverlayOffset(x - m_dragStartX, scene.width(), GetSystemMetrics(SM_CXVIRTUALSCREEN)),
+            -8192, 8192);
+        settings.offsetY = std::clamp(m_offsetStartY
+                + scaledOverlayOffset(y - m_dragStartY, scene.height(), GetSystemMetrics(SM_CYVIRTUALSCREEN)),
+            -8192, 8192);
+    } else {
+        const auto& start = m_dragPositions.front();
+        const int originalX = m_value ? start.valueX : start.labelX;
+        const int nextX = std::clamp(x - static_cast<int>(m_canvas.left) - m_grabX, 0, 470);
+        const int nextY = std::clamp(y - static_cast<int>(m_canvas.top) + m_canvasScroll - m_grabY, 0, kMaxY);
+        int deltaX = nextX - originalX;
+        int deltaY = nextY - start.y;
+        for (const auto& position : m_dragPositions) {
+            deltaX = std::clamp(deltaX, -std::min(position.labelX, position.valueX),
+                470 - std::max(position.labelX, position.valueX));
+            deltaY = std::clamp(deltaY, -position.y, kMaxY - position.y);
+        }
+        for (std::size_t index = 0; index < m_selectedRows.size(); ++index) {
+            auto& row = settings.rowPositions[static_cast<std::size_t>(m_selectedRows[index])];
+            row.labelX = m_dragPositions[index].labelX + deltaX;
+            row.valueX = m_dragPositions[index].valueX + deltaX;
+            row.y = m_dragPositions[index].y + deltaY;
+        }
+        syncFields();
+    }
     changed(false);
 }
 
 void OverlayEditor::editCoordinate(HWND field)
 {
-    if (m_syncing || !field) {
+    if (m_syncing || !field || m_model->settings.overlay.layout == OverlayLayout::Line) {
         return;
     }
     wchar_t buffer[24] { };
@@ -349,7 +378,9 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
             m_catalogScroll = std::clamp(
                 m_catalogScroll - delta / 28, 0, std::max(0, static_cast<int>(catalogRows().size()) - 12));
         } else if (cursor.x < static_cast<int>(m_controls.left)) {
-            m_canvasScroll = std::clamp(m_canvasScroll - delta, 0, 1100);
+            // Последнюю строку (y=1490) тоже можно довести до видимой области.
+            const int scrollLimit = std::max(0, kMaxY + 26 - static_cast<int>(m_canvas.height()));
+            m_canvasScroll = std::clamp(m_canvasScroll - delta, 0, scrollLimit);
         } else {
             m_panelScroll = std::clamp(m_panelScroll - delta, 0,
                 std::max(0,
@@ -471,6 +502,17 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
             }
         }
         if (m_canvas.contains(static_cast<float>(x), static_cast<float>(y))) {
+            if (m_model->settings.overlay.layout == OverlayLayout::Line) {
+                m_dragLine = true;
+                m_dragging = true;
+                m_dragStartX = x;
+                m_dragStartY = y;
+                m_offsetStartX = m_model->settings.overlay.offsetX;
+                m_offsetStartY = m_model->settings.overlay.offsetY;
+                SetFocus(m_window);
+                SetCapture(m_window);
+                return 0;
+            }
             const auto rows = overlayMetricRows(m_model->settings.overlay, m_model->store);
             for (auto it = rows.rbegin(); it != rows.rend(); ++it) {
                 const auto row = canvasPosition(it->id);
@@ -482,8 +524,37 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
                 if (!value && (x < m_canvas.left + row.labelX || x >= m_canvas.left + row.labelX + 230)) {
                     continue;
                 }
+                const bool isSelected
+                    = std::find(m_selectedRows.begin(), m_selectedRows.end(), it->id) != m_selectedRows.end();
+                if (GetKeyState(VK_SHIFT) < 0) {
+                    if (isSelected) {
+                        m_selectedRows.erase(
+                            std::remove(m_selectedRows.begin(), m_selectedRows.end(), it->id),
+                            m_selectedRows.end());
+                    } else {
+                        m_selectedRows.push_back(it->id);
+                    }
+                    select(it->id, value);
+                    return 0;
+                }
+                if (!isSelected) {
+                    m_selectedRows = { it->id };
+                }
                 select(it->id, value);
                 preparePixelLayout();
+                m_dragPositions.clear();
+                m_dragPositions.push_back(
+                    m_model->settings.overlay.rowPositions[static_cast<std::size_t>(it->id)]);
+                std::vector<MetricId> ordered { it->id };
+                for (MetricId selected : m_selectedRows) {
+                    if (selected != it->id) {
+                        ordered.push_back(selected);
+                        m_dragPositions.push_back(
+                            m_model->settings.overlay.rowPositions[static_cast<std::size_t>(selected)]);
+                    }
+                }
+                m_selectedRows = std::move(ordered);
+                m_dragLine = false;
                 m_grabX = x - static_cast<int>(m_canvas.left) - (value ? row.valueX : row.labelX);
                 m_grabY = y - rowY;
                 m_dragging = true;
@@ -559,15 +630,38 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
             return 0;
         }
         if (wParam == VK_LEFT || wParam == VK_RIGHT || wParam == VK_UP || wParam == VK_DOWN) {
+            if (m_model->settings.overlay.layout == OverlayLayout::Line) {
+                auto& settings = m_model->settings.overlay;
+                const int delta = GetKeyState(VK_SHIFT) < 0 ? 10 : 1;
+                if (wParam == VK_LEFT || wParam == VK_RIGHT) {
+                    settings.offsetX
+                        = std::clamp(settings.offsetX + (wParam == VK_LEFT ? -delta : delta), -8192, 8192);
+                } else {
+                    settings.offsetY
+                        = std::clamp(settings.offsetY + (wParam == VK_UP ? -delta : delta), -8192, 8192);
+                }
+                changed(true);
+                return 0;
+            }
             preparePixelLayout();
             auto& settings = m_model->settings.overlay;
-            auto& row = settings.rowPositions[static_cast<std::size_t>(m_selected)];
             const int delta = GetKeyState(VK_SHIFT) < 0 ? 10 : 1;
-            if (wParam == VK_LEFT || wParam == VK_RIGHT) {
-                int& left = m_value ? row.valueX : row.labelX;
-                left = std::clamp(left + (wParam == VK_LEFT ? -delta : delta), 0, 470);
-            } else {
-                row.y = std::clamp(row.y + (wParam == VK_UP ? -delta : delta), 0, kMaxY);
+            if (m_selectedRows.empty()) {
+                m_selectedRows.push_back(m_selected);
+            }
+            int deltaX = wParam == VK_LEFT ? -delta : wParam == VK_RIGHT ? delta : 0;
+            int deltaY = wParam == VK_UP ? -delta : wParam == VK_DOWN ? delta : 0;
+            for (MetricId id : m_selectedRows) {
+                const auto& row = settings.rowPositions[static_cast<std::size_t>(id)];
+                deltaX = std::clamp(
+                    deltaX, -std::min(row.labelX, row.valueX), 470 - std::max(row.labelX, row.valueX));
+                deltaY = std::clamp(deltaY, -row.y, kMaxY - row.y);
+            }
+            for (MetricId id : m_selectedRows) {
+                auto& row = settings.rowPositions[static_cast<std::size_t>(id)];
+                row.labelX += deltaX;
+                row.valueX += deltaX;
+                row.y += deltaY;
             }
             settings.pixelLayout = true;
             syncFields();
@@ -602,46 +696,65 @@ void OverlayEditor::paint()
     m_renderer.text(L"Слева — живой вид и расстановка. Справа — ВСЕ настройки.",
         Rect { 20.0f, 37.0f, 540.0f, 61.0f }, TextRole::Small, theme.textDim);
 
-    drawOverlayEditorPreview(m_renderer, *m_model, theme, Rect { 20.0f, 70.0f, 540.0f, 282.0f });
-    m_renderer.text(L"Холст 520 px · двигайте подпись или значение", Rect { 20.0f, 284.0f, 395.0f, 304.0f },
-        TextRole::Tiny, theme.textDim);
+    drawOverlayEditorPreview(m_renderer, *m_model, theme, Rect { 20.0f, 70.0f, 540.0f, 282.0f },
+        GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN));
+    m_renderer.text(m_model->settings.overlay.layout == OverlayLayout::Line
+            ? L"Строка: двигайте весь блок; порядок — в разделе «Строки»"
+            : L"Холст: Shift + клик выделяет несколько блоков",
+        Rect { 20.0f, 284.0f, 395.0f, 304.0f }, TextRole::Tiny, theme.textDim);
     m_renderer.text(L"Вернуть шаблон", Rect { 405.0f, 283.0f, 540.0f, 307.0f }, TextRole::Tiny, theme.accent);
+    const auto rows = overlayMetricRows(m_model->settings.overlay, m_model->store);
     m_renderer.fillRoundRect(m_canvas, 10.0f, theme.panel);
     m_renderer.pushClip(m_canvas);
-    for (int y = -m_canvasScroll % 28; y < static_cast<int>(m_canvas.height()); y += 28) {
-        m_renderer.drawLine(m_canvas.left, m_canvas.top + static_cast<float>(y), m_canvas.right,
-            m_canvas.top + static_cast<float>(y), theme.line.withAlpha(0.45f), 1.0f);
-    }
-    const auto rows = overlayMetricRows(m_model->settings.overlay, m_model->store);
-    for (const auto& entry : rows) {
-        const std::size_t index = static_cast<std::size_t>(entry.id);
-        const auto row = canvasPosition(entry.id);
-        if (row.y < m_canvasScroll - 28 || row.y > m_canvasScroll + m_canvas.height()) {
-            continue;
+    if (m_model->settings.overlay.layout == OverlayLayout::Line) {
+        drawOverlayEditorPreview(m_renderer, *m_model, theme, m_canvas, GetSystemMetrics(SM_CXVIRTUALSCREEN),
+            GetSystemMetrics(SM_CYVIRTUALSCREEN));
+    } else {
+        for (int y = -m_canvasScroll % 28; y < static_cast<int>(m_canvas.height()); y += 28) {
+            m_renderer.drawLine(m_canvas.left, m_canvas.top + static_cast<float>(y), m_canvas.right,
+                m_canvas.top + static_cast<float>(y), theme.line.withAlpha(0.45f), 1.0f);
         }
-        const float y = m_canvas.top + static_cast<float>(row.y - m_canvasScroll);
-        const bool active = m_selected == entry.id;
-        if (active) {
-            const float x = m_canvas.left + static_cast<float>(m_value ? row.valueX : row.labelX);
-            m_renderer.fillRoundRect(Rect { x - 2.0f, y - 2.0f, x + (m_value ? 250.0f : 230.0f), y + 27.0f },
-                5.0f, theme.accentSoft);
+        for (const auto& entry : rows) {
+            const std::size_t index = static_cast<std::size_t>(entry.id);
+            const auto row = canvasPosition(entry.id);
+            if (row.y < m_canvasScroll - 28 || row.y > m_canvasScroll + m_canvas.height()) {
+                continue;
+            }
+            const float y = m_canvas.top + static_cast<float>(row.y - m_canvasScroll);
+            const bool active = m_selected == entry.id
+                || std::find(m_selectedRows.begin(), m_selectedRows.end(), entry.id) != m_selectedRows.end();
+            if (active) {
+                const float left = m_canvas.left + static_cast<float>(std::min(row.labelX, row.valueX));
+                const float right
+                    = m_canvas.left + static_cast<float>(std::max(row.labelX + 230, row.valueX + 220));
+                m_renderer.fillRoundRect(
+                    Rect { left - 2.0f, y - 2.0f, right, y + 27.0f }, 5.0f, theme.accentSoft);
+            }
+            const auto palette = overlayColorPalette();
+            const int color = m_model->settings.overlay.metricColors[index];
+            const int labelEnd = row.labelX == row.valueX ? row.labelX
+                : row.labelX < row.valueX                 ? std::min(row.labelX + 228, row.valueX - 8)
+                                                          : 512;
+            const int valueEnd = row.valueX < row.labelX ? row.labelX - 8 : 512;
+            if (labelEnd > row.labelX) {
+                m_renderer.text(widen(entry.label),
+                    Rect { m_canvas.left + row.labelX, y, m_canvas.left + labelEnd, y + 26.0f },
+                    TextRole::Small, active && !m_value ? theme.accent : theme.textDim);
+            }
+            if (valueEnd > row.valueX) {
+                m_renderer.text(widen(entry.value),
+                    Rect { m_canvas.left + row.valueX, y, m_canvas.left + valueEnd, y + 26.0f },
+                    TextRole::Small, color >= 0 ? palette[static_cast<std::size_t>(color)] : theme.text);
+            }
         }
-        const auto palette = overlayColorPalette();
-        const int color = m_model->settings.overlay.metricColors[index];
-        m_renderer.text(widen(entry.label),
-            Rect {
-                m_canvas.left + row.labelX, y, m_canvas.left + std::min(row.labelX + 228, 520), y + 26.0f },
-            TextRole::Small, active && !m_value ? theme.accent : theme.textDim);
-        m_renderer.text(widen(entry.value),
-            Rect { m_canvas.left + row.valueX, y, m_canvas.right - 8.0f, y + 26.0f }, TextRole::Small,
-            color >= 0 ? palette[static_cast<std::size_t>(color)] : theme.text);
     }
     m_renderer.popClip();
     m_renderer.strokeRoundRect(m_canvas, 10.0f, theme.line);
 
     m_renderer.fillRoundRect(m_inspector, 10.0f, theme.panel);
-    m_renderer.text(
-        rows.empty() ? L"Включите строки в разделе «Состав» справа" : widen(metricInfo(m_selected).label),
+    const std::wstring title
+        = rows.empty() ? L"Добавьте показатель через «+ Датчик»" : widen(metricInfo(m_selected).label);
+    m_renderer.text(clipText(m_renderer, title, TextRole::Heading, 280.0f),
         Rect { 32.0f, m_inspector.top + 7.0f, 320.0f, m_inspector.top + 34.0f }, TextRole::Heading,
         theme.text);
     m_renderer.text(L"Сбросить имя", Rect { 320.0f, m_inspector.top + 9.0f, 425.0f, m_inspector.top + 32.0f },

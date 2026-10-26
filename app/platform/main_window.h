@@ -48,6 +48,7 @@ public:
     }
     void setOverlayVisible(bool visible);
     void openEditorForSmoke();
+    void scheduleSensorElevation();
     void exportOverlayStyles();
     // smokeSeconds > 0 — самопроверка для CI: окно живёт заданное время и закрывается само.
     int run(int smokeSeconds = 0, const std::wstring& overlayShotDir = std::wstring());
@@ -58,7 +59,7 @@ private:
 
     void startSampling();
     void stopSampling();
-    // Перезапуск нужен, когда меняется состав сбора (ETW включают или выключают).
+    // Перезапуск ETW делает поток опроса; UI не ждёт остановки провайдера.
     void restartSampling();
     void samplingLoop();
     void onTick();
@@ -128,6 +129,9 @@ private:
     std::mutex m_wakeMutex;
     std::mutex m_modelMutex;
     std::atomic<bool> m_stopRequested{ false };
+    std::atomic<bool> m_etwRestartRequested{ false };
+    // Выбор адаптера применяет только поток опроса: UI не меняет PDH/NVML во время sample().
+    std::atomic<std::size_t> m_requestedGpu{ static_cast<std::size_t>(-1) };
     bool m_running = false;
     bool m_trayCreated = false;
     bool m_trackingMouse = false;

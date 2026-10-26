@@ -382,11 +382,10 @@ void drawSensors(Renderer& renderer, AppModel& model, const Theme& theme, const 
             renderer.text(id == MetricId::VramUsed ? L"Видеопамять занято / всего"
                     : id == MetricId::RamUsed      ? L"ОЗУ занято / всего"
                     : id == MetricId::PageFile     ? L"Файл подкачки занято / всего"
-                    : id == MetricId::CpuLoad      ? L"CPU общий / пик ядра"
+                    : id == MetricId::CpuLoad      ? L"CPU / самое занятое ядро"
                                                    : wideText(info.label),
-                Rect{ nameX + 14.0f, rowTop, valueRight - 120.0f,
-                                                     rowTop + kRowHeight },
-                TextRole::Small, known ? theme.textDim : theme.textFaint);
+                Rect { nameX + 14.0f, rowTop, valueRight - 120.0f, rowTop + kRowHeight }, TextRole::Small,
+                known ? theme.textDim : theme.textFaint);
 
             // Значение крупнее остальных, единица — мелким шрифтом через пробел.
             // Недоступный датчик пишет причину словами: прочерк читался как сломанный интерфейс.

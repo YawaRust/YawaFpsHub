@@ -322,7 +322,7 @@ double gpuPerfIndex(std::string_view name, double dedicatedMb)
     return 0.0;
 }
 
-SystemLoad loadFromStore(const MetricStore& store, double targetFps)
+SystemLoad loadFromStore(const MetricStore& store)
 {
     auto read = [&store](MetricId id, double fallback) {
         return store.hasValue(id) ? store.value(id) : fallback;
@@ -339,7 +339,6 @@ SystemLoad loadFromStore(const MetricStore& store, double targetFps)
     load.pageFileLoad = read(MetricId::PageFileLoad, -1.0);
     load.cpuPower = read(MetricId::CpuPower, -1.0);
     load.gpuPower = read(MetricId::GpuPower, -1.0);
-    load.targetFps = targetFps;
     return load;
 }
 
@@ -366,15 +365,15 @@ BottleneckResult analyzeBottleneck(const HardwareIdentity& hardware, const Syste
     const double cpuPressure = std::max(load.cpuLoad, load.cpuPeakCore * 0.9);
     const double gpuPressure = load.gpuLoad;
 
-    if (haveLiveLoad && std::max(cpuPressure, gpuPressure) < 22.0 && !(load.fps > 0.0)) {
+    if (haveLiveLoad && std::max(cpuPressure, gpuPressure) < 75.0) {
         result.kind = BottleneckKind::Idle;
-        result.headline = "Нагрузки нет";
-        result.detail = "Пока ни процессор, ни видеокарта не загружены, судить об узком месте не по чему. "
-                        "Запустите игру — расчёт пересчитается по живым данным.";
+        result.headline = "Недостаточно нагрузки для вывода";
+        result.detail
+            = "Оба узла игры ниже 75 %: лимит кадров или ожидание ресурсов могут искажать вывод по загрузке.";
         return result;
     }
 
-    if (haveLiveLoad && std::max(cpuPressure, gpuPressure) >= 22.0) {
+    if (haveLiveLoad && std::max(cpuPressure, gpuPressure) >= 75.0) {
         result.measured = true;
         result.expectedFps = load.fps > 0.0 ? load.fps : 0.0;
 
@@ -389,22 +388,6 @@ BottleneckResult analyzeBottleneck(const HardwareIdentity& hardware, const Syste
             return result;
         }
 
-        if (load.fps > 0.0 && load.targetFps > 0.0 && load.fps >= load.targetFps * 0.96
-            && std::max(cpuPressure, gpuPressure) < 85.0) {
-            result.kind = BottleneckKind::RefreshLimited;
-            result.percent = 0;
-            result.headline = "Кадры ограничены герцовкой или вертикальной синхронизацией";
-            result.detail = "FPS держится на цели " + std::to_string(static_cast<int>(load.targetFps))
-                + " Гц при незагруженной видеокарте: узкого места в железе нет, лимит стоит сверху.";
-            pushAdvice(result, "Снять ограничение и включить G-SYNC/FreeSync",
-                "Переменная герцовка уберёт разрывы без жёсткого лимита, а целевой кадр имеет смысл "
-                "поставить на 3 ниже максимума монитора — так оверлей не добавляет задержку.");
-            pushAdvice(result, "Поднять качество вместо борьбы за FPS",
-                "Пока кадр упирается в лимит, запас видеокарты можно потратить на настройки: "
-                "качество картинки вырастет без просадок.");
-            return result;
-        }
-
         const double high = std::max(cpuPressure, gpuPressure);
         const double low = std::min(cpuPressure, gpuPressure);
         result.percent = static_cast<std::uint32_t>(std::lround(clampPercent(100.0 * (1.0 - low / std::max(high, 1.0)))));
@@ -413,7 +396,7 @@ BottleneckResult analyzeBottleneck(const HardwareIdentity& hardware, const Syste
             result.kind = BottleneckKind::LiveBalanced;
             result.headline = "Связка работает ровно";
             result.detail = "Процессор загружен на " + percentText(cpuPressure) + ", видеокарта — на "
-                + percentText(gpuPressure) + ": оба узла близко к пределу, простой отсутствует.";
+                + percentText(gpuPressure) + ": их загрузка близка, однозначного упора в один узел нет.";
             pushAdvice(result, "Апгрейд одного узла кадров не добавит",
                 "Пока оба компонента загружены ровно, замена видеокарты упрётся в процессор, и наоборот. "
                 "Смысл есть только в паре или в переходе на более высокое разрешение.");
@@ -429,9 +412,9 @@ BottleneckResult analyzeBottleneck(const HardwareIdentity& hardware, const Syste
         if (cpuPressure > gpuPressure) {
             result.kind = BottleneckKind::LiveCpu;
             result.headline = "Упор в процессор";
-            result.detail = "Процессор держит " + percentText(cpuPressure) + " (самое занятое ядро — "
-                + percentText(load.cpuPeakCore) + "), видеокарта — только " + percentText(gpuPressure) + ". "
-                + percentText(static_cast<double>(result.percent)) + " мощности GPU простаивает.";
+            result.detail = "Процесс игры использует до " + percentText(cpuPressure)
+                + " одного ядра, её 3D-движок GPU — " + percentText(gpuPressure) + ". "
+                + percentText(static_cast<double>(result.percent)) + " загрузки GPU остаётся свободной.";
             cpuAdvice(hardware, result);
         } else {
             result.kind = BottleneckKind::LiveGpu;
@@ -467,8 +450,6 @@ BottleneckResult analyzeBottleneck(const HardwareIdentity& hardware, const Syste
         result.headline = "Связка сбалансирована";
         result.detail = "По индексу производительности при разрешении " + resolution
             + " оба узла приходят к потолку вместе. Оценка ±15 %: живые замеры точнее.";
-        pushAdvice(result, "Держать цель кадра по герцовке монитора",
-            "Лишние кадры при незагруженной видеокарте только добавляют задержку и нагрев.");
         return result;
     }
 
@@ -488,13 +469,27 @@ BottleneckResult analyzeBottleneck(const HardwareIdentity& hardware, const Syste
         gpuAdvice(hardware, load, result);
     }
 
-    if (display != nullptr && display->refreshHz > 0 && result.expectedFps > display->refreshHz * 1.5)
-    {
-        pushAdvice(result, "Экран не использует запас кадров",
-            "Монитор " + std::to_string(display->refreshHz) + " Гц: прогноз выше герцовки вдвое. "
-                "Либо поднимите настройки до упора в видеокарту, либо ограничьте FPS — лишние кадры не видны.");
-    }
     return result;
+}
+
+BottleneckResult analyzeActiveGame(const HardwareIdentity& hardware, SystemLoad gameLoad, bool active)
+{
+    BottleneckResult result;
+    if (!active) {
+        result.kind = BottleneckKind::Idle;
+        result.headline = "Нет активной игры";
+        result.detail = "Выберите окно игры: оценка появится после кадров ETW и замеров её процесса.";
+        return result;
+    }
+    if (gameLoad.cpuLoad < 0.0 || gameLoad.gpuLoad < 0.0) {
+        result.headline = "Недостаточно данных об игре";
+        result.detail = "Загрузка CPU или GPU этой игры недоступна. Значения всей системы не подставляются.";
+        return result;
+    }
+    // Занятость всей видеопамяти адаптера не означает, что память заняла игра.
+    gameLoad.vramUsedGb = -1.0;
+    gameLoad.vramTotalGb = -1.0;
+    return analyzeBottleneck(hardware, gameLoad);
 }
 
 } // namespace yawa

@@ -156,6 +156,10 @@ struct AppModel {
     // из последних показаний: экраны только рисуют то, что лежит в модели.
     HardwareIdentity hardware;
     BottleneckResult balance;
+    std::wstring gameName;
+    double gameCpuLoad = -1.0;
+    double gamePeakThreadLoad = -1.0;
+    double gameGpuLoad = -1.0;
     float cursorX = -100.0f;
     float cursorY = -100.0f;
     bool cursorInside = false;

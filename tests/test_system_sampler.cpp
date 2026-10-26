@@ -110,15 +110,34 @@ void testDerivedMemory()
     CHECK_NEAR(values.pageFileGb, 900.0 / 1024.0, 1e-6);
 }
 
-void testDerivedVramUsesBudget()
+void testProcessCpuCountsAllLogicalProcessors()
+{
+    CHECK_NEAR(processCpuPercent(20'000'000, 1.0, 16), 12.5, 1e-9);
+    CHECK_NEAR(processCpuPercent(10'000'000, 1.0, 1), 100.0, 1e-9);
+    CHECK_NEAR(processCpuPercent(120'000'000, 1.0, 8), 100.0, 1e-9);
+    CHECK(processCpuPercent(10'000'000, 0.0, 16) < 0.0);
+}
+
+void testVramDistinguishesMissingUsageFromZero()
 {
     SystemSnapshot snapshot = baseSnapshot();
     snapshot.vramUsedBytes = 9ull * 1024 * 1024 * 1024;
     snapshot.vramBudgetBytes = 16ull * 1024 * 1024 * 1024;
+    snapshot.vramUsageKnown = true;
 
     const DerivedValues values = deriveValues(snapshot, SystemSampler::Deltas{});
     CHECK_NEAR(values.vramUsedGb, 9.0, 1e-6);
     CHECK_NEAR(values.vramTotalGb, 16.0, 1e-6);
+    MetricStore store;
+    applySnapshot(store, baseSnapshot(), deriveValues(baseSnapshot(), { }), { }, 0);
+    CHECK(!store.hasValue(MetricId::VramUsed));
+    CHECK(!store.hasValue(MetricId::VramTotal));
+    applySnapshot(store, snapshot, values, { }, 0);
+    CHECK_NEAR(store.value(MetricId::VramUsed), 9.0, 1e-6);
+    CHECK_NEAR(store.value(MetricId::VramTotal), 16.0, 1e-6);
+    applySnapshot(store, baseSnapshot(), deriveValues(baseSnapshot(), { }), { }, 0);
+    CHECK(!store.hasValue(MetricId::VramUsed));
+    CHECK(!store.hasValue(MetricId::VramTotal));
 }
 
 void testApplySnapshotFillsStore()
@@ -206,7 +225,8 @@ void runSystemSamplerTests()
     testRatesIgnoreNegativeValues();
     testSelfLoad();
     testDerivedMemory();
-    testDerivedVramUsesBudget();
+    testProcessCpuCountsAllLogicalProcessors();
+    testVramDistinguishesMissingUsageFromZero();
     testApplySnapshotFillsStore();
 }
 

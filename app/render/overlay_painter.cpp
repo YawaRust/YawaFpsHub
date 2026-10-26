@@ -108,6 +108,8 @@ IDWriteTextFormat* styledFormat(IDWriteFactory* factory, IDWriteTextFormat* base
     }
 
     format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+    format->SetParagraphAlignment(base->GetParagraphAlignment());
+    format->SetTextAlignment(base->GetTextAlignment());
     return format;
 }
 
@@ -242,7 +244,8 @@ public:
                     { -step, step }, { step, step } };
                 for (const auto& [dx, dy] : shifts) {
                     m_target->DrawTextW(value.data(), static_cast<UINT32>(value.size()), format,
-                        D2D1::RectF(rect.left + dx, rect.top + dy, rect.right + dx, rect.bottom + dy), edgeBrush);
+                        D2D1::RectF(rect.left + dx, rect.top + dy, rect.right + dx, rect.bottom + dy),
+                        edgeBrush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
                 }
                 edgeBrush->Release();
             }
@@ -255,7 +258,7 @@ public:
         }
 
         m_target->DrawTextW(value.data(), static_cast<UINT32>(value.size()), format,
-            D2D1::RectF(rect.left, rect.top, rect.right, rect.bottom), brush);
+            D2D1::RectF(rect.left, rect.top, rect.right, rect.bottom), brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
         format->SetTextAlignment(previous);
         brush->Release();
     }
@@ -494,22 +497,6 @@ std::size_t visibleRows(const OverlayText& text)
         }
     }
     return rows;
-}
-
-std::wstring inlineText(const OverlayText& text)
-{
-    const auto& values = text.values;
-    std::wstring line;
-    for (std::size_t index = 0; index < text.labels.size(); ++index) {
-        if (!rowShown(text, index)) {
-            continue;
-        }
-        if (!line.empty()) {
-            line += L"   ";
-        }
-        line += text.labels[index] + L" " + values[index];
-    }
-    return line;
 }
 
 const std::vector<std::wstring>& rowValues(const OverlayText& text)
@@ -896,7 +883,8 @@ void drawInline(Painter& painter, const OverlaySettings& settings, const Overlay
     const float separator = painter.measure(tracked(L"   ", look.letterSpacing), role);
     for (std::size_t index = 0; index < text.labels.size(); ++index) {
         if (!rowShown(text, index)) { continue; }
-        const std::wstring segment = tracked(text.labels[index] + L" " + text.values[index], look.letterSpacing);
+        const std::wstring label = look.uppercase ? upperCase(text.labels[index]) : text.labels[index];
+        const std::wstring segment = tracked(label + L" " + text.values[index], look.letterSpacing);
         const float width = painter.measure(segment, role);
         const bool customized = settings.metricColors[static_cast<std::size_t>(text.ids[index])] >= 0
             || settings.valueColor >= 0 || settings.rowColors[index % kLabelCount] >= 0;
@@ -1062,8 +1050,20 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
 
     Painter measurer(target, theme, scaled, scale, opacity, chrome, settings.textOutline);
     measurer.setBackgroundOpacity(backgroundOpacity);
-    const float lineWidth
-        = measurer.measure(inlineText(text), look.mono ? TextRole::Mono : TextRole::Small) / scale;
+    const TextRole inlineRole = look.mono ? TextRole::Mono : TextRole::Small;
+    float lineWidth = 0.0f;
+    for (std::size_t index = 0; index < text.labels.size(); ++index) {
+        if (!rowShown(text, index)) {
+            continue;
+        }
+        if (lineWidth > 0.0f) {
+            lineWidth += measurer.measure(tracked(L"   ", look.letterSpacing), inlineRole) / scale;
+        }
+        const std::wstring label = look.uppercase ? upperCase(text.labels[index]) : text.labels[index];
+        lineWidth
+            += measurer.measure(tracked(label + L" " + text.values[index], look.letterSpacing), inlineRole)
+            / scale;
+    }
     StyleSpec spec = styleSpec(settings, text, lineWidth);
     const auto labels = rowLabels(text, look);
     if (settings.layout == OverlayLayout::Plates && settings.style == OverlayStyle::Esport) {
@@ -1121,7 +1121,7 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
         const float step = settings.style == OverlayStyle::Rtss ? 19.0f : 18.0f + look.rowGap;
         spec.height = std::max(spec.height, head + bodyRows * step + look.padding + 8.0f);
     }
-    if (settings.pixelLayout && !text.ids.empty()) {
+    if (settings.pixelLayout && settings.layout == OverlayLayout::Plates && !text.ids.empty()) {
         spec.width = 520.0f;
         spec.height = 80.0f;
         for (MetricId id : text.ids) {
@@ -1160,7 +1160,7 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
     Painter painter(target, theme, scaled, scale, opacity, chrome, settings.textOutline);
     painter.setBackgroundOpacity(backgroundOpacity);
 
-    if (settings.pixelLayout && !text.ids.empty()) {
+    if (settings.pixelLayout && settings.layout == OverlayLayout::Plates && !text.ids.empty()) {
         painter.plate(frame, look.radius * scale, look.background);
         painter.outline(frame, look.radius * scale, look.border, 1.0f);
         for (std::size_t i = 0; i < text.ids.size(); ++i) {
@@ -1170,13 +1170,22 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
             const auto& row = settings.rowPositions[static_cast<std::size_t>(text.ids[i])];
             const float y
                 = frame.top + static_cast<float>(row.y >= 0 ? row.y : 12 + static_cast<int>(i) * 28) * scale;
-            painter.text(text.labels[i],
-                Rect { frame.left + row.labelX * scale, y, frame.left + (row.labelX + 230) * scale,
-                    y + 26.0f * scale },
-                TextRole::Small, look.label);
-            painter.text(text.values[i],
-                Rect { frame.left + row.valueX * scale, y, frame.left + 505.0f * scale, y + 26.0f * scale },
-                TextRole::Small, look.rowPalette[i]);
+            const int labelEnd = row.labelX == row.valueX ? row.labelX
+                : row.labelX < row.valueX                 ? std::min(row.labelX + 230, row.valueX - 8)
+                                                          : 505;
+            const int valueEnd = row.valueX < row.labelX ? row.labelX - 8 : 505;
+            if (labelEnd > row.labelX) {
+                painter.text(text.labels[i],
+                    Rect { frame.left + row.labelX * scale, y, frame.left + labelEnd * scale,
+                        y + 26.0f * scale },
+                    TextRole::Small, look.label);
+            }
+            if (valueEnd > row.valueX) {
+                painter.text(text.values[i],
+                    Rect { frame.left + row.valueX * scale, y, frame.left + valueEnd * scale,
+                        y + 26.0f * scale },
+                    TextRole::Small, look.rowPalette[i]);
+            }
         }
     } else if (settings.layout == OverlayLayout::Line) {
         drawInline(painter, settings, text, frame, look);

@@ -17,8 +17,6 @@ constexpr std::array<std::wstring_view, 8> kStyleNames{ L"Неон", L"RTSS", L"
     L"Минимал", L"Esport", L"Retro" };
 constexpr std::array<std::wstring_view, 4> kPositionNames{ L"Слева сверху", L"Справа сверху", L"Слева снизу",
     L"Справа снизу" };
-constexpr std::array<std::wstring_view, 5> kFieldNames{ L"Кадры в секунду", L"Загрузка процессора",
-    L"Загрузка видеокарты", L"Занятая память", L"Видеопамять" };
 
 void drawSlider(Renderer& renderer, const Rect& row, int value, int minimum, int maximum, std::wstring_view caption,
     const Theme& theme, std::vector<UiHit>& hits, ActionKind action, std::wstring_view suffix)
@@ -89,40 +87,6 @@ void drawColorRow(Renderer& renderer, const AppModel& model, const Theme& theme,
     }
 }
 
-// Цвет одной строки оверлея: «авто» и шесть цветов палитры. Значение хита кодирует
-// и номер строки, и цвет, чтобы обойтись одним действием.
-void drawRowColorRow(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& row,
-    std::wstring_view caption, int selected, int field, std::vector<UiHit>& hits)
-{
-    renderer.text(caption, Rect{ row.left, row.top, row.left + 60.0f, row.bottom }, TextRole::Small,
-        theme.textDim);
-
-    constexpr int kCount = kOverlayColorCount + 1;
-    const float chipWidth = 22.0f;
-    const float gap = 4.0f;
-    const float total = static_cast<float>(kCount) * chipWidth + static_cast<float>(kCount - 1) * gap;
-    float left = row.right - total;
-    const auto palette = overlayColorPalette();
-    for (int index = -1; index < kOverlayColorCount; ++index) {
-        // Чипы той же высоты, что и строка: иначе подписи выглядели сдвинутыми вниз.
-        const Rect chip{ left, row.top, left + chipWidth, row.bottom };
-        const bool active = index == selected;
-        const bool hover = isHovered(model, chip);
-        renderer.fillRoundRect(chip, 7.0f, active ? theme.accentSoft : theme.panelSoft.withAlpha(hover ? 0.95f : 0.6f));
-        if (active) {
-            renderer.strokeRoundRect(chip, 7.0f, theme.accentGlow, 1.0f);
-        }
-        if (index < 0) {
-            renderer.text(L"а", chip, TextRole::Tiny, active ? theme.accent : theme.textFaint, TextAlign::Center);
-        } else {
-            renderer.fillCircle(chip.centerX(), chip.centerY(), 5.5f,
-                palette[static_cast<std::size_t>(index)].withAlpha(active ? 1.0f : 0.85f));
-        }
-        hits.push_back(UiHit{ chip, ActionKind::SetRowColor, field * 8 + index + 1 });
-        left += chipWidth + gap;
-    }
-}
-
 // Тройной выбор «как в стиле / включено / выключено» для необязательных переключателей.
 void drawTriState(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& row,
     std::wstring_view caption, int mode, ActionKind action, std::vector<UiHit>& hits)
@@ -141,21 +105,6 @@ void drawTriState(Renderer& renderer, const AppModel& model, const Theme& theme,
         hits.push_back(UiHit{ chip, action, values[index] });
         left += chipWidth + gap;
     }
-}
-
-void drawToggleRow(Renderer& renderer, const Rect& row, std::wstring_view label, bool on, const Theme& theme,
-    std::vector<UiHit>& hits, ActionKind action, int value)
-{
-    const Rect track{ row.right - 36.0f, row.centerY() - 9.0f, row.right, row.centerY() + 9.0f };
-    renderer.fillRoundRect(track, 9.0f, on ? theme.accentSoft : theme.panelSoft);
-    if (on) {
-        renderer.strokeRoundRect(track, 9.0f, theme.accentGlow, 1.0f);
-    }
-    renderer.fillCircle(on ? track.right - 9.0f : track.left + 9.0f, track.centerY(), 6.0f,
-        on ? theme.accent : theme.textFaint);
-    renderer.text(label, Rect{ row.left, row.top, track.left - 12.0f, row.bottom }, TextRole::Small,
-        on ? theme.text : theme.textFaint);
-    hits.push_back(UiHit{ row, action, value });
 }
 
 void drawStyleGallery(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area,
@@ -293,7 +242,7 @@ void drawSceneBackdrop(Renderer& renderer, const Rect& scene, const Theme& theme
 }
 
 void drawPreviewCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card,
-    std::vector<UiHit>& hits)
+    std::vector<UiHit>& hits, const OverlaySettings* previewSettings = nullptr)
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
@@ -319,9 +268,12 @@ void drawPreviewCard(Renderer& renderer, const AppModel& model, const Theme& the
     const OverlayFormats formats{ renderer.dwrite(), renderer.textFormat(TextRole::Heading),
         renderer.textFormat(TextRole::Value), renderer.textFormat(TextRole::Small),
         renderer.textFormat(TextRole::Mono) };
-    const OverlayText text = makeOverlayText(model.settings.overlay, model.store);
-    const float scale = static_cast<float>(model.settings.overlay.scalePercent) / 100.0f * 0.9f;
-    paintOverlay(renderer.target(), model.settings.overlay, theme, text, scene, scale, formats);
+    const OverlaySettings& overlay = previewSettings != nullptr ? *previewSettings : model.settings.overlay;
+    const OverlayText text = makeOverlayText(overlay, model.store);
+    const float scale = static_cast<float>(overlay.scalePercent) / 100.0f * 0.9f;
+    renderer.pushClip(scene);
+    paintOverlay(renderer.target(), overlay, theme, text, scene, scale, formats);
+    renderer.popClip();
 
     renderer.strokeRoundRect(scene, 14.0f, theme.line, 1.0f);
     hits.push_back(UiHit{ scene, ActionKind::DragOverlay, 0 });
@@ -525,22 +477,6 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
         overlay.accentColor, ActionKind::SetAccentColor, hits);
     top += 26.0f;
 
-    // Каждая строка оверлея красится отдельно: так собираются свои наборы в духе Fpsmon.
-    renderer.text(L"Цвет строк", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small,
-        theme.textDim);
-    top += 18.0f;
-    // Короткие имена строк: длинные подписи наезжали на палитры справа.
-    const std::array<std::wstring_view, kLabelCount> rowNames{ L"FPS", L"CPU", L"GPU", L"RAM", L"VRAM" };
-    for (std::size_t index = 0; index < kLabelCount; ++index) {
-        if (top + 20.0f > inner.bottom) {
-            break;
-        }
-        drawRowColorRow(renderer, model, theme, Rect{ inner.left, top, inner.right, top + 22.0f },
-            rowNames[index], overlay.rowColors[index], static_cast<int>(index), hits);
-        top += 24.0f;
-    }
-    top += 6.0f;
-
     // Рамка: толщина от 0 до 3 px, «из стиля» — у каждого пресета своя.
     const int borderValue = overlay.borderWidth;
     drawSliderAt(renderer, Rect{ inner.left, top, inner.right, top + 34.0f },
@@ -596,70 +532,6 @@ void drawControlsCard(Renderer& renderer, const AppModel& model, const Theme& th
     };
     drawOffset(inner.left, ActionKind::OffsetX, overlay.offsetX, L"X");
     drawOffset(inner.left + 148.0f, ActionKind::OffsetY, overlay.offsetY, L"Y");
-    top += 38.0f;
-
-    renderer.text(L"Состав", Rect{ inner.left, top, inner.right, top + 16.0f }, TextRole::Small, theme.textDim);
-    top += 18.0f;
-    for (std::size_t index = 0; index < kFieldNames.size(); ++index) {
-        if (top + 24.0f > inner.bottom) {
-            break;
-        }
-        drawToggleRow(renderer, Rect { inner.left, top, inner.right, top + 24.0f }, kFieldNames[index],
-            overlay.metrics[static_cast<std::size_t>(kOverlayPrimaryMetrics[index])], theme, hits,
-            ActionKind::ToggleMetric, static_cast<int>(index));
-        top += 25.0f;
-    }
-}
-
-
-void drawLabelsCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card,
-    std::vector<UiHit>& hits)
-{
-    drawCard(renderer, card, theme);
-    const Rect inner = card.inset(kCardPadding);
-
-    renderer.text(L"Подписи полей", Rect{ inner.left, inner.top, inner.right, inner.top + 22.0f }, TextRole::Heading,
-        theme.text);
-    renderer.text(L"клик по строке очищает подпись и начинает ввод; Esc вернёт прежнюю, Delete сотрёт целиком",
-        Rect{ inner.left, inner.top + 20.0f, inner.right, inner.top + 36.0f }, TextRole::Tiny, theme.textFaint);
-
-    const std::array<std::wstring_view, 3> presets{ L"Стандарт", L"Русские", L"Только FPS" };
-    float top = inner.top + 42.0f;
-    const float presetWidth = (inner.width() - 2.0f * 6.0f) / 3.0f;
-    for (std::size_t index = 0; index < presets.size(); ++index) {
-        const Rect chip{ inner.left + static_cast<float>(index) * (presetWidth + 6.0f), top,
-            inner.left + static_cast<float>(index) * (presetWidth + 6.0f) + presetWidth, top + 24.0f };
-        drawChip(renderer, chip, presets[index], false, theme, TextRole::Tiny);
-        hits.push_back(UiHit{ chip, ActionKind::ApplyLabelPreset, static_cast<int>(index) });
-    }
-    top += 32.0f;
-
-    for (std::size_t index = 0; index < kFieldNames.size(); ++index) {
-        if (top + 24.0f > inner.bottom) {
-            break;
-        }
-        const Rect row{ inner.left, top, inner.right, top + 24.0f };
-        const bool editing = model.editingLabel == static_cast<int>(index);
-        renderer.fillRoundRect(row, 9.0f, editing ? theme.accentSoft : theme.panelSoft);
-        if (editing) {
-            renderer.strokeRoundRect(row, 9.0f, theme.accentGlow, 1.0f);
-        }
-        renderer.text(kFieldNames[index], Rect{ row.left + 10.0f, row.top, row.left + 150.0f, row.bottom },
-            TextRole::Tiny, theme.textDim);
-
-        const std::string& value = labelValue(model.settings.overlay, static_cast<LabelField>(index));
-        const std::wstring shown = wideText(value);
-        renderer.text(editing ? shown + L"|" : (shown.empty() ? L"скрыто" : shown),
-            Rect{ row.left + 156.0f, row.top, row.right - 34.0f, row.bottom }, TextRole::Small,
-            editing ? theme.accent : (shown.empty() ? theme.textFaint : theme.text), TextAlign::Right);
-
-        // Крестик стирает подпись одним нажатием: пустая подпись — валидное состояние.
-        const Rect clear{ row.right - 28.0f, row.centerY() - 9.0f, row.right - 10.0f, row.centerY() + 9.0f };
-        renderer.text(L"×", clear, TextRole::Small, theme.textFaint, TextAlign::Center);
-        hits.push_back(UiHit{ row, ActionKind::SelectLabel, static_cast<int>(index) });
-        hits.push_back(UiHit{ clear, ActionKind::ClearLabel, static_cast<int>(index) });
-        top += 28.0f;
-    }
 }
 
 void drawOrderCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card,
@@ -718,13 +590,19 @@ float overlayOrderCardHeight(const OverlaySettings& settings)
 
 float overlayEditorControlsHeight(const OverlaySettings& settings)
 {
-    return 268.0f + 1450.0f + 232.0f + overlayOrderCardHeight(settings) + 4.0f * kGap;
+    return 268.0f + 1260.0f + overlayOrderCardHeight(settings) + 2.0f * kGap;
 }
 
-void drawOverlayEditorPreview(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card)
+void drawOverlayEditorPreview(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card,
+    int screenWidth, int screenHeight)
 {
+    const Rect inner = card.inset(kCardPadding);
+    const Rect scene { inner.left, inner.top + 46.0f, inner.right, inner.bottom };
+    OverlaySettings preview = model.settings.overlay;
+    preview.offsetX = scaledOverlayOffset(preview.offsetX, screenWidth, scene.width());
+    preview.offsetY = scaledOverlayOffset(preview.offsetY, screenHeight, scene.height());
     std::vector<UiHit> unused;
-    drawPreviewCard(renderer, model, theme, card, unused);
+    drawPreviewCard(renderer, model, theme, card, unused, &preview);
 }
 
 void drawOverlayEditorControls(Renderer& renderer, const AppModel& model, const Theme& theme,
@@ -741,13 +619,9 @@ void drawOverlayEditorControls(Renderer& renderer, const AppModel& model, const 
     drawCard(renderer, gallery, theme);
     drawStyleGallery(renderer, model, theme, gallery.inset(kCardPadding), hits);
     renderer.popClip();
-    const Rect controls = place(1450.0f);
+    const Rect controls = place(1260.0f);
     renderer.pushClip(controls);
     drawControlsCard(renderer, model, theme, controls, hits);
-    renderer.popClip();
-    const Rect labels = place(232.0f);
-    renderer.pushClip(labels);
-    drawLabelsCard(renderer, model, theme, labels, hits);
     renderer.popClip();
     const Rect order = place(overlayOrderCardHeight(model.settings.overlay));
     renderer.pushClip(order);

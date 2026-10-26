@@ -22,7 +22,9 @@ constexpr wchar_t kInstanceMutex[] = L"Global\\YawaFpsHubInstance";
 bool anotherInstanceExists()
 {
     HANDLE mutex = OpenMutexW(SYNCHRONIZE, FALSE, kInstanceMutex);
-    if (mutex == nullptr) { return false; }
+    if (mutex == nullptr) {
+        return GetLastError() == ERROR_ACCESS_DENIED;
+    }
     CloseHandle(mutex);
     return true;
 }
@@ -31,13 +33,22 @@ bool isAlreadyRunning()
 {
     HANDLE mutex = CreateMutexW(nullptr, TRUE, kInstanceMutex);
     if (mutex == nullptr) {
-        return false;
+        return GetLastError() == ERROR_ACCESS_DENIED;
     }
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         CloseHandle(mutex);
         return true;
     }
     return false;
+}
+
+void showExistingWindow()
+{
+    const HWND window = FindWindowW(L"YawaFpsHubMain", nullptr);
+    if (window != nullptr) {
+        ShowWindow(window, SW_RESTORE);
+        SetForegroundWindow(window);
+    }
 }
 
 } // namespace
@@ -48,16 +59,20 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
     if (sensorCommand >= 0) {
         return sensorCommand;
     }
+    yawa::Log log;
+    log.open(yawa::logPath());
+    log.info("вход в приложение");
     const std::wstring_view arguments = commandLine != nullptr ? commandLine : L"";
     const std::size_t smokeFlag = arguments.find(L"--smoke");
     const bool smoke = smokeFlag != std::wstring_view::npos;
-    if (!smoke && (arguments.empty() || arguments == L"--sensor-ready") && anotherInstanceExists()) {
-        MessageBoxW(nullptr, L"YawaFpsHub уже запущен — окно свёрнуто в трей.", L"YawaFpsHub",
-            MB_OK | MB_ICONINFORMATION);
+    if (!smoke && arguments.empty() && anotherInstanceExists()) {
+        log.info("уже запущен другой экземпляр");
+        showExistingWindow();
         return 0;
     }
-    if (!smoke && yawa::prepareSensorsForLaunch(arguments)) {
-        return 0; // UAC запустил этот же exe с доступом к CPU-датчикам
+    if (yawa::prepareSensorsForLaunch(arguments)) {
+        log.info("повышенный дочерний процесс завершён без запуска окна");
+        return 0;
     }
 
     // --smoke=<секунды>: CI держит окно дольше, чтобы замерить потребление в установившемся режиме.
@@ -138,13 +153,10 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
     const HRESULT comResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
     if (isAlreadyRunning()) {
-        MessageBoxW(nullptr, L"YawaFpsHub уже запущен — окно свёрнуто в трей.", L"YawaFpsHub",
-            MB_OK | MB_ICONINFORMATION);
+        showExistingWindow();
         return 0;
     }
 
-    yawa::Log log;
-    log.open(yawa::logPath());
     log.info("запуск, каталог " + yawa::executableDirectory());
 
     yawa::MainWindow window;
@@ -178,6 +190,9 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
 
     if (arguments.find(L"--editor") != std::wstring_view::npos) {
         window.openEditorForSmoke();
+    }
+    if (!smoke && arguments.empty()) {
+        window.scheduleSensorElevation();
     }
     const int result = window.run(smoke ? smokeSeconds : 0, overlayShotDir);
     log.info("остановка");

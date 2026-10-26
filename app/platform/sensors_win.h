@@ -14,6 +14,8 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
+#include <vector>
 
 struct IWbemServices;
 
@@ -54,7 +56,7 @@ public:
     std::size_t activeGpu() const { return m_activeGpu; }
     void selectGpu(std::size_t index);
 
-    bool sample(SystemSnapshot& snapshot);
+    bool sample(SystemSnapshot& snapshot, std::uint32_t gamePid = 0);
     const SensorAvailability& availability() const { return m_availability; }
 
     std::wstring activeGpuName() const;
@@ -74,6 +76,8 @@ private:
     void sampleDiskAndNetwork(SystemSnapshot& snapshot);
     void sampleGpu(SystemSnapshot& snapshot);
     void sampleSelf(SystemSnapshot& snapshot);
+    void sampleGameProcess(SystemSnapshot& snapshot, std::uint32_t gamePid);
+    void sampleGameThreads(SystemSnapshot& snapshot, std::uint32_t gamePid, std::uint64_t now);
 
     DxgiAdapterList m_adapters;
     NvmlSensors m_nvml;
@@ -86,6 +90,7 @@ private:
     PdhWildcardCounter m_netReceived;
     PdhWildcardCounter m_netSent;
     PdhWildcardCounter m_gpuEngine;
+    PdhWildcardCounter m_gpuAdapterMemory;
     // ACPI-термозона: отдаёт температуру без прав администратора и без MSR-драйвера.
     // Загрузка ядер считается по NtQuerySystemInformation(SystemProcessorPerformanceInformation):
     // этот источник есть на любой Windows и не зависит от локали и набора счётчиков PDH,
@@ -109,6 +114,18 @@ private:
     double m_gpuLoad = 0.0;
 
     // Поток игры: главный поток активного окна. Считаем по разнице времён, как диспетчер задач.
+    std::uint32_t m_gameProcessId = 0;
+    std::uint64_t m_gameProcessTicks = 0;
+    std::uint64_t m_gameProcessCreated = 0;
+    std::uint64_t m_gameProcessTime = 0;
+    std::uint64_t m_gameThreadsTime = 0;
+    struct GameThreadSample
+    {
+        std::uint32_t id;
+        std::uint64_t created;
+        std::uint64_t busy;
+    };
+    std::vector<GameThreadSample> m_gameThreadTimes;
     std::uint32_t m_gameThreadId = 0;
     std::uint64_t m_gameThreadTicks = 0;
     std::uint64_t m_gameQueryTime = 0;

@@ -62,7 +62,7 @@ inline std::string displayMetricValue(MetricId id, const MetricStore& store)
         return value;
     }
     if (id == MetricId::CpuLoad) {
-        return value + " / пик " + formatWithUnit(total, MetricUnit::Percent, 0);
+        return value + " / " + formatWithUnit(total, MetricUnit::Percent, 0);
     }
     return formatValue(store.value(id), info.decimals) + " / "
         + formatWithUnit(total, info.unit, info.decimals);

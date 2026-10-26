@@ -105,6 +105,7 @@ bool PdhWildcardCounter::collect()
     }
 
     if (PdhCollectQueryData(static_cast<PDH_HQUERY>(m_query)) != ERROR_SUCCESS) {
+        m_values.clear();
         return false;
     }
 

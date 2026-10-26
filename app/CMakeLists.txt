@@ -3,6 +3,7 @@ add_executable(YawaFpsHub WIN32
     metrics/frame_tracker.cpp
     metrics/gpu_registry.cpp
     metrics/hardware_info.cpp
+    metrics/smbios_memory.cpp
     metrics/bottleneck.cpp
     metrics/metric_store.cpp
     metrics/statistics.cpp

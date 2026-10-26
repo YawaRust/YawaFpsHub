@@ -64,6 +64,13 @@ private:
     bool m_catalogOpen = false;
     int m_grabX = 0;
     int m_grabY = 0;
+    int m_dragStartX = 0;
+    int m_dragStartY = 0;
+    int m_offsetStartX = 0;
+    int m_offsetStartY = 0;
+    bool m_dragLine = false;
+    std::vector<MetricId> m_selectedRows;
+    std::vector<OverlayRowPosition> m_dragPositions;
 };
 
 } // namespace yawa

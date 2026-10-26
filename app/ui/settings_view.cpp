@@ -316,19 +316,18 @@ void drawSourcesCard(Renderer& renderer, const AppModel& model, const Theme& the
     };
 
     const SensorAvailability& availability = model.availability;
-    const std::array<Source, 6> sources{ Source{ L"ETW · кадры",
-                                              L"Microsoft-Windows-DXGI, Present_Start",
+    const std::array<Source, 6> sources { Source { L"ETW · кадры", L"Microsoft-Windows-DXGI, Present_Start",
                                               model.etwRunning, L"без инъекций в игры" },
         { L"PDH · процессор, диски, сеть", L"те же счётчики, что у диспетчера задач", availability.cpu,
             L"без прав администратора" },
         { L"PDH · загрузка GPU", L"GPU Engine, движок 3D активного адаптера", availability.gpuLoad,
             L"Windows 10 1709 и новее" },
-        { L"DXGI · адаптеры и видеопамять", L"LUID, объём, QueryVideoMemoryInfo", availability.gpuMemory,
+        { L"VRAM · DXGI, PDH, NVML", L"Объём DXGI/NVML · занято PDH/NVML", availability.gpuMemory,
             L"ядро драйвера, без установки" },
         { L"NVML · температура и питание GPU", L"nvml.dll из драйвера NVIDIA", availability.gpuTemperature,
             L"только NVIDIA" },
         { L"Датчики CPU и чипсета", L"CPU: PawnIO + администратор; ACPI не кристалл",
-                availability.cpuTemperature, L"драйвер не нужен" } };
+            availability.cpuTemperature, L"драйвер не нужен" } };
 
     // Две колонки по три источника: шесть строк в одну не помещаются на 1040x790.
     const float columnWidth = (inner.width() - 24.0f) / 2.0f;
