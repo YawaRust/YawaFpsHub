@@ -272,6 +272,16 @@
   const sensorRows = new Map();
   const sensorFilter = { group: "all", query: "", pinnedOnly: false };
 
+  // Какой строке оверлея соответствует датчик: та же привязка, что в приложении.
+  function osdFieldFor(id) {
+    if (id.startsWith("fps") || id === "frameMs" || id === "framesDropped") return "fps";
+    if (id.startsWith("cpu") || id.startsWith("core")) return "cpu";
+    if (id === "vramUsed" || id === "vramTotal") return "vram";
+    if (id.startsWith("ram") || id.startsWith("pageFile")) return "ram";
+    if (id.startsWith("gpu") || id === "pcieLoad") return "gpu";
+    return null;
+  }
+
   function buildSensorTable() {
     const host = $("#sensorRows");
     const snapshot = window.Sim.snapshot();
@@ -310,6 +320,14 @@
       eye.addEventListener("click", () => {
         sensor.pinned = !sensor.pinned;
         eye.classList.toggle("is-on", sensor.pinned);
+        // Как в приложении: «глаз» включает и выключает строку в оверлее.
+        const field = osdFieldFor(sensor.id);
+        if (field) {
+          const fieldRow = $(`[data-osd-item="${field}"]`);
+          if (fieldRow) fieldRow.classList.toggle("is-hidden", !sensor.pinned);
+          const toggle = $(`[data-osd-toggle="${field}"]`);
+          if (toggle) toggle.checked = sensor.pinned;
+        }
         applySensorFilter();
       });
 
