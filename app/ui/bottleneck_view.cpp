@@ -266,17 +266,17 @@ void drawBottleneckView(Renderer& renderer, const AppModel& model, const Theme& 
     const float firstHeight = 214.0f;
     const float secondHeight = 268.0f;
 
-    drawVerdictCard(renderer, model, theme, columns.span(0, 12, area.top, firstHeight));
+    drawVerdictCard(renderer, model, theme, columns.span(0.0f, 12.0f, area.top, firstHeight));
     const float pairTop = area.top + firstHeight + kGap;
-    drawPairCard(renderer, model, theme, columns.span(0, narrow ? 12 : 7, pairTop, secondHeight));
+    drawPairCard(renderer, model, theme, columns.span(0.0f, narrow ? 12.0f : 7.0f, pairTop, secondHeight));
     const float loadTop = narrow ? pairTop + secondHeight + kGap : pairTop;
-    drawLoadCard(renderer, model, theme, columns.span(narrow ? 0 : 7, narrow ? 12 : 5, loadTop, secondHeight));
+    drawLoadCard(renderer, model, theme, columns.span(narrow ? 0.0f : 7.0f, narrow ? 12.0f : 5.0f, loadTop, secondHeight));
 
     const float adviceTop = loadTop + secondHeight + kGap;
-    drawAdviceCard(renderer, model, theme, columns.span(0, 12, adviceTop, 260.0f));
+    drawAdviceCard(renderer, model, theme, columns.span(0.0f, 12.0f, adviceTop, 260.0f));
 
     // Методика — внизу: вывод важнее пояснения, но проверить его всё равно должно быть можно.
-    const Rect note = columns.span(0, 12, adviceTop + 260.0f + kGap, 118.0f);
+    const Rect note = columns.span(0.0f, 12.0f, adviceTop + 260.0f + kGap, 118.0f);
     drawCard(renderer, note, theme);
     const Rect inner = note.inset(kCardPadding);
     drawCardHeader(renderer, note, L"Как считаем",

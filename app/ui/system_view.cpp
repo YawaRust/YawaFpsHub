@@ -301,22 +301,20 @@ void drawSystemView(Renderer& renderer, const AppModel& model, const Theme& them
 
     const float wideTop = area.top;
     const float narrowStep = rowHeight + kGap;
-    drawOsCard(renderer, model, theme, columns.span(0, narrow ? 12 : 4, wideTop, rowHeight));
+    drawOsCard(renderer, model, theme, columns.span(0.0f, narrow ? 12.0f : 4.0f, wideTop, rowHeight));
     drawCpuCard(renderer, model, theme,
-        columns.span(narrow ? 0 : 4, narrow ? 12 : 4, narrow ? wideTop + narrowStep : wideTop, rowHeight));
+        columns.span(narrow ? 0.0f : 4.0f, narrow ? 12.0f : 4.0f, narrow ? wideTop + narrowStep : wideTop, rowHeight));
     drawGpuCard(renderer, model, theme,
-        columns.span(narrow ? 0 : 8, narrow ? 12 : 4, narrow ? wideTop + 2.0f * narrowStep : wideTop, rowHeight));
+        columns.span(narrow ? 0.0f : 8.0f, narrow ? 12.0f : 4.0f, narrow ? wideTop + 2.0f * narrowStep : wideTop, rowHeight));
 
     const float memoryTop = narrow ? wideTop + 3.0f * narrowStep : wideTop + rowHeight + kGap;
-    drawMemoryCard(renderer, model, theme, columns.span(0, narrow ? 12 : 8, memoryTop, memoryHeight));
-    drawDisplayCard(renderer, model, theme,
-        columns.span(narrow ? 0 : 8, narrow ? 12 : 4,
-            narrow ? memoryTop + memoryHeight + kGap : memoryTop,
-            narrow ? 190.0f : memoryHeight));
+    drawMemoryCard(renderer, model, theme, columns.span(0.0f, narrow ? 12.0f : 8.0f, memoryTop, memoryHeight));
+    drawDisplayCard(renderer, model, theme, columns.span(narrow ? 0.0f : 8.0f, narrow ? 12.0f : 4.0f,
+        narrow ? memoryTop + memoryHeight + kGap : memoryTop, narrow ? 190.0f : memoryHeight));
 
     const float noteTop = narrow ? memoryTop + memoryHeight + 190.0f + 2.0f * kGap : memoryTop + memoryHeight + kGap;
     const float designHeight = narrow ? kSystemNarrowHeight : kSystemHeight;
-    const Rect note = columns.span(0, 12, noteTop, area.top + designHeight - 8.0f - noteTop);
+    const Rect note = columns.span(0.0f, 12.0f, noteTop, area.top + designHeight - 8.0f - noteTop);
     drawCard(renderer, note, theme);
     const Rect inner = note.inset(kCardPadding);
     drawCardHeader(renderer, note, L"Откуда эти числа",
