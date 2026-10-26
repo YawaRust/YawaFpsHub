@@ -386,14 +386,14 @@ void SystemSensors::sampleCpu(SystemSnapshot& snapshot)
     if (m_hasCoreTimes && sampleCoreTimes()) {
         const std::size_t cores = std::min<std::size_t>(m_coreTimeCount, snapshot.coreLoadPercent.size());
         for (std::size_t index = 0; index < cores; ++index) {
-            const std::uint64_t idle = m_coreIdleTicks[index] >= m_previousCoreIdle[index]
+            const std::uint64_t idleTicks = m_coreIdleTicks[index] >= m_previousCoreIdle[index]
                 ? m_coreIdleTicks[index] - m_previousCoreIdle[index]
                 : 0;
             const std::uint64_t total = m_coreTotalTicks[index] >= m_previousCoreTotal[index]
                 ? m_coreTotalTicks[index] - m_previousCoreTotal[index]
                 : 0;
             snapshot.coreLoadPercent[index]
-                = total > 0 ? std::clamp(100.0 * (1.0 - static_cast<double>(idle) / static_cast<double>(total)),
+                = total > 0 ? std::clamp(100.0 * (1.0 - static_cast<double>(idleTicks) / static_cast<double>(total)),
                     0.0, 100.0)
                             : 0.0;
         }

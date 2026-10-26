@@ -357,12 +357,6 @@ struct StyleLook {
     bool shadow = false;
 };
 
-std::array<Color, kOverlayColorCount> overlayColorPalette()
-{
-    return { styleColor(0xFFFFFFu), styleColor(0x5EF29Bu), styleColor(0x6AA8FFu), styleColor(0xB47BFFu),
-        styleColor(0xFFB347u), styleColor(0xFF6F6Fu) };
-}
-
 StyleLook lookFor(OverlayStyle style)
 {
     StyleLook look;
@@ -981,6 +975,13 @@ OverlaySwatch overlaySwatch(OverlayStyle style)
         break;
     }
     return swatch;
+}
+
+// Палитра вынесена из анонимного namespace: она объявлена в заголовке и нужна редактору.
+std::array<Color, kOverlayColorCount> overlayColorPalette()
+{
+    return { styleColor(0xFFFFFFu), styleColor(0x5EF29Bu), styleColor(0x6AA8FFu), styleColor(0xB47BFFu),
+        styleColor(0xFFB347u), styleColor(0xFF6F6Fu) };
 }
 
 OverlayText makeOverlayText(const OverlaySettings& settings, const OverlayValues& values)
