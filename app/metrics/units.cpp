@@ -65,6 +65,9 @@ std::string formatValue(double value, std::uint8_t decimals)
     }
 
     const double rounded = std::round(value * std::pow(10.0, decimals)) / std::pow(10.0, decimals);
+    if (!std::isfinite(rounded)) {
+        return "—";
+    }
     if (std::abs(rounded) < std::pow(10.0, -static_cast<int>(decimals)) * 0.5) {
         value = 0.0;
     } else {
@@ -73,7 +76,7 @@ std::string formatValue(double value, std::uint8_t decimals)
 
     std::array<char, 64> buffer{};
     const int written = std::snprintf(buffer.data(), buffer.size(), "%.*f", static_cast<int>(decimals), value);
-    if (written <= 0) {
+    if (written <= 0 || static_cast<std::size_t>(written) >= buffer.size()) {
         return "—";
     }
 
