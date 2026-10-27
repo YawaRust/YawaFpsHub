@@ -27,7 +27,7 @@ add_test(NAME ui_labels COMMAND ${CMAKE_COMMAND} -DPROJECT_ROOT=${PROJECT_SOURCE
 # preview pixels and the PNG. The DXGI game capture itself still needs real hardware.
 if(WIN32)
     add_executable(report_card_win_tests
-        test_report_card_win.cpp
+        ../app/platform/report_card_win_test.cpp
         ../app/platform/report_card_win.cpp
         ../app/platform/win_util.cpp)
     target_link_libraries(report_card_win_tests PRIVATE yawa_metrics d2d1 dwrite windowscodecs ole32)
