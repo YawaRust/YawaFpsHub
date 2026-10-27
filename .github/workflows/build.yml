@@ -409,6 +409,7 @@ jobs:
           python -B -m unittest discover -s tests -p test_compare_ui.py -v
           if ($LASTEXITCODE -ne 0) { throw "Тесты сравнения снимков не прошли" }
           Write-Output "::notice title=UI stage::проверка реальных снимков"
+          $env:PYTHONIOENCODING = 'utf-8'
           $python = (Get-Command python).Source
           $compare = Start-Process -FilePath $python -ArgumentList "-B", "tools/compare_ui.py", "--demo", ".", "--app", ".", "--out", "shots", "--check" -Wait -PassThru -RedirectStandardOutput "ui-stdout.txt" -RedirectStandardError "ui-stderr.txt"
           Get-Content ui-stdout.txt | ForEach-Object { Write-Output $_ }
