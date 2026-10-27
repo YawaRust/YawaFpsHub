@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from hashlib import sha256
 from pathlib import Path
 
@@ -73,6 +74,8 @@ def main() -> int:
             problems += check_frame(app, seen_app, f"screenshot-{view}", 2.0)
         score = compare(demo, app)
         print(f"{view:10s} расхождение {score:5.1f} из 255")
+        if os.environ.get("GITHUB_ACTIONS"):
+            print(f"::notice title=UI {view}::расхождение {score:.1f} из 255")
         if args.max_score is not None and score > args.max_score:
             problems.append(f"{view}: расхождение {score:.1f} выше {args.max_score:.1f}")
         pair = Image.new("RGB", (size[0] * 2 + 12, size[1]), (12, 15, 20))
@@ -81,6 +84,8 @@ def main() -> int:
         pair.save(out / f"pair-{view}.png")
     for problem in problems:
         print(f"ОШИБКА: {problem}")
+        if os.environ.get("GITHUB_ACTIONS"):
+            print(f"::error title=UI screenshot::{problem}")
     print(f"пары сохранены в {out}")
     return int(bool(problems) and (args.check or args.max_score is not None))
 
