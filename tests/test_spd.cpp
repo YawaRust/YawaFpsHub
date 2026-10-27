@@ -1,6 +1,7 @@
 #include "metrics/spd.h"
 #include "test_support.h"
 
+#include <algorithm>
 #include <array>
 #include <string_view>
 
@@ -66,6 +67,39 @@ void runSpdTests()
     broken = ddr4;
     broken[2] = 0x0b; // DDR3 is not supported by this decoder.
     CHECK(!decodeSpdBase(broken));
+
+    std::array<std::uint8_t, 512> full { };
+    std::copy(ddr4.begin(), ddr4.end(), full.begin());
+    // Synthetic second CRC-covered block (all zeros); XMP bytes themselves are not CRC-covered.
+    const auto noXmp = decodeDdr4Xmp(full);
+    CHECK(noXmp.has_value());
+    if (noXmp)
+        CHECK(noXmp->empty());
+    full[384] = 0x0c;
+    full[385] = 0x4a;
+    full[386] = 0x03; // Two advertised profiles.
+    full[387] = 0x20; // XMP 2.0.
+    full[393 + 3] = 10; // 1250 ps, passport ~1600 MT/s, not active frequency.
+    full[440 + 3] = 8; // 1000 ps, passport ~2000 MT/s.
+    const auto xmp = decodeDdr4Xmp(full);
+    CHECK(xmp.has_value());
+    if (xmp) {
+        CHECK(xmp->size() == 2);
+        if (xmp->size() == 2) {
+            CHECK((*xmp)[0].number == 1 && (*xmp)[0].minimumCyclePs == 1250);
+            CHECK((*xmp)[1].number == 2 && (*xmp)[1].minimumCyclePs == 1000);
+        }
+    }
+    full[128] ^= 1; // Module CRC is mandatory, even though XMP lies outside it.
+    CHECK(!decodeDdr4Xmp(full));
+    full[128] ^= 1;
+    full[393 + 3] = 0; // A signaled but invalid profile is unknown, not 'no XMP'.
+    CHECK(!decodeDdr4Xmp(full));
+    full[393 + 3] = 10;
+    full[387] = 0x30; // XMP 3.0/unknown is not decoded as 2.0.
+    CHECK(!decodeDdr4Xmp(full));
+    full[387] = 0x20;
+    CHECK(!decodeDdr4Xmp(std::span<const std::uint8_t>(full.data(), 256)));
 }
 
 } // namespace yawa::test

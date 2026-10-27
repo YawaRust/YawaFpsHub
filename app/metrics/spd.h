@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <vector>
 
 namespace yawa {
 
@@ -25,6 +26,20 @@ struct SpdIdentity
     std::optional<SpdJedecTimings> jedecTimings;
 };
 
+// JEDEC DDR4 SPD CRC-16, polynomial x^16+x^12+x^5+1, initial value zero.
+inline std::uint16_t spdCrc16(std::span<const std::uint8_t> bytes)
+{
+    std::uint16_t crc = 0;
+    for (const auto byte : bytes) {
+        crc ^= static_cast<std::uint16_t>(byte) << 8;
+        for (int bit = 0; bit < 8; ++bit) {
+            crc = (crc & 0x8000u) ? static_cast<std::uint16_t>((crc << 1) ^ 0x1021u)
+                                  : static_cast<std::uint16_t>(crc << 1);
+        }
+    }
+    return crc;
+}
+
 // Pure decoder: JEDEC passport, not current controller timings or an XMP/EXPO state.
 // Only the CRC-covered base 128 bytes are consumed. DDR5 module organization and
 // vendor profile pages are intentionally not inferred from an incomplete dump.
@@ -34,15 +49,7 @@ inline std::optional<SpdIdentity> decodeSpdBase(std::span<const std::uint8_t> by
         return std::nullopt;
     const bool isDdr4 = bytes[2] == 0x0c;
     const std::size_t covered = isDdr4 && (bytes[0] & 0x80u) ? 116 : 126;
-    std::uint16_t crc = 0;
-    for (std::size_t index = 0; index < covered; ++index) {
-        crc ^= static_cast<std::uint16_t>(bytes[index]) << 8;
-        for (int bit = 0; bit < 8; ++bit) {
-            crc = (crc & 0x8000u) ? static_cast<std::uint16_t>((crc << 1) ^ 0x1021u)
-                                  : static_cast<std::uint16_t>(crc << 1);
-        }
-    }
-    if (crc != static_cast<unsigned>(bytes[126] | (bytes[127] << 8)))
+    if (spdCrc16(bytes.first(covered)) != static_cast<unsigned>(bytes[126] | (bytes[127] << 8)))
         return std::nullopt;
 
     SpdIdentity result { isDdr4 ? SpdType::Ddr4 : SpdType::Ddr5, 0, std::nullopt, std::nullopt };
@@ -77,6 +84,39 @@ inline std::optional<SpdIdentity> decodeSpdBase(std::span<const std::uint8_t> by
             static_cast<unsigned>(tRp), static_cast<unsigned>(tRas) };
     }
     return result;
+}
+
+struct Ddr4XmpProfile
+{
+    unsigned number = 0; // XMP profile 1 or 2, not the active controller profile.
+    unsigned minimumCyclePs = 0;
+};
+
+// Full 512-byte DDR4 SPD image only. nullopt = unreadable/ambiguous, empty = no
+// XMP 2.0 signature. The two JEDEC CRCs cover 0..125 and 128..253, NOT the XMP
+// extension at 384..486: its structural checks cannot authenticate its contents.
+inline std::optional<std::vector<Ddr4XmpProfile>> decodeDdr4Xmp(std::span<const std::uint8_t> bytes)
+{
+    if (bytes.size() != 512 || bytes[2] != 0x0c || (bytes[0] & 0x70u) != 0x20u || !decodeSpdBase(bytes)
+        || spdCrc16(bytes.subspan(128, 126)) != static_cast<unsigned>(bytes[254] | (bytes[255] << 8))) {
+        return std::nullopt;
+    }
+    if (bytes[384] != 0x0c || bytes[385] != 0x4a)
+        return std::vector<Ddr4XmpProfile> { };
+    if (bytes[387] != 0x20) // Only Intel XMP 2.0 for DDR4.
+        return std::nullopt;
+
+    std::vector<Ddr4XmpProfile> profiles;
+    for (unsigned index = 0; index < 2; ++index) {
+        if ((bytes[386] & (1u << index)) == 0)
+            continue;
+        const std::size_t offset = 393 + index * 47;
+        const int tCk = bytes[offset + 3] * 125 + static_cast<std::int8_t>(bytes[offset + 38]);
+        if (tCk < 500 || tCk > 2500)
+            return std::nullopt;
+        profiles.push_back({ index + 1, static_cast<unsigned>(tCk) });
+    }
+    return profiles;
 }
 
 } // namespace yawa
