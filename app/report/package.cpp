@@ -47,9 +47,12 @@ namespace report_internal {
                 return false;
             const auto type = png.substr(offset + 4, 4);
             if (!hasImage) {
-                if (type != "IHDR" || length != 13 || bigEndian(png, offset + 8) == 0
-                    || bigEndian(png, offset + 8) > 8192 || bigEndian(png, offset + 12) == 0
-                    || bigEndian(png, offset + 12) > 8192)
+                if (type != "IHDR" || length != 13)
+                    return false;
+                const auto width = bigEndian(png, offset + 8);
+                const auto height = bigEndian(png, offset + 12);
+                if (width == 0 || width > 8192 || height == 0 || height > 8192
+                    || static_cast<std::uint64_t>(width) * height > 16u * 1024u * 1024u)
                     return false;
                 hasImage = true;
             } else if (type == "IHDR") {

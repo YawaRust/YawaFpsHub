@@ -27,6 +27,12 @@ namespace {
             data[offset + static_cast<std::size_t>(index)] = static_cast<char>(value >> (index * 8));
     }
 
+    void writePng32(std::string& png, std::size_t offset, std::uint32_t value)
+    {
+        for (int index = 0; index < 4; ++index)
+            png[offset + static_cast<std::size_t>(index)] = static_cast<char>(value >> ((3 - index) * 8));
+    }
+
     void replaceEntryByte(std::string& archive, std::string_view name, std::size_t at, char byte)
     {
         const std::size_t localName = archive.find(name);
@@ -77,6 +83,12 @@ void runReportTests()
     std::string corrupted = png;
     corrupted[corrupted.size() - 1] ^= 1;
     CHECK(!buildReportPackage({ sample, corrupted, false }, output, error));
+    CHECK(output == "unchanged");
+    std::string hugeCanvas = png;
+    writePng32(hugeCanvas, 16, 8192);
+    writePng32(hugeCanvas, 20, 8192);
+    writePng32(hugeCanvas, 29, report_internal::crc32(std::string_view(hugeCanvas).substr(12, 17)));
+    CHECK(!buildReportPackage({ sample, hugeCanvas, false }, output, error));
     CHECK(output == "unchanged");
     CHECK(buildReportPackage(input, output, error));
     CHECK(error.empty());
@@ -161,6 +173,16 @@ void runReportTests()
     write32(broken, localScreenName - 30 + 14, cardCrc);
     write32(broken, broken.rfind("screen.png") - 46 + 16, cardCrc);
     CHECK(!readReportPackage(broken, read, error)); // ZIP CRC верен, PNG CRC неверен.
+    CHECK(read.cardPng == original);
+    broken = output;
+    writePng32(broken, cardStart + 16, 8192);
+    writePng32(broken, cardStart + 20, 8192);
+    writePng32(
+        broken, cardStart + 29, report_internal::crc32(std::string_view(broken).substr(cardStart + 12, 17)));
+    const auto forgedCrc = report_internal::crc32(std::string_view(broken).substr(cardStart, png.size()));
+    write32(broken, localScreenName - 30 + 14, forgedCrc);
+    write32(broken, broken.rfind("screen.png") - 46 + 16, forgedCrc);
+    CHECK(!readReportPackage(broken, read, error)); // Оба CRC верны, но площадь кадра чрезмерна.
     CHECK(read.cardPng == original);
     CHECK(!readReportPackage("not a zip", read, error));
 
