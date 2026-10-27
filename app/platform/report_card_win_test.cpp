@@ -1,5 +1,6 @@
 #include "platform/report_card_win.h"
 
+#include <objbase.h>
 #include <windows.h>
 
 #include <cstddef>
