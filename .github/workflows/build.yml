@@ -231,33 +231,37 @@ jobs:
             $view = $item.name
             $argumentsList = @("--smoke", "--view=$($item.view)", "--size=1280x800")
             if ($item.extra -ne "") { $argumentsList += $item.extra }
-            $process = Start-Process -FilePath $exe -ArgumentList $argumentsList -PassThru
-            Start-Sleep -Seconds 4
             $shot = $null
-            for ($i = 0; $i -lt 10 -and -not $shot; $i++) {
-              $process.Refresh()
-              $hwnd = $process.MainWindowHandle
-              if ($hwnd -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 500; continue }
-              $rect = New-Object YawaShot+RECT
-              if (-not [YawaShot]::GetWindowRect($hwnd, [ref] $rect)) { Start-Sleep -Milliseconds 500; continue }
-              $width = $rect.Right - $rect.Left
-              $height = $rect.Bottom - $rect.Top
-              if ($width -le 0 -or $height -le 0) { Start-Sleep -Milliseconds 500; continue }
-              $bitmap = New-Object System.Drawing.Bitmap $width, $height
-              $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-              $hdc = $graphics.GetHdc()
-              $ok = [YawaShot]::PrintWindow($hwnd, $hdc, 2)
-              $graphics.ReleaseHdc($hdc)
-              $graphics.Dispose()
-              if ($ok) {
-                $path = "$PWD\screenshot-$view.png"
-                $bitmap.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
-                $shot = $path
+            # Первый запуск окна на холодном Windows-раннере иногда не даёт PrintWindow;
+            # повторяем только отсутствующий кадр, а гейт ниже по-прежнему требует все шесть.
+            for ($attempt = 0; $attempt -lt 2 -and -not $shot; $attempt++) {
+              $process = Start-Process -FilePath $exe -ArgumentList $argumentsList -PassThru
+              Start-Sleep -Seconds 4
+              for ($i = 0; $i -lt 10 -and -not $shot; $i++) {
+                $process.Refresh()
+                $hwnd = $process.MainWindowHandle
+                if ($hwnd -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 500; continue }
+                $rect = New-Object YawaShot+RECT
+                if (-not [YawaShot]::GetWindowRect($hwnd, [ref] $rect)) { Start-Sleep -Milliseconds 500; continue }
+                $width = $rect.Right - $rect.Left
+                $height = $rect.Bottom - $rect.Top
+                if ($width -le 0 -or $height -le 0) { Start-Sleep -Milliseconds 500; continue }
+                $bitmap = New-Object System.Drawing.Bitmap $width, $height
+                $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+                $hdc = $graphics.GetHdc()
+                $ok = [YawaShot]::PrintWindow($hwnd, $hdc, 2)
+                $graphics.ReleaseHdc($hdc)
+                $graphics.Dispose()
+                if ($ok) {
+                  $path = "$PWD\screenshot-$view.png"
+                  $bitmap.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+                  $shot = $path
+                }
+                $bitmap.Dispose()
+                if (-not $shot) { Start-Sleep -Milliseconds 500 }
               }
-              $bitmap.Dispose()
-              if (-not $shot) { Start-Sleep -Milliseconds 500 }
+              $process.WaitForExit()
             }
-            $process.WaitForExit()
             if ($shot) {
               Write-Output "::notice title=YawaFpsHub::скриншот $view снят"
             } else {
