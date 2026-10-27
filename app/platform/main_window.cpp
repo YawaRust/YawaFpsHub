@@ -2022,6 +2022,7 @@ void MainWindow::samplingLoop()
     }
 
     auto previous = std::chrono::steady_clock::now();
+    auto lastFrameSample = previous;
 
     while (!m_stopRequested) {
         if (m_etwRestartRequested.exchange(false)) {
@@ -2029,6 +2030,7 @@ void MainWindow::samplingLoop()
             tracker.reset();
             sampler = yawa::SystemSampler { };
             previous = std::chrono::steady_clock::now();
+            lastFrameSample = previous;
             bool enabled = false;
             {
                 std::lock_guard<std::mutex> guard(m_modelMutex);
@@ -2053,7 +2055,12 @@ void MainWindow::samplingLoop()
             const double elapsed = std::chrono::duration<double>(now - previous).count();
             previous = now;
 
-            m_etw.drain(tracker);
+            if (m_etw.drain(tracker) != 0) {
+                lastFrameSample = now;
+            } else if (tracker.streamCount() != 0 && now - lastFrameSample > std::chrono::seconds(2)) {
+                // Без новых Present-событий последний QPC не меняется: история иначе залипает навсегда.
+                tracker.reset();
+            }
 
             // Игра — это процесс активного окна, как в RTSS. Без этого на мониторе 144 Гц
             // композитор рабочего стола обгонял игру на 120 кадрах.
