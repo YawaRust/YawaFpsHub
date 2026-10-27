@@ -25,6 +25,7 @@ add_executable(YawaFpsHub WIN32
     platform/overlay_window.cpp
     platform/pawnio_sensors.cpp
     platform/pawnio_package.cpp
+    platform/spd_probe_win.cpp
     platform/pdh_query.cpp
     platform/report_capture_win.cpp
     platform/report_card_win.cpp

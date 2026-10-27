@@ -3,6 +3,7 @@
 #include "platform/main_window.h"
 #include "platform/pawnio_package.h"
 #include "platform/pawnio_sensors.h"
+#include "platform/spd_probe_win.h"
 #include "platform/win_util.h"
 
 #include <objbase.h>
@@ -21,39 +22,56 @@ namespace {
 
 constexpr wchar_t kInstanceMutex[] = L"Global\\YawaFpsHubInstance";
 
-enum class DumpCommand { None, Run, Invalid };
+enum class DumpCommand { None, Memory, Spd, Invalid };
 
-DumpCommand memoryDumpCommand()
+struct DumpRequest
+{
+    DumpCommand command = DumpCommand::None;
+    unsigned address = 0;
+};
+
+DumpRequest probeCommand()
 {
     int count = 0;
     wchar_t** arguments = CommandLineToArgvW(GetCommandLineW(), &count);
-    if (arguments == nullptr) {
-        return DumpCommand::None;
-    }
-    bool mentionsDump = false;
+    if (arguments == nullptr)
+        return { };
+    bool mentionsProbe = false;
     for (int index = 1; index < count; ++index) {
-        mentionsDump |= std::wstring_view(arguments[index]) == L"--probe"
-            || std::wstring_view(arguments[index]) == L"--dump=memory";
+        const std::wstring_view arg = arguments[index];
+        mentionsProbe |= arg == L"--probe" || arg == L"--dump=memory" || arg.starts_with(L"--spd");
     }
-    const bool valid = (count == 2 && std::wstring_view(arguments[1]) == L"--dump=memory")
+    DumpRequest request;
+    if ((count == 2 && std::wstring_view(arguments[1]) == L"--dump=memory")
         || (count == 3 && std::wstring_view(arguments[1]) == L"--probe"
-            && std::wstring_view(arguments[2]) == L"--dump=memory");
+            && std::wstring_view(arguments[2]) == L"--dump=memory")) {
+        request.command = DumpCommand::Memory;
+    } else if (count == 3 && std::wstring_view(arguments[1]) == L"--probe") {
+        const std::wstring_view arg = arguments[2];
+        if (arg.size() == 8 && arg.starts_with(L"--spd=5") && arg[7] >= L'0' && arg[7] <= L'7') {
+            request.command = DumpCommand::Spd;
+            request.address = 0x50u + static_cast<unsigned>(arg[7] - L'0');
+        }
+    }
     LocalFree(arguments);
-    return valid ? DumpCommand::Run : mentionsDump ? DumpCommand::Invalid : DumpCommand::None;
+    if (request.command == DumpCommand::None && mentionsProbe)
+        request.command = DumpCommand::Invalid;
+    return request;
+}
+
+HANDLE probeOutput()
+{
+    HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
+    if ((output == nullptr || output == INVALID_HANDLE_VALUE) && AttachConsole(ATTACH_PARENT_PROCESS))
+        output = GetStdHandle(STD_OUTPUT_HANDLE);
+    return output;
 }
 
 int memoryDumpCommandOutput()
 {
-    HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (output == nullptr || output == INVALID_HANDLE_VALUE) {
-        if (!AttachConsole(ATTACH_PARENT_PROCESS)) {
-            return 2;
-        }
-        output = GetStdHandle(STD_OUTPUT_HANDLE);
-    }
-    if (output == nullptr || output == INVALID_HANDLE_VALUE) {
+    HANDLE output = probeOutput();
+    if (output == nullptr || output == INVALID_HANDLE_VALUE)
         return 2;
-    }
     yawa::Log unopenedLog;
     yawa::PawnioSensors sensors;
     const auto dump = sensors.initialize(unopenedLog) ? sensors.readMemoryDump() : std::nullopt;
@@ -64,6 +82,42 @@ int memoryDumpCommandOutput()
     return WriteFile(output, text.data(), static_cast<DWORD>(text.size()), &written, nullptr)
             && written == text.size()
         ? (dump ? 0 : 1)
+        : 2;
+}
+
+int spdProbeCommandOutput(unsigned address)
+{
+    HANDLE output = probeOutput();
+    if (output == nullptr || output == INVALID_HANDLE_VALUE)
+        return 2;
+    yawa::Ddr4SpdProbeResult result { };
+    std::string error;
+    const bool success = yawa::readCezanneDdr4Spd(address, result, error);
+    std::string text;
+    if (success) {
+        text = "DDR4 SPD passport: base CRC valid, minimum tCK "
+            + std::to_string(result.passport.minimumCyclePs) + " ps";
+        if (result.passport.moduleCapacityMiB)
+            text += ", capacity " + std::to_string(*result.passport.moduleCapacityMiB) + " MiB";
+        text += ".\nXMP 2.0 passport: ";
+        if (result.profiles.empty()) {
+            text += "no signature";
+        } else {
+            for (const auto& profile : result.profiles) {
+                if (profile.number != result.profiles.front().number)
+                    text += "; ";
+                text += "profile " + std::to_string(profile.number) + " minimum tCK "
+                    + std::to_string(profile.minimumCyclePs) + " ps";
+            }
+        }
+        text += ". Active profile: unknown (SPD does not report controller state).\n";
+    } else {
+        text = "SPD probe unavailable: " + error + "\n";
+    }
+    DWORD written = 0;
+    return WriteFile(output, text.data(), static_cast<DWORD>(text.size()), &written, nullptr)
+            && written == text.size()
+        ? (success ? 0 : 1)
         : 2;
 }
 
@@ -103,9 +157,13 @@ void showExistingWindow()
 
 int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
 {
-    const DumpCommand dump = memoryDumpCommand();
-    if (dump != DumpCommand::None) {
-        return dump == DumpCommand::Run ? memoryDumpCommandOutput() : 2;
+    const DumpRequest probe = probeCommand();
+    if (probe.command != DumpCommand::None) {
+        if (probe.command == DumpCommand::Memory)
+            return memoryDumpCommandOutput();
+        if (probe.command == DumpCommand::Spd)
+            return spdProbeCommandOutput(probe.address);
+        return 2;
     }
     const int sensorCommand = yawa::runSensorCommandLine();
     if (sensorCommand >= 0) {

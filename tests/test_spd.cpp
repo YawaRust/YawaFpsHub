@@ -19,6 +19,18 @@ std::array<std::uint8_t, 128> fromHex(std::string_view hex)
 
 void runSpdTests()
 {
+    CHECK(permittedDdr4SpdTransfer(0x50, 1, 0, 2));
+    CHECK(permittedDdr4SpdTransfer(0x57, 1, 255, 2));
+    CHECK(permittedDdr4SpdTransfer(0x36, 1, 0, 1)); // Page-zero query.
+    CHECK(permittedDdr4SpdTransfer(0x36, 0, 0, 1)); // Restore page zero.
+    CHECK(permittedDdr4SpdTransfer(0x37, 0, 0, 1)); // Select page one.
+    CHECK(!permittedDdr4SpdTransfer(0x50, 0, 1, 2)); // Never write SPD content.
+    CHECK(!permittedDdr4SpdTransfer(0x50, 1, 1, 3));
+    CHECK(!permittedDdr4SpdTransfer(0x58, 1, 1, 2));
+    CHECK(!permittedDdr4SpdTransfer(0x36, 0, 1, 1));
+    CHECK(!permittedDdr4SpdTransfer(0x37, 1, 0, 1));
+    CHECK(!permittedDdr4SpdTransfer(0x36, 0, 0, 0));
+    CHECK(!permittedDdr4SpdTransfer(0x50, 1, 256, 2));
     // coreboot/coreboot 1879b6a34a6e93a93d691a0d9f2457d6251a17c1,
     // src/mainboard/google/hatch/spd/8G_2666.spd.hex, blob 7042c766f84a1a611dfbb5763dc7b7400f501a0e, bytes
     // 0..127.

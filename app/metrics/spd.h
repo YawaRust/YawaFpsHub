@@ -11,6 +11,19 @@ namespace yawa {
 
 enum class SpdType { Ddr4, Ddr5 };
 
+// The AMD EE1004 probe permits reads from a single chosen SPD address; the only
+// writes are byte commands to the JEDEC page selectors, never to the EEPROM.
+inline bool permittedDdr4SpdTransfer(
+    unsigned address, unsigned direction, unsigned command, unsigned protocol)
+{
+    if (command > 255 || direction > 1)
+        return false;
+    if (address >= 0x50 && address <= 0x57)
+        return direction == 1 && protocol == 2;
+    return (address == 0x36 && direction == 1 && protocol == 1 && command == 0)
+        || ((address == 0x36 || address == 0x37) && direction == 0 && protocol == 1 && command == 0);
+}
+
 struct SpdJedecTimings
 {
     unsigned tAaPs = 0;
