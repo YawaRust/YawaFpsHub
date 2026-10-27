@@ -219,8 +219,12 @@ bool showReportCardPreview(HWND owner, const GameDiagnosisInput& input, std::str
         DestroyWindow(state.window);
     EnableWindow(owner, TRUE);
     SetForegroundWindow(owner);
-    if (received == 0)
+    if (received == 0) {
         PostQuitMessage(static_cast<int>(event.wParam));
+    } else if (received == -1) {
+        error = "Предпросмотр: ошибка обработки сообщений окна";
+        return false;
+    }
     return true;
 }
 
