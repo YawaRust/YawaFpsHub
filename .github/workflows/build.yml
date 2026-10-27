@@ -393,11 +393,19 @@ jobs:
           }
           Stop-Process -Id $server.Id -Force
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Проверить снимки и собрать пары сравнения
         shell: pwsh
         run: |
-          python -m pip install --disable-pip-version-check --only-binary=:all: Pillow==13.0.0
-          if ($LASTEXITCODE -ne 0) { throw "Pillow не установлен для сравнения снимков" }
+          Write-Output "::notice title=UI Python::$(python --version)"
+          $install = python -m pip install --disable-pip-version-check --only-binary=:all: Pillow==13.0.0 2>&1
+          if ($LASTEXITCODE -ne 0) {
+            Write-Output "::error title=UI Pillow::$install"
+            throw "Pillow не установлен для сравнения снимков"
+          }
           python -B -m unittest discover -s tests -p test_compare_ui.py -v
           if ($LASTEXITCODE -ne 0) { throw "Тесты сравнения снимков не прошли" }
           python -B tools/compare_ui.py --demo . --app . --out shots --check
