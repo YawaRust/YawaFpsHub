@@ -119,12 +119,15 @@ jobs:
             $cpuBefore = $process.TotalProcessorTime.TotalSeconds
             $memory = $process.WorkingSet64
             $diagnostics.Add("память: " + [math]::Round($memory / 1MB, 1) + " МБ")
+            if ($memory -gt 60MB -and -not $fail) { $fail = "память в простое больше 60 МиБ" }
             Start-Sleep -Seconds 10
             $process.Refresh()
             $cpuUsed = $process.TotalProcessorTime.TotalSeconds - $cpuBefore
             $cores = [Environment]::ProcessorCount
-            $diagnostics.Add("CPU в простое: " + [math]::Round($cpuUsed / 10.0 * 100 / $cores, 2) + " % от всех ядер")
+            $idleCpuPct = $cpuUsed / 10.0 * 100 / $cores
+            $diagnostics.Add("CPU в простое: " + [math]::Round($idleCpuPct, 2) + " % от всех ядер")
             $diagnostics.Add("CPU на ядро: " + [math]::Round($cpuUsed / 10.0 * 100, 2) + " % одного ядра")
+            if ($idleCpuPct -gt 1.0 -and -not $fail) { $fail = "CPU в простое больше 1 % от всех ядер" }
 
             # Оверлей — отдельное окно: проверяем класс и стили layered/topmost/click-through.
             $overlayFound = $false
