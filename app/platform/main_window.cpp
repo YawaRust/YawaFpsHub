@@ -5,6 +5,7 @@
 #include "platform/hardware_info_win.h"
 #include "platform/overlay_monitor.h"
 #include "platform/pawnio_package.h"
+#include "platform/report_preview_win.h"
 #include "platform/win_util.h"
 #include "render/overlay_painter.h"
 #include "ui/bottleneck_view.h"
@@ -1675,8 +1676,10 @@ void MainWindow::applyAction(const UiHit& hit)
     case ActionKind::TogglePause: {
         std::lock_guard<std::mutex> guard(m_modelMutex);
         m_model.paused = !m_model.paused;
-        if (m_model.paused)
+        if (m_model.paused) {
             m_model.findings.clear();
+            m_model.diagnosisInput = { };
+        }
         break;
     }
 
@@ -1700,6 +1703,24 @@ void MainWindow::applyAction(const UiHit& hit)
         m_model.overlayOnly = !m_model.overlayOnly;
         m_model.sensorScroll = 0;
         break;
+
+    case ActionKind::CreateDiagnosticReport: {
+        GameDiagnosisInput input;
+        {
+            std::lock_guard<std::mutex> guard(m_modelMutex);
+            input = m_model.diagnosisInput;
+        }
+        input.nowMs = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch())
+                .count());
+        std::string error;
+        if (!showReportCardPreview(m_window, input, error)) {
+            if (m_log)
+                m_log->warning("диагностическая карточка: " + error);
+            MessageBoxW(m_window, widen(error).c_str(), L"YawaFpsHub", MB_OK | MB_ICONERROR);
+        }
+        break;
+    }
 
     case ActionKind::ImportOverlayRecipe: {
         wchar_t filename[MAX_PATH] { };
@@ -1873,6 +1894,7 @@ void MainWindow::restartSampling()
         std::lock_guard<std::mutex> guard(m_modelMutex);
         m_model.etwRunning = false;
         m_model.findings.clear();
+        m_model.diagnosisInput = { };
         m_model.store.reset();
     }
     m_etwRestartRequested = true;
@@ -2119,6 +2141,7 @@ void MainWindow::samplingLoop()
                 gameLoad.gpuLoad = snapshot.gameGpuLoad;
                 m_model.balance = analyzeActiveGame(m_model.hardware, gameLoad, gamePid != 0);
                 m_model.findings = m_model.paused ? std::vector<Finding> { } : std::move(findings);
+                m_model.diagnosisInput = m_model.paused ? GameDiagnosisInput { } : diagnosis;
                 m_model.etwRunning = etwRunning;
                 if (!foreground.empty()) {
                     m_model.foregroundApp = foreground;

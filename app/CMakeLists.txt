@@ -27,6 +27,8 @@ add_executable(YawaFpsHub WIN32
     platform/pawnio_package.cpp
     platform/pdh_query.cpp
     platform/report_capture_win.cpp
+    platform/report_card_win.cpp
+    platform/report_preview_win.cpp
     platform/storage_sensors.cpp
     platform/vendor_gpu_sensors.cpp
     platform/sensors_win.cpp

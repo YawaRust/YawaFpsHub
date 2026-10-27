@@ -51,6 +51,7 @@ enum class ActionKind : std::uint8_t {
     OpenOverlayEditor,
     ExportOverlayRecipe,
     ImportOverlayRecipe,
+    CreateDiagnosticReport,
     SetSensorFilter,
     ClearLabel,
     ResetOverlayPlacement,
@@ -166,6 +167,7 @@ struct AppModel
     HardwareIdentity hardware;
     BottleneckResult balance;
     std::vector<Finding> findings;
+    GameDiagnosisInput diagnosisInput;
     std::wstring gameName;
     std::uint32_t gameProcessId = 0;
     double gameCpuLoad = -1.0;

@@ -135,12 +135,23 @@ void runReportTests()
     write32(broken, read32(broken, end + 16) + 16, manifestCrc);
     CHECK(!readReportPackage(broken, read, error)); // CRC верен, версия всё равно неизвестна.
     CHECK(read.cardPng == original);
+    broken = output;
+    const auto localScreenName = broken.find("screen.png");
+    const auto cardStart = localScreenName + std::string_view("screen.png").size();
+    broken[cardStart + 20] ^= 1;
+    const auto cardCrc = report_internal::crc32(std::string_view(broken).substr(cardStart, png.size()));
+    write32(broken, localScreenName - 30 + 14, cardCrc);
+    write32(broken, broken.rfind("screen.png") - 46 + 16, cardCrc);
+    CHECK(!readReportPackage(broken, read, error)); // ZIP CRC верен, PNG CRC неверен.
+    CHECK(read.cardPng == original);
     CHECK(!readReportPackage("not a zip", read, error));
 
     sample.gpuMatchesGame = false;
     sample.sampledAtMs = 100;
     CHECK(buildReportPackage({ sample, png, true }, output, error));
     CHECK(output.find("\"game_frame\":\"included\"") != std::string::npos);
+    CHECK(readReportPackage(output, read, error));
+    CHECK(read.gameFrameIncluded);
     CHECK(output.find("\"status\":\"no_game_sample\"") != std::string::npos);
     CHECK(output.find("game_gpu_3d_pct") == std::string::npos);
     CHECK(output.find("gpu_bound") == std::string::npos);

@@ -270,8 +270,8 @@ namespace {
         }
     }
 
-    void drawDiagnosisCard(
-        Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card, bool narrow)
+    void drawDiagnosisCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card,
+        bool narrow, std::vector<UiHit>& hits)
     {
         drawCard(renderer, card, theme);
         drawCardHeader(renderer, card, L"Диагностическая карточка · предпросмотр",
@@ -317,10 +317,12 @@ namespace {
             TextRole::Small, theme.textDim, 15.0f, 3);
         drawWrappedText(renderer, action, Rect { left, verdict.bottom - 58.0f, right, verdict.bottom - 8.0f },
             TextRole::Small, theme.text, 15.0f, 3);
-        renderer.text(
-            clipText(renderer, L"PNG и пакет .yawa пока не создаются; предпросмотр не содержит кадра игры.",
-                TextRole::Tiny, inner.width()),
-            Rect { inner.left, inner.bottom - 19.0f, inner.right, inner.bottom }, TextRole::Tiny,
+        const Rect button { inner.right - 183.0f, inner.bottom - 25.0f, inner.right, inner.bottom + 1.0f };
+        renderer.fillRoundRect(button, 6.0f, theme.accentSoft);
+        renderer.text(L"Создать снимок…", button, TextRole::Small, theme.accent, TextAlign::Center);
+        hits.push_back(UiHit { button, ActionKind::CreateDiagnosticReport, 0 });
+        renderer.text(L"PNG/.yawa создаются только после предпросмотра; кадр игры не включён.",
+            Rect { inner.left, inner.bottom - 19.0f, button.left - 12.0f, inner.bottom }, TextRole::Tiny,
             theme.textFaint);
     }
 
@@ -329,8 +331,6 @@ namespace {
 void drawBottleneckView(
     Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area, std::vector<UiHit>& hits)
 {
-    (void)hits; // экран только показывает расчёт: действий на нём нет
-
     const Columns columns { area };
     // Узкое окно — как в прототипе: ряд 7+5 распадается на две карточки друг под другом.
     const bool narrow = area.width() < kDashboardNarrowWidth;
@@ -349,7 +349,7 @@ void drawBottleneckView(
     top += adviceHeightLocal + kGap;
 
     const float diagnosisHeight = narrow ? 410.0f : 300.0f;
-    drawDiagnosisCard(renderer, model, theme, columns.span(0, 12, top, diagnosisHeight), narrow);
+    drawDiagnosisCard(renderer, model, theme, columns.span(0, 12, top, diagnosisHeight), narrow, hits);
     top += diagnosisHeight + kGap;
 
     // Методика — внизу: вывод важнее пояснения, но проверить его должно быть можно.
