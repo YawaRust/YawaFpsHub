@@ -71,7 +71,7 @@ void drawCpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
     const CpuIdentity& cpu = model.hardware.cpu;
-    drawCardHeader(renderer, card, L"Процессор", L"CPUID и GetLogicalProcessorInformationEx", theme);
+    drawCardHeader(renderer, card, L"Процессор", L"модель из процессора, ядра и кэш из Windows", theme);
 
     float top = inner.top + 42.0f;
     renderer.text(clipText(renderer, field(cpu.name), TextRole::Heading, inner.width()),
@@ -107,7 +107,7 @@ void drawGpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
-    drawCardHeader(renderer, card, L"Видеокарты", L"DXGI и реестр класса Display: список адаптеров и драйвер", theme);
+    drawCardHeader(renderer, card, L"Видеокарты", L"модели и версии драйверов из Windows", theme);
 
     if (model.hardware.gpus.empty()) {
         renderer.text(L"нет данных", Rect{ inner.left, inner.top + 44.0f, inner.right, inner.top + 62.0f },
@@ -150,8 +150,8 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
     const MemoryIdentity& memory = model.hardware.memory;
-    drawCardHeader(renderer, card, L"Память",
-        L"SMBIOS Type 17, резерв WMI · сведения прошивки, не замеры контроллера", theme);
+    drawCardHeader(
+        renderer, card, L"Память", L"сведения прошивки о конфигурации, не измерение таймингов", theme);
 
     float top = inner.top + 42.0f;
     // Конфигурация — заголовок карточки слева: «2×16 ГБ» должно читаться первым.
@@ -169,7 +169,7 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
     }
 
     const double tck = memory.cycleTimeNs();
-    const std::wstring profile = L"не определяется из SMBIOS";
+    const std::wstring profile = L"нет данных о профиле";
 
     std::wstring slots = L"—";
     if (memory.slots > 0) {
@@ -267,7 +267,7 @@ void drawDisplayCard(Renderer& renderer, const AppModel& model, const Theme& the
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
-    drawCardHeader(renderer, card, L"Мониторы", L"EnumDisplaySettings и EDID-имя драйвера монитора", theme);
+    drawCardHeader(renderer, card, L"Мониторы", L"параметры и названия мониторов из Windows", theme);
 
     if (model.hardware.displays.empty()) {
         renderer.text(model.displayWidth > 0
@@ -304,7 +304,7 @@ void drawDiskCard(Renderer& renderer, const AppModel& model, const Theme& theme,
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
-    drawCardHeader(renderer, card, L"Диски", L"WMI Win32_DiskDrive и GetDiskFreeSpaceEx: модель, интерфейс и объём", theme);
+    drawCardHeader(renderer, card, L"Диски", L"модель, тип подключения и объём из Windows", theme);
 
     if (model.hardware.disks.empty()) {
         renderer.text(L"нет данных",
@@ -388,19 +388,15 @@ void drawSystemView(Renderer& renderer, const AppModel& model, const Theme& them
     const Rect note = columns.span(0, 12, noteTop, area.top + systemHeight(narrow) - 8.0f - noteTop);
     drawCard(renderer, note, theme);
     const Rect inner = note.inset(kCardPadding);
-    drawCardHeader(renderer, note, L"Откуда эти числа",
-        L"реестр, CPUID, SMBIOS, DXGI и EnumDisplaySettings — без драйверов и без сети", theme);
+    drawCardHeader(
+        renderer, note, L"Откуда эти числа", L"сведения Windows, процессора и прошивки · без сети", theme);
     drawWrappedText(renderer,
-        L"Версию Windows берём из CurrentVersion — оттуда же её берёт winver, поэтому карточка и окно «О "
-        L"системе» "
-        L"совпадают. Модель процессора читается прямо из CPUID, ядра и кэш — из "
-        L"GetLogicalProcessorInformationEx. "
-        L"Видеокарты перечисляет DXGI, а версию драйвера добавляет реестр класса Display. Модули памяти и их "
-        L"частоты "
-        L"приложение берёт из таблиц SMBIOS, которые BIOS собирает из SPD: именно так видно «2×16 ГБ», а не "
-        L"только "
-        L"«32 ГБ» суммарно.",
-        Rect { inner.left, inner.top + 40.0f, inner.right, inner.bottom }, TextRole::Small, theme.textDim, 15.0f, 4);
+        L"Версию системы и сведения о дисках получаем из Windows. Модель процессора читаем из самого "
+        L"процессора, данные о ядрах и кэше — из Windows. Список видеокарт и версии драйверов тоже "
+        L"получаем из Windows. Состав модулей памяти и настроенную скорость сообщает прошивка: "
+        L"это сведения о конфигурации, а не измерение текущих таймингов или статуса профиля разгона.",
+        Rect { inner.left, inner.top + 40.0f, inner.right, inner.bottom }, TextRole::Small, theme.textDim,
+        15.0f, 4);
 }
 
 } // namespace yawa

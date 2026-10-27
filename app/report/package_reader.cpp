@@ -117,6 +117,219 @@ namespace {
         return schema && format && frame && reader.ended();
     }
 
+    class JsonReader
+    {
+    public:
+        explicit JsonReader(std::string_view text)
+            : m_text(text)
+        {
+        }
+
+        bool valid() { return object(0) && ended(); }
+
+    private:
+        void space()
+        {
+            while (m_pos < m_text.size()
+                && (m_text[m_pos] == ' ' || m_text[m_pos] == '\n' || m_text[m_pos] == '\r'
+                    || m_text[m_pos] == '\t'))
+                ++m_pos;
+        }
+
+        bool take(char symbol)
+        {
+            space();
+            if (m_pos == m_text.size() || m_text[m_pos] != symbol)
+                return false;
+            ++m_pos;
+            return true;
+        }
+
+        bool ended()
+        {
+            space();
+            return m_pos == m_text.size();
+        }
+
+        bool literal(std::string_view word)
+        {
+            if (m_text.substr(m_pos, word.size()) != word)
+                return false;
+            m_pos += word.size();
+            return true;
+        }
+
+        bool hexQuad(unsigned& value)
+        {
+            if (m_text.size() - m_pos < 4)
+                return false;
+            value = 0;
+            for (int index = 0; index < 4; ++index) {
+                const char digit = m_text[m_pos++];
+                unsigned nibble = 0;
+                if (digit >= '0' && digit <= '9')
+                    nibble = static_cast<unsigned>(digit - '0');
+                else if (digit >= 'a' && digit <= 'f')
+                    nibble = static_cast<unsigned>(digit - 'a' + 10);
+                else if (digit >= 'A' && digit <= 'F')
+                    nibble = static_cast<unsigned>(digit - 'A' + 10);
+                else
+                    return false;
+                value = (value << 4) | nibble;
+            }
+            return true;
+        }
+
+        bool utf8(unsigned char first)
+        {
+            const unsigned count = first >= 0xc2 && first <= 0xdf ? 2u
+                : first >= 0xe0 && first <= 0xef                  ? 3u
+                : first >= 0xf0 && first <= 0xf4                  ? 4u
+                                                                  : 0u;
+            if (count == 0 || m_text.size() - m_pos < count - 1)
+                return false;
+            unsigned codepoint = first & (0x7fu >> count);
+            for (unsigned index = 1; index < count; ++index) {
+                const auto next = static_cast<unsigned char>(m_text[m_pos++]);
+                if ((next & 0xc0u) != 0x80u)
+                    return false;
+                codepoint = (codepoint << 6) | (next & 0x3fu);
+            }
+            const unsigned minimum = count == 2 ? 0x80u : count == 3 ? 0x800u : 0x10000u;
+            return codepoint >= minimum && codepoint <= 0x10ffffu
+                && (codepoint < 0xd800u || codepoint > 0xdfffu);
+        }
+
+        bool quoted()
+        {
+            if (!take('"'))
+                return false;
+            while (m_pos < m_text.size()) {
+                const auto symbol = static_cast<unsigned char>(m_text[m_pos++]);
+                if (symbol == '"')
+                    return true;
+                if (symbol < 0x20u)
+                    return false;
+                if (symbol >= 0x80u) {
+                    if (!utf8(symbol))
+                        return false;
+                } else if (symbol == '\\') {
+                    if (m_pos == m_text.size())
+                        return false;
+                    const char escaped = m_text[m_pos++];
+                    if (escaped == 'u') {
+                        unsigned codepoint = 0;
+                        if (!hexQuad(codepoint))
+                            return false;
+                        if (codepoint >= 0xd800u && codepoint <= 0xdbffu) {
+                            if (m_text.substr(m_pos, 2) != "\\u")
+                                return false;
+                            m_pos += 2;
+                            unsigned low = 0;
+                            if (!hexQuad(low) || low < 0xdc00u || low > 0xdfffu)
+                                return false;
+                        } else if (codepoint >= 0xdc00u && codepoint <= 0xdfffu) {
+                            return false;
+                        }
+                    } else if (escaped != '"' && escaped != '\\' && escaped != '/' && escaped != 'b'
+                        && escaped != 'f' && escaped != 'n' && escaped != 'r' && escaped != 't') {
+                        return false;
+                    }
+                }
+            }
+            return false;
+        }
+
+        bool number()
+        {
+            if (m_text[m_pos] == '-')
+                ++m_pos;
+            if (m_pos == m_text.size())
+                return false;
+            if (m_text[m_pos] == '0') {
+                ++m_pos;
+            } else {
+                if (m_text[m_pos] < '1' || m_text[m_pos] > '9')
+                    return false;
+                while (m_pos < m_text.size() && m_text[m_pos] >= '0' && m_text[m_pos] <= '9')
+                    ++m_pos;
+            }
+            if (m_pos < m_text.size() && m_text[m_pos] == '.') {
+                ++m_pos;
+                if (m_pos == m_text.size() || m_text[m_pos] < '0' || m_text[m_pos] > '9')
+                    return false;
+                while (m_pos < m_text.size() && m_text[m_pos] >= '0' && m_text[m_pos] <= '9')
+                    ++m_pos;
+            }
+            if (m_pos < m_text.size() && (m_text[m_pos] == 'e' || m_text[m_pos] == 'E')) {
+                ++m_pos;
+                if (m_pos < m_text.size() && (m_text[m_pos] == '+' || m_text[m_pos] == '-'))
+                    ++m_pos;
+                if (m_pos == m_text.size() || m_text[m_pos] < '0' || m_text[m_pos] > '9')
+                    return false;
+                while (m_pos < m_text.size() && m_text[m_pos] >= '0' && m_text[m_pos] <= '9')
+                    ++m_pos;
+            }
+            return true;
+        }
+
+        bool value(unsigned depth)
+        {
+            if (depth > 16)
+                return false;
+            space();
+            if (m_pos == m_text.size())
+                return false;
+            const char symbol = m_text[m_pos];
+            if (symbol == '{')
+                return object(depth);
+            if (symbol == '[')
+                return array(depth);
+            if (symbol == '"')
+                return quoted();
+            if (symbol == 't')
+                return literal("true");
+            if (symbol == 'f')
+                return literal("false");
+            if (symbol == 'n')
+                return literal("null");
+            return number();
+        }
+
+        bool object(unsigned depth)
+        {
+            if (!take('{'))
+                return false;
+            if (take('}'))
+                return true;
+            do {
+                if (!quoted() || !take(':') || !value(depth + 1))
+                    return false;
+                if (take('}'))
+                    return true;
+            } while (take(','));
+            return false;
+        }
+
+        bool array(unsigned depth)
+        {
+            if (!take('['))
+                return false;
+            if (take(']'))
+                return true;
+            do {
+                if (!value(depth + 1))
+                    return false;
+                if (take(']'))
+                    return true;
+            } while (take(','));
+            return false;
+        }
+
+        std::string_view m_text;
+        std::size_t m_pos = 0;
+    };
+
     bool readEntries(std::string_view archive, std::array<std::string_view, 7>& entries, std::string& error)
     {
         if (archive.size() < 22 || archive.size() > kMaxArchiveBytes) {
@@ -195,6 +408,12 @@ bool readReportPackage(std::string_view archive, ReportPackageContents& contents
     if (!parseManifest(entries[0], hasFrame) || !report_internal::validPng(entries[6])) {
         error = "Пакет .yawa: неподдерживаемая схема или повреждённая PNG-карточка";
         return false;
+    }
+    for (const std::size_t index : std::array<std::size_t, 4> { 1, 2, 4, 5 }) {
+        if (!JsonReader(entries[index]).valid()) {
+            error = "Пакет .yawa: некорректный JSON в " + std::string(kNames[index]);
+            return false;
+        }
     }
     ReportPackageContents parsed;
     parsed.manifestJson = entries[0];

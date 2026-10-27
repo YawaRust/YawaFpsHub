@@ -20,3 +20,5 @@ target_include_directories(metrics_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(metrics_tests PRIVATE cxx_std_20)
 
 add_test(NAME metrics_tests COMMAND metrics_tests)
+add_test(NAME ui_labels COMMAND ${CMAKE_COMMAND} -DPROJECT_ROOT=${PROJECT_SOURCE_DIR}
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/check_ui_labels.cmake)

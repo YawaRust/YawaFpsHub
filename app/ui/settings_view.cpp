@@ -233,19 +233,15 @@ void drawAboutCard(Renderer& renderer, const AppModel& model, const Theme& theme
     const Rect inner = card.inset(kCardPadding);
     float top = drawSettingsCardHeader(renderer, card, L"О программе", L"YawaFpsHub 0.4 · Windows 10/11 x64", theme);
 
-    const std::array<std::array<std::wstring, 2>, 4> rows{ std::array<std::wstring, 2>{ L"Собственное потребление",
-                                                                                      wideMetric(MetricId::SelfCpu,
-                                                                                               model.store.value(
-                                                                                                   MetricId::SelfCpu))
-                                                                                          + L" CPU · "
-                                                                                          + wideMetric(
-                                                                                              MetricId::SelfRam,
-                                                                                              model.store.value(
-                                                                                                  MetricId::SelfRam)) },
+    const std::array<std::array<std::wstring, 2>, 4> rows {
+        std::array<std::wstring, 2> { L"Собственное потребление",
+            wideMetric(MetricId::SelfCpu, model.store.value(MetricId::SelfCpu)) + L" CPU · "
+                + wideMetric(MetricId::SelfRam, model.store.value(MetricId::SelfRam)) },
         { L"Потоков", wideNumber(model.store.value(MetricId::SelfThreads), MetricUnit::Count, 0) },
         { L"Активный адаптер",
             model.activeGpu < model.gpuNames.size() ? model.gpuNames[model.activeGpu] : L"не найден" },
-        { L"ETW-сессия", model.etwRunning ? L"работает" : L"выключена" } };
+        { L"Сбор кадров", model.etwRunning ? L"работает" : L"выключен" }
+    };
 
     for (const auto& row : rows) {
         if (top + 16.0f > inner.bottom) {

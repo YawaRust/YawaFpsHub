@@ -159,7 +159,7 @@ namespace {
         {
             const MemoryIdentity& memory = model.hardware.memory;
             rows.push_back(
-                Row { L"Память", wideText(describeMemory(memory)), L"XMP/EXPO из SMBIOS не определяется",
+                Row { L"Память", wideText(describeMemory(memory)), L"Статус профиля памяти не определён",
                     static_cast<float>(std::clamp(memory.totalGb / 64.0, 0.0, 1.0)), theme.ram });
         }
         if (const DisplayIdentity* display = model.hardware.primaryDisplay(); display != nullptr) {

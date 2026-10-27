@@ -27,6 +27,24 @@ namespace {
             data[offset + static_cast<std::size_t>(index)] = static_cast<char>(value >> (index * 8));
     }
 
+    void replaceEntryByte(std::string& archive, std::string_view name, std::size_t at, char byte)
+    {
+        const std::size_t localName = archive.find(name);
+        const std::size_t centralName = archive.rfind(name);
+        CHECK(localName != std::string::npos && localName != centralName);
+        if (localName == std::string::npos || localName == centralName)
+            return;
+        const std::size_t data = localName + name.size();
+        const std::size_t length = read32(archive, localName - 30 + 18);
+        CHECK(at < length);
+        if (at >= length)
+            return;
+        archive[data + at] = byte;
+        const auto crc = report_internal::crc32(std::string_view(archive).substr(data, length));
+        write32(archive, localName - 30 + 14, crc);
+        write32(archive, centralName - 46 + 16, crc);
+    }
+
 } // namespace
 
 void runReportTests()
@@ -145,6 +163,27 @@ void runReportTests()
     CHECK(!readReportPackage(broken, read, error)); // ZIP CRC верен, PNG CRC неверен.
     CHECK(read.cardPng == original);
     CHECK(!readReportPackage("not a zip", read, error));
+
+    for (std::string_view name : { "system.json", "session.json", "audit.json", "diagnosis.json" }) {
+        broken = output;
+        replaceEntryByte(broken, name, 0, '[');
+        CHECK(!readReportPackage(broken, read, error));
+        CHECK(read.cardPng == original);
+    }
+    broken = output;
+    replaceEntryByte(broken, "session.json", 11, static_cast<char>(0x80));
+    CHECK(!readReportPackage(broken, read, error)); // Корректный ZIP CRC не оправдывает сломанный UTF-8.
+    CHECK(read.cardPng == original);
+    broken = output;
+    replaceEntryByte(broken, "session.json", 12, '\\');
+    CHECK(!readReportPackage(broken, read, error)); // Неизвестная управляющая последовательность.
+    CHECK(read.cardPng == original);
+    broken = output;
+    const std::size_t sessionName = broken.find("session.json");
+    const std::size_t sessionSize = read32(broken, sessionName - 30 + 18);
+    replaceEntryByte(broken, "session.json", sessionSize - 2, ',');
+    CHECK(!readReportPackage(broken, read, error)); // Нет закрывающей скобки JSON.
+    CHECK(read.cardPng == original);
 
     sample.gpuMatchesGame = false;
     sample.sampledAtMs = 100;
