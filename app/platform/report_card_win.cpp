@@ -55,7 +55,8 @@ namespace {
     }
 
     void paint(ID2D1RenderTarget* canvas, ID2D1SolidColorBrush* brush, IDWriteTextFormat* title,
-        IDWriteTextFormat* body, IDWriteTextFormat* caption, const GameDiagnosisInput& input)
+        IDWriteTextFormat* body, IDWriteTextFormat* caption, const GameDiagnosisInput& input,
+        ID2D1Bitmap* game, std::span<const ReportMask> masks)
     {
         const auto white = D2D1::ColorF(0.92f, 0.97f, 0.97f);
         const auto dim = D2D1::ColorF(0.70f, 0.80f, 0.84f);
@@ -64,11 +65,28 @@ namespace {
         canvas->Clear(D2D1::ColorF(0.05f, 0.09f, 0.12f));
         text(canvas, brush, title, L"YawaFpsHub · диагностический снимок", D2D1::RectF(48, 30, 1850, 94),
             white);
-        text(canvas, brush, caption, L"ОФЛАЙН · КАДР ИГРЫ НЕ ВКЛЮЧЁН", D2D1::RectF(48, 100, 1100, 138),
-            accent);
+        text(canvas, brush, caption,
+            game ? L"КАДР ИГРЫ · ПРОВЕРЬТЕ ДРУГИЕ ОКНА И ЗАКРОЙТЕ ЛИЧНОЕ" : L"ОФЛАЙН · КАДР ИГРЫ НЕ ВКЛЮЧЁН",
+            D2D1::RectF(48, 100, 1100, 138), accent);
         fill(canvas, brush, D2D1::RectF(48, 155, 1108, 840), D2D1::ColorF(0.09f, 0.15f, 0.18f));
-        text(canvas, brush, body, L"Кадр не захвачен. Карточка не копирует рабочий стол и другие окна.",
-            D2D1::RectF(120, 432, 1030, 544), dim);
+        if (game != nullptr) {
+            const D2D1_SIZE_F source = game->GetSize();
+            const float scale = std::min(1060.0f / source.width, 685.0f / source.height);
+            const float width = source.width * scale;
+            const float height = source.height * scale;
+            const D2D1_RECT_F destination = D2D1::RectF(48 + (1060 - width) / 2, 155 + (685 - height) / 2,
+                48 + (1060 + width) / 2, 155 + (685 + height) / 2);
+            canvas->DrawBitmap(game, &destination);
+            canvas->SetAntialiasMode(D2D1_ANTIALIAS_MODE_ALIASED);
+            for (const ReportMask& mask : masks)
+                fill(canvas, brush,
+                    D2D1::RectF(static_cast<float>(mask.left), static_cast<float>(mask.top),
+                        static_cast<float>(mask.right), static_cast<float>(mask.bottom)),
+                    D2D1::ColorF(0.04f, 0.07f, 0.09f));
+        } else {
+            text(canvas, brush, body, L"Кадр не захвачен. Карточка не копирует рабочий стол и другие окна.",
+                D2D1::RectF(120, 432, 1030, 544), dim);
+        }
         fill(canvas, brush, D2D1::RectF(1134, 155, 1872, 840), D2D1::ColorF(0.09f, 0.15f, 0.18f));
 
         const auto findings = diagnoseGame(input);
@@ -101,7 +119,8 @@ namespace {
             L"GPU 3D игры: " + (fresh && input.gpuMatchesGame ? percent(input.gpuLoad) : L"нет данных"),
             D2D1::RectF(950, 878, 1650, 921), white);
         text(canvas, brush, caption,
-            L"Только проверенные показания активной игры · без серийных номеров, путей и журналов",
+            game ? L"Кадр может содержать оверлей и чужие окна · проверьте маски перед сохранением"
+                 : L"Только проверенные показания активной игры · без серийных номеров, путей и журналов",
             D2D1::RectF(48, 977, 1840, 1030), dim);
     }
 
@@ -133,9 +152,25 @@ namespace {
 
 } // namespace
 
-bool renderReportCard(const GameDiagnosisInput& input, ReportCardBitmap& result, std::string& error)
+bool renderReportCard(const GameDiagnosisInput& input, const GameClientFrame* frame,
+    std::span<const ReportMask> masks, ReportCardBitmap& result, std::string& error)
 {
     error.clear();
+    if ((frame == nullptr && !masks.empty()) || masks.size() > 16
+        || (frame != nullptr
+            && (frame->width == 0 || frame->height == 0
+                || static_cast<std::uint64_t>(frame->width) * frame->height > 16000000u
+                || frame->bgra.size() != static_cast<std::size_t>(frame->width) * frame->height * 4u))) {
+        error = "Карточка: недопустимый кадр или число масок";
+        return false;
+    }
+    for (const ReportMask& mask : masks) {
+        if (mask.left < 48 || mask.top < 155 || mask.right > 1108 || mask.bottom > 840
+            || mask.left >= mask.right || mask.top >= mask.bottom) {
+            error = "Карточка: маска выходит за область кадра";
+            return false;
+        }
+    }
     ComPtr<IWICImagingFactory> wic;
     ComPtr<IWICBitmap> bitmap;
     ComPtr<ID2D1Factory> d2d;
@@ -162,7 +197,16 @@ bool renderReportCard(const GameDiagnosisInput& input, ReportCardBitmap& result,
         error = "Карточка: не удалось создать шрифты";
         return false;
     }
-    paint(canvas.Get(), brush.Get(), heading.Get(), body.Get(), caption.Get(), input);
+    ComPtr<ID2D1Bitmap> game;
+    const D2D1_BITMAP_PROPERTIES gameProperties = D2D1::BitmapProperties(
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+    if (frame != nullptr
+        && FAILED(canvas->CreateBitmap(D2D1::SizeU(frame->width, frame->height), frame->bgra.data(),
+            frame->width * 4u, &gameProperties, &game))) {
+        error = "Карточка: не удалось отрисовать игровой кадр";
+        return false;
+    }
+    paint(canvas.Get(), brush.Get(), heading.Get(), body.Get(), caption.Get(), input, game.Get(), masks);
     if (FAILED(canvas->EndDraw())) {
         error = "Карточка: не удалось завершить отрисовку";
         return false;

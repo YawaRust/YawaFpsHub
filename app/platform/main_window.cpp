@@ -1,5 +1,6 @@
 #include "platform/main_window.h"
 #include "metrics/overlay_metric.h"
+#include "metrics/report_frame.h"
 #include "platform/app_paths.h"
 #include "platform/display_info.h"
 #include "platform/hardware_info_win.h"
@@ -1679,6 +1680,8 @@ void MainWindow::applyAction(const UiHit& hit)
         if (m_model.paused) {
             m_model.findings.clear();
             m_model.diagnosisInput = { };
+            m_recentGamePid = 0;
+            m_recentGameWindow = nullptr;
         }
         break;
     }
@@ -1706,15 +1709,24 @@ void MainWindow::applyAction(const UiHit& hit)
 
     case ActionKind::CreateDiagnosticReport: {
         GameDiagnosisInput input;
+        HWND gameWindow = nullptr;
+        const auto nowMs = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch())
+                .count());
         {
             std::lock_guard<std::mutex> guard(m_modelMutex);
             input = m_model.diagnosisInput;
+            if (!m_model.paused && m_recentGameWindow != nullptr && IsWindow(m_recentGameWindow) != FALSE
+                && recentGameSelection(nowMs, m_recentGameAtMs, m_recentGamePid)) {
+                if (input.gameProcessId == 0)
+                    input.gameProcessId = m_recentGamePid;
+                if (input.gameProcessId == m_recentGamePid)
+                    gameWindow = m_recentGameWindow;
+            }
         }
-        input.nowMs = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now().time_since_epoch())
-                .count());
+        input.nowMs = nowMs;
         std::string error;
-        if (!showReportCardPreview(m_window, input, error)) {
+        if (!showReportCardPreview(m_window, input, gameWindow, error)) {
             if (m_log)
                 m_log->warning("диагностическая карточка: " + error);
             MessageBoxW(m_window, widen(error).c_str(), L"YawaFpsHub", MB_OK | MB_ICONERROR);
@@ -1895,6 +1907,8 @@ void MainWindow::restartSampling()
         m_model.etwRunning = false;
         m_model.findings.clear();
         m_model.diagnosisInput = { };
+        m_recentGamePid = 0;
+        m_recentGameWindow = nullptr;
         m_model.store.reset();
     }
     m_etwRestartRequested = true;
@@ -2065,8 +2079,9 @@ void MainWindow::samplingLoop()
             // Игра — это процесс активного окна, как в RTSS. Без этого на мониторе 144 Гц
             // композитор рабочего стола обгонял игру на 120 кадрах.
             DWORD foregroundPid = 0;
-            if (GetForegroundWindow() != nullptr) {
-                GetWindowThreadProcessId(GetForegroundWindow(), &foregroundPid);
+            const HWND foregroundWindow = GetForegroundWindow();
+            if (foregroundWindow != nullptr) {
+                GetWindowThreadProcessId(foregroundWindow, &foregroundPid);
             }
             if (foregroundPid == GetCurrentProcessId()) {
                 foregroundPid = 0;
@@ -2139,6 +2154,11 @@ void MainWindow::samplingLoop()
                 // опроса железа нет, и цифры на «Балансе» всегда совпадают с «Обзором».
                 m_model.gameName = gamePid != 0 ? foreground : L"";
                 m_model.gameProcessId = gamePid;
+                if (gamePid != 0 && !m_model.paused) {
+                    m_recentGamePid = gamePid;
+                    m_recentGameWindow = foregroundWindow;
+                    m_recentGameAtMs = diagnosis.sampledAtMs;
+                }
                 m_model.gameCpuLoad = gamePid != 0 ? snapshot.gameCpuLoad : -1.0;
                 m_model.gamePeakThreadLoad = gamePid != 0 ? snapshot.gamePeakThreadLoad : -1.0;
                 m_model.gameGpuLoad = gamePid != 0 ? snapshot.gameGpuLoad : -1.0;

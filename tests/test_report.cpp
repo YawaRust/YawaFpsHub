@@ -1,3 +1,4 @@
+#include "metrics/report_frame.h"
 #include "report/package.h"
 #include "report/package_internal.h"
 #include "test_support.h"
@@ -82,6 +83,17 @@ namespace {
 
 void runReportTests()
 {
+    CHECK(recentGameSelection(35000, 5000, 421));
+    CHECK(!recentGameSelection(35001, 5000, 421));
+    CHECK(!recentGameSelection(100, 200, 421));
+    CHECK(!recentGameSelection(35000, 5000, 0));
+    const auto mask = reportMaskFromDrag(200, 300, 100, 200);
+    CHECK(mask && mask->left == 100 && mask->top == 200 && mask->right == 200 && mask->bottom == 300);
+    const auto clipped = reportMaskFromDrag(-200, -200, 2000, 2000);
+    CHECK(clipped && clipped->left == 48 && clipped->top == 155 && clipped->right == 1108
+        && clipped->bottom == 840);
+    CHECK(!reportMaskFromDrag(5, 5, 40, 40));
+    CHECK(!reportMaskFromDrag(200, 300, 204, 310));
     const unsigned char pngBytes[] { 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
         0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00, 0x00,
         0x90, 0x77, 0x53, 0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x60, 0x60,

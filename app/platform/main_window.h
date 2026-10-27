@@ -15,6 +15,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <cstdint>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -107,6 +108,9 @@ private:
     EtwFrameSession m_etw;
 
     AppModel m_model;
+    std::uint32_t m_recentGamePid = 0;
+    HWND m_recentGameWindow = nullptr;
+    std::uint64_t m_recentGameAtMs = 0;
     Theme m_theme = makeTheme(Accent::Mint);
     std::vector<UiHit> m_hits;
     std::vector<std::pair<std::uint32_t, bool>> m_systemProcessCache;
