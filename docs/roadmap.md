@@ -473,11 +473,10 @@ const char* function = smn ? "ioctl_read_smn" : "ioctl_read_msr"; // app/platfor
 `ioctl_get_mchbar_addr`, `ioctl_read_dword`, `ioctl_read_qword`, а смещения `TC_PRE`,
 `TC_RDRD`, `TC_WRWR` (`e000h`…) описаны в публичной документации Intel по регистрам
 памяти. Для SPD — `SmbusI801.p` (Intel PCH) и `SmbusPIIX4.p` (AMD FCH), обе
-LGPL-2.1-or-later. Сейчас в сборку попадают только два модуля:
-
-```
-"IntelMSR.bin|d6ed85…"  "AMDFamily17.bin|dae746…"   # cmake/pawnio.cmake:8-9
-```
+LGPL-2.1-or-later. Сейчас встроены `IntelMSR.bin`, `AMDFamily17.bin` и
+`SmbusPIIX4.bin` (контроль хешей — `cmake/pawnio.cmake`). Последний **не
+загружается и не выполняется**: действие live SPD и аппаратная проверка ещё не
+реализованы. Intel `SmbusI801.bin` не встроен.
 
 #### 7.2.3 Четыре шага, каждый с видимым результатом
 
