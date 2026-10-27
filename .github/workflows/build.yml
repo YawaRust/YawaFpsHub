@@ -406,8 +406,12 @@ jobs:
             Write-Output "::error title=UI Pillow::$install"
             throw "Pillow не установлен для сравнения снимков"
           }
-          python -B -m unittest discover -s tests -p test_compare_ui.py -v
-          if ($LASTEXITCODE -ne 0) { throw "Тесты сравнения снимков не прошли" }
+          $tests = python -B -m unittest discover -s tests -p test_compare_ui.py -v 2>&1
+          $tests | ForEach-Object { Write-Output $_ }
+          if ($LASTEXITCODE -ne 0) {
+            Write-Output "::error title=UI tests::$($tests -join ' | ')"
+            throw "Тесты сравнения снимков не прошли"
+          }
           python -B tools/compare_ui.py --demo . --app . --out shots --check
           if ($LASTEXITCODE -ne 0) { throw "Снимки отсутствуют, пусты или повторяются" }
 
