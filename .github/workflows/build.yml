@@ -393,6 +393,16 @@ jobs:
           }
           Stop-Process -Id $server.Id -Force
 
+      - name: Проверить снимки и собрать пары сравнения
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check --only-binary=:all: Pillow==13.0.0
+          if ($LASTEXITCODE -ne 0) { throw "Pillow не установлен для сравнения снимков" }
+          python -B -m unittest discover -s tests -p test_compare_ui.py -v
+          if ($LASTEXITCODE -ne 0) { throw "Тесты сравнения снимков не прошли" }
+          python -B tools/compare_ui.py --demo . --app . --out shots --check
+          if ($LASTEXITCODE -ne 0) { throw "Снимки отсутствуют, пусты или повторяются" }
+
       - name: Лог приложения (диагностика)
         # Логи и снимки публикуются артефактами, без записи в служебные ветки.
         continue-on-error: true
