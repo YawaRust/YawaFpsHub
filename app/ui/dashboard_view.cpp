@@ -61,8 +61,8 @@ void drawFpsHint(Renderer& renderer, const AppModel& model, const Theme& theme, 
     const std::array<std::wstring_view, 4> hints {
         L"1% low — FPS по 99-му перцентилю времени кадра, не минимум.",
         L"0.1% low — FPS по 99,9-му перцентилю времени кадра.",
-        L"Frame time — 1000 / FPS за последнюю секунду, не последний кадр.",
-        L"Пропущено — доля интервалов длиннее бюджета, не потеря событий."
+        L"Время кадра — 1000 / FPS за последнюю секунду, не медиана.",
+        L"Дольше цели — доля интервалов кадра длиннее целевого времени, не потеря событий."
     };
     const std::size_t index = (model.cursorY >= statsPanel.centerY() ? 2u : 0u)
         + (model.cursorX >= statsPanel.centerX() ? 1u : 0u);
@@ -131,12 +131,12 @@ void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
     renderer.drawLine(statsPanel.left + 12.0f, statsPanel.centerY(), statsPanel.right - 12.0f, statsPanel.centerY(),
         theme.line, 1.0f);
     const float columnWidth = statsPanel.width() / 2.0f;
-    const std::array<std::array<std::wstring, 2>, 4> stats{ std::array<std::wstring, 2>{ L"1% LOW",
-                                                                                       wideNumber(model.fps.low1Fps,
-                                                                                                  MetricUnit::Count, 0) },
+    const std::array<std::array<std::wstring, 2>, 4> stats {
+        std::array<std::wstring, 2> { L"1% LOW", wideNumber(model.fps.low1Fps, MetricUnit::Count, 0) },
         { L"0.1% LOW", wideNumber(model.fps.low01Fps, MetricUnit::Count, 0) },
         { L"FRAME TIME", wideNumber(model.fps.frameTimeMs, MetricUnit::Milliseconds, 2) },
-        { L"ПРОПУЩЕНО", wideNumber(model.fps.droppedShare * 100.0, MetricUnit::Percent, 1) } };
+        { L"ДОЛЬШЕ ЦЕЛИ", wideNumber(model.fps.droppedShare * 100.0, MetricUnit::Percent, 1) }
+    };
 
     const float statsTop = statsPanel.top + 14.0f;
     for (std::size_t index = 0; index < stats.size(); ++index) {
@@ -204,12 +204,13 @@ void drawSessionCard(Renderer& renderer, const AppModel& model, const Theme& the
     const std::wstring budgetLabel
         = L"Бюджет кадра " + wideText(std::to_string(model.settings.capture.targetHz) + " Гц");
 
-    const std::array<std::pair<std::wstring, std::wstring>, 6> rows{
-        std::pair<std::wstring, std::wstring>{ L"Длительность", formatClock(model.elapsedMs) },
-        { L"Отрисовано кадров", wideNumber(static_cast<double>(model.framesPresented), MetricUnit::Count, 0) },
-        { L"Пропущено кадров", wideNumber(model.fps.droppedShare * 100.0, MetricUnit::Percent, 1) },
+    const std::array<std::pair<std::wstring, std::wstring>, 6> rows {
+        std::pair<std::wstring, std::wstring> { L"Длительность", formatClock(model.elapsedMs) },
+        { L"Отрисовано кадров",
+            wideNumber(static_cast<double>(model.framesPresented), MetricUnit::Count, 0) },
+        { L"Интервалы дольше цели", wideNumber(model.fps.droppedShare * 100.0, MetricUnit::Percent, 1) },
         { L"Средний FPS", wideNumber(model.fps.averageFps, MetricUnit::Count, 1) },
-        { L"Медианный frame time", wideNumber(model.fps.frameTimeMs, MetricUnit::Milliseconds, 2) },
+        { L"Время кадра по FPS", wideNumber(model.fps.frameTimeMs, MetricUnit::Milliseconds, 2) },
         { budgetLabel, wideNumber(std::clamp(used, 0.0, 1.999) * 100.0, MetricUnit::Percent, 0) },
     };
 
@@ -622,6 +623,7 @@ void drawAlertsCard(Renderer& renderer, const AppModel& model, const Theme& them
     const double gpuTemp = model.store.value(MetricId::GpuTemp);
     const bool hasGpuTemp = model.availability.gpuTemperature && model.store.hasValue(MetricId::GpuTemp);
     const bool hasLow = model.fps.low1Fps > 0.0;
+    const bool hasFps = model.etwRunning && model.fps.currentFps > 0.0;
 
     const double ramUsed = model.store.value(MetricId::RamUsed);
     const double ramFree = model.store.value(MetricId::RamFree);
@@ -634,15 +636,19 @@ void drawAlertsCard(Renderer& renderer, const AppModel& model, const Theme& them
         int severity;
     };
 
-    const std::array<Rule, 4> rules{
-        Rule{ L"Перегрев GPU выше 83 °C", hasGpuTemp ? (gpuTemp > 83.0 ? L"сработало" : L"норма") : L"нет данных",
+    const std::array<Rule, 4> rules {
+        Rule { L"Перегрев GPU выше 83 °C",
+            hasGpuTemp ? (gpuTemp > 83.0 ? L"сработало" : L"норма") : L"нет данных",
             hasGpuTemp ? (gpuTemp > 83.0 ? 1 : 0) : -1 },
-        { L"1% low ниже 60 fps", hasLow ? (model.fps.low1Fps < 60.0 ? L"сработало" : L"норма") : L"нет данных",
+        { L"1% low ниже 60 fps",
+            hasLow ? (model.fps.low1Fps < 60.0 ? L"сработало" : L"норма") : L"нет данных",
             hasLow ? (model.fps.low1Fps < 60.0 ? 1 : 0) : -1 },
-        { L"Память занята больше 90 %", ramShare > 0.0 ? (ramShare > 0.9 ? L"сработало" : L"норма") : L"нет данных",
+        { L"Память занята больше 90 %",
+            ramShare > 0.0 ? (ramShare > 0.9 ? L"сработало" : L"норма") : L"нет данных",
             ramShare > 0.0 ? (ramShare > 0.9 ? 1 : 0) : -1 },
-        { L"Кадр дольше бюджета", hasLow ? (model.fps.frameTimeMs > budgetMs ? L"сработало" : L"норма") : L"нет данных",
-            hasLow ? (model.fps.frameTimeMs > budgetMs ? 1 : 0) : -1 },
+        { L"По FPS ниже цели",
+            hasFps ? (model.fps.frameTimeMs > budgetMs ? L"сработало" : L"норма") : L"нет данных",
+            hasFps ? (model.fps.frameTimeMs > budgetMs ? 1 : 0) : -1 },
     };
 
     float rowTop = top + 2.0f;
