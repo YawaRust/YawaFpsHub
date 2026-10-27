@@ -62,7 +62,7 @@ class CompareUiTests(unittest.TestCase):
         changed = self.app / "screenshot-settings.png"
         with Image.open(changed) as image:
             inverted = Image.eval(image, lambda value: 255 - value)
-            inverted.save(changed)
+        inverted.save(changed)
         status, text = self.run_check("--max-score", "10")
         self.assertEqual(status, 1)
         self.assertIn("расхождение", text)

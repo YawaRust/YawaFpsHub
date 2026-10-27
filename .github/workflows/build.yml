@@ -400,18 +400,15 @@ jobs:
       - name: Проверить снимки и собрать пары сравнения
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Continue'
           Write-Output "::notice title=UI Python::$(python --version)"
-          $install = python -m pip install --disable-pip-version-check --only-binary=:all: Pillow==13.0.0 2>&1
-          if ($LASTEXITCODE -ne 0) {
-            Write-Output "::error title=UI Pillow::$install"
-            throw "Pillow не установлен для сравнения снимков"
-          }
-          $tests = python -B -m unittest discover -s tests -p test_compare_ui.py -v 2>&1
-          $tests | ForEach-Object { Write-Output $_ }
-          if ($LASTEXITCODE -ne 0) {
-            Write-Output "::error title=UI tests::$($tests -join ' | ')"
-            throw "Тесты сравнения снимков не прошли"
-          }
+          Write-Output "::notice title=UI stage::установка Pillow"
+          python -m pip install --disable-pip-version-check --only-binary=:all: Pillow==13.0.0
+          if ($LASTEXITCODE -ne 0) { throw "Pillow не установлен для сравнения снимков" }
+          Write-Output "::notice title=UI stage::тесты сравнителя"
+          python -B -m unittest discover -s tests -p test_compare_ui.py -v
+          if ($LASTEXITCODE -ne 0) { throw "Тесты сравнения снимков не прошли" }
+          Write-Output "::notice title=UI stage::проверка реальных снимков"
           python -B tools/compare_ui.py --demo . --app . --out shots --check
           if ($LASTEXITCODE -ne 0) { throw "Снимки отсутствуют, пусты или повторяются" }
 
