@@ -203,7 +203,7 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
         if (!module.populated) {
             continue;
         }
-        if (top + 16.0f > inner.bottom) {
+        if (top + 16.0f > inner.bottom - 52.0f) {
             break;
         }
 
@@ -242,13 +242,25 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
         top += 18.0f;
     }
 
-    if (top + 30.0f <= inner.bottom) {
-        drawWrappedText(renderer,
-            L"SMBIOS/WMI не сообщают действующие тайминги; tCK рассчитан из частоты. "
-            L"Декодер SPD/контроллера памяти для PawnIO пока не реализован.",
-            Rect { inner.left, inner.bottom - 28.0f, inner.right, inner.bottom }, TextRole::Tiny,
-            theme.textFaint, 12.0f, 2);
+    std::wstring live = L"Сейчас (UMC): недоступны";
+    if (model.memoryTimings) {
+        const AmdDdr4Timings& timings = *model.memoryTimings;
+        live = L"Сейчас (UMC): "
+            + wideText(std::to_string(timings.cl) + "-" + std::to_string(timings.rcdRead) + "-"
+                + std::to_string(timings.rp) + "-" + std::to_string(timings.ras))
+            + L" (CL-RCDRD-RP-RAS)";
     }
+    renderer.text(clipText(renderer, live, TextRole::Small, inner.width()),
+        Rect { inner.left, inner.bottom - 43.0f, inner.right, inner.bottom - 25.0f }, TextRole::Small,
+        model.memoryTimings ? theme.accent : theme.textFaint);
+    renderer.text(model.memoryTimings
+            ? L"AMD DDR4 Matisse · tRCDWR / tRC: "
+                + wideText(std::to_string(model.memoryTimings->rcdWrite) + " / "
+                    + std::to_string(model.memoryTimings->rc))
+                + L" · показания не проверены на железе"
+            : L"SPD — паспорт, не замер. UMC: только поддержанный AMD DDR4 с доступом к PawnIO.",
+        Rect { inner.left, inner.bottom - 20.0f, inner.right, inner.bottom }, TextRole::Tiny,
+        theme.textFaint);
 }
 
 void drawDisplayCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card)

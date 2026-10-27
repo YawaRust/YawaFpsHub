@@ -3,896 +3,968 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdio>
 #include <cwctype>
 
 namespace yawa {
 namespace {
 
-constexpr float kMargin = 18.0f;
-constexpr float kRowHeight = 16.0f;
+    constexpr float kMargin = 18.0f;
+    constexpr float kRowHeight = 16.0f;
 
-D2D1_COLOR_F toD2D(const Color& color, float alphaScale = 1.0f)
-{
-    return D2D1::ColorF(color.r, color.g, color.b, color.a * alphaScale);
-}
-
-// Цвета пресетов берутся из палитры репозитория Fpsmon2.0: один набор на все стили,
-// чтобы оверлей в приложении и в демо выглядел одинаково.
-Color styleColor(std::uint32_t rgb, float alpha = 1.0f)
-{
-    return fromRgba(0xFF000000u | rgb).withAlpha(alpha);
-}
-
-std::wstring wideLabel(std::string_view utf8)
-{
-    if (utf8.empty()) {
-        return {};
+    D2D1_COLOR_F toD2D(const Color& color, float alphaScale = 1.0f)
+    {
+        return D2D1::ColorF(color.r, color.g, color.b, color.a * alphaScale);
     }
-    const int length = MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), nullptr, 0);
-    if (length <= 0) {
-        return {};
-    }
-    std::wstring result(static_cast<std::size_t>(length), L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), result.data(), length);
-    return result;
-}
 
-std::wstring upperCase(std::wstring value)
-{
-    for (wchar_t& symbol : value) {
-        symbol = static_cast<wchar_t>(std::towupper(symbol));
+    // Цвета пресетов берутся из палитры репозитория Fpsmon2.0: один набор на все стили,
+    // чтобы оверлей в приложении и в демо выглядел одинаково.
+    Color styleColor(std::uint32_t rgb, float alpha = 1.0f)
+    {
+        return fromRgba(0xFF000000u | rgb).withAlpha(alpha);
     }
-    return value;
-}
 
-// Межбуквенный интервал DirectWrite для DrawTextW не выставляет, а пресеты Terminal,
-// Cyber и Retro различаются именно трекингом. Расставляем тонкие пробелы между знаками.
-std::wstring tracked(std::wstring_view value, float letterSpacing)
-{
-    if (letterSpacing < 0.10f) {
-        return std::wstring(value);
+    std::wstring wideLabel(std::string_view utf8)
+    {
+        if (utf8.empty()) {
+            return { };
+        }
+        const int length
+            = MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), nullptr, 0);
+        if (length <= 0) {
+            return { };
+        }
+        std::wstring result(static_cast<std::size_t>(length), L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()), result.data(), length);
+        return result;
     }
-    std::wstring result;
-    result.reserve(value.size() * 2);
-    for (wchar_t symbol : value) {
-        result.push_back(symbol);
-        if (symbol != L' ') {
-            result.push_back(L'\u2009');
+
+    std::wstring upperCase(std::wstring value)
+    {
+        for (wchar_t& symbol : value) {
+            symbol = static_cast<wchar_t>(std::towupper(symbol));
+        }
+        return value;
+    }
+
+    // Межбуквенный интервал DirectWrite для DrawTextW не выставляет, а пресеты Terminal,
+    // Cyber и Retro различаются именно трекингом. Расставляем тонкие пробелы между знаками.
+    std::wstring tracked(std::wstring_view value, float letterSpacing)
+    {
+        if (letterSpacing < 0.10f) {
+            return std::wstring(value);
+        }
+        std::wstring result;
+        result.reserve(value.size() * 2);
+        for (wchar_t symbol : value) {
+            result.push_back(symbol);
+            if (symbol != L' ') {
+                result.push_back(L'\u2009');
+            }
+        }
+        return result;
+    }
+
+    // Семейство шрифта по номеру настройки. Нулевое значение оставляет шрифт пресета.
+    const wchar_t* fontFamilyName(int index)
+    {
+        switch (index) {
+        case 1:
+            return L"Consolas";
+        case 2:
+            return L"Bahnschrift SemiCondensed";
+        case 3:
+            return L"Impact";
+        default:
+            return nullptr;
         }
     }
-    return result;
-}
 
-// Семейство шрифта по номеру настройки. Нулевое значение оставляет шрифт пресета.
-const wchar_t* fontFamilyName(int index)
-{
-    switch (index) {
-    case 1:
-        return L"Consolas";
-    case 2:
-        return L"Bahnschrift SemiCondensed";
-    case 3:
-        return L"Impact";
-    default:
-        return nullptr;
-    }
-}
-
-// Копия формата с другим размером, начертанием и семейством. Раньше масштаб двигал только
-// рамку: текст оставался прежним, и оверлей выглядел сломанным.
-IDWriteTextFormat* styledFormat(IDWriteFactory* factory, IDWriteTextFormat* base, float factor,
-    const OverlaySettings& settings)
-{
-    if (factory == nullptr || base == nullptr || factor <= 0.0f) {
-        return nullptr;
-    }
-
-    const UINT32 length = base->GetFontFamilyNameLength();
-    std::wstring family(static_cast<std::size_t>(length) + 1, L'\0');
-    if (FAILED(base->GetFontFamilyName(family.data(), length + 1))) {
-        return nullptr;
-    }
-    family.resize(length);
-
-    if (const wchar_t* chosen = fontFamilyName(settings.fontFamily)) {
-        family = chosen;
-    }
-    const DWRITE_FONT_WEIGHT weight = settings.fontBold ? DWRITE_FONT_WEIGHT_BOLD : base->GetFontWeight();
-    const DWRITE_FONT_STYLE style = settings.fontItalic ? DWRITE_FONT_STYLE_ITALIC : base->GetFontStyle();
-
-    IDWriteTextFormat* format = nullptr;
-    if (FAILED(factory->CreateTextFormat(family.c_str(), nullptr, weight, style, base->GetFontStretch(),
-            base->GetFontSize() * factor, L"ru-ru", &format))) {
-        return nullptr;
-    }
-
-    format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
-    format->SetParagraphAlignment(base->GetParagraphAlignment());
-    format->SetTextAlignment(base->GetTextAlignment());
-    return format;
-}
-
-struct OverlayChrome {
-    bool background = true;
-    bool border = true;
-    bool shadow = true;
-    // -1 — радиус из пресета.
-    float radius = -1.0f;
-    // Множитель толщины рамки и силы тени: 1 — как в пресете.
-    float borderWidth = 1.0f;
-    float shadowStrength = 1.0f;
-};
-
-class Painter {
-public:
-    Painter(ID2D1RenderTarget* target, const Theme& theme, const OverlayFormats& formats, float scale, float opacity,
-        const OverlayChrome& chrome, int outline = 0)
-        : m_target(target)
-        , m_theme(theme)
-        , m_formats(formats)
-        , m_scale(scale)
-        , m_opacity(opacity)
-        , m_chrome(chrome)
-        , m_outline(static_cast<float>(std::max(outline, 0)))
+    // Копия формата с другим размером, начертанием и семейством. Раньше масштаб двигал только
+    // рамку: текст оставался прежним, и оверлей выглядел сломанным.
+    IDWriteTextFormat* styledFormat(
+        IDWriteFactory* factory, IDWriteTextFormat* base, float factor, const OverlaySettings& settings)
     {
-    }
-
-    // Подложка оверлея: уважает переключатель «Фон» и пользовательский радиус углов.
-    void plate(const Rect& rect, float radius, const Color& color, float alphaScale = 1.0f)
-    {
-        if (!m_chrome.background || m_backgroundOpacity <= 0.0f) {
-            return;
-        }
-        fillRound(rect, chromeRadius(radius), color, alphaScale * m_backgroundOpacity);
-    }
-
-    // Прозрачность самой подложки: общая прозрачность окна и прозрачность плашки
-    // настраиваются отдельно, иначе «Фон» нельзя сделать почти незаметным.
-    void setBackgroundOpacity(float value) { m_backgroundOpacity = std::clamp(value, 0.0f, 1.0f); }
-
-    void outline(const Rect& rect, float radius, const Color& color, float thickness, float alphaScale = 1.0f)
-    {
-        if (!m_chrome.border) {
-            return;
-        }
-        strokeRound(rect, chromeRadius(radius), color, thickness * m_chrome.borderWidth, alphaScale);
-    }
-
-    void dropShadow(const Rect& rect, float radius, const Color& color, float alphaScale)
-    {
-        if (!m_chrome.shadow) {
-            return;
-        }
-        fillRound(rect, chromeRadius(radius), color, alphaScale * m_chrome.shadowStrength);
-    }
-
-    float textSize() const { return m_scale; }
-
-    void fillRect(const Rect& rect, const Color& color, float alphaScale = 1.0f)
-    {
-        ID2D1SolidColorBrush* brush = nullptr;
-        if (FAILED(m_target->CreateSolidColorBrush(toD2D(color, alphaScale), &brush))) {
-            return;
-        }
-        m_target->FillRectangle(D2D1::RectF(rect.left, rect.top, rect.right, rect.bottom), brush);
-        brush->Release();
-    }
-
-    void fillRound(const Rect& rect, float radius, const Color& color, float alphaScale = 1.0f)
-    {
-        ID2D1SolidColorBrush* brush = nullptr;
-        if (FAILED(m_target->CreateSolidColorBrush(toD2D(color, alphaScale), &brush))) {
-            return;
-        }
-        m_target->FillRoundedRectangle(
-            D2D1::RoundedRect(D2D1::RectF(rect.left, rect.top, rect.right, rect.bottom), radius, radius), brush);
-        brush->Release();
-    }
-
-    void fillCircle(float centerX, float centerY, float radius, const Color& color, float alphaScale = 1.0f)
-    {
-        fillRound(Rect{ centerX - radius, centerY - radius, centerX + radius, centerY + radius }, radius, color,
-            alphaScale);
-    }
-
-    void strokeRound(const Rect& rect, float radius, const Color& color, float thickness, float alphaScale = 1.0f)
-    {
-        ID2D1SolidColorBrush* brush = nullptr;
-        if (FAILED(m_target->CreateSolidColorBrush(toD2D(color, alphaScale), &brush))) {
-            return;
-        }
-        m_target->DrawRoundedRectangle(
-            D2D1::RoundedRect(D2D1::RectF(rect.left, rect.top, rect.right, rect.bottom), radius, radius), brush,
-            thickness);
-        brush->Release();
-    }
-
-    void line(float x1, float y1, float x2, float y2, const Color& color, float thickness, float alphaScale = 1.0f)
-    {
-        ID2D1SolidColorBrush* brush = nullptr;
-        if (FAILED(m_target->CreateSolidColorBrush(toD2D(color, alphaScale), &brush))) {
-            return;
-        }
-        m_target->DrawLine(D2D1::Point2F(x1, y1), D2D1::Point2F(x2, y2), brush, thickness);
-        brush->Release();
-    }
-
-    void text(std::wstring_view value, const Rect& rect, TextRole role, const Color& color,
-        TextAlign align = TextAlign::Left, float alphaScale = 1.0f)
-    {
-        IDWriteTextFormat* format = formatFor(role);
-        if (format == nullptr) {
-            return;
+        if (factory == nullptr || base == nullptr || factor <= 0.0f) {
+            return nullptr;
         }
 
-        const DWRITE_TEXT_ALIGNMENT previous = format->GetTextAlignment();
-        format->SetTextAlignment(align == TextAlign::Right ? DWRITE_TEXT_ALIGNMENT_TRAILING
-                : align == TextAlign::Center                 ? DWRITE_TEXT_ALIGNMENT_CENTER
-                                                             : DWRITE_TEXT_ALIGNMENT_LEADING);
+        const UINT32 length = base->GetFontFamilyNameLength();
+        std::wstring family(static_cast<std::size_t>(length) + 1, L'\0');
+        if (FAILED(base->GetFontFamilyName(family.data(), length + 1))) {
+            return nullptr;
+        }
+        family.resize(length);
 
-        // Обводка: контрастный контур, чтобы текст читался на любом фоне игры.
-        if (m_outline > 0.0f) {
-            const float luminance = color.r * 0.299f + color.g * 0.587f + color.b * 0.114f;
-            const Color edge = luminance > 0.55f ? Color{ 0.02f, 0.03f, 0.05f, 0.9f }
-                                                 : Color{ 0.97f, 0.98f, 1.0f, 0.9f };
-            ID2D1SolidColorBrush* edgeBrush = nullptr;
-            if (SUCCEEDED(m_target->CreateSolidColorBrush(toD2D(edge, alphaScale), &edgeBrush))) {
-                const float step = m_outline * m_scale;
-                const std::array<std::pair<float, float>, 8> shifts{ std::pair<float, float>{ -step, 0.0f },
-                    { step, 0.0f }, { 0.0f, -step }, { 0.0f, step }, { -step, -step }, { step, -step },
-                    { -step, step }, { step, step } };
-                for (const auto& [dx, dy] : shifts) {
-                    m_target->DrawTextW(value.data(), static_cast<UINT32>(value.size()), format,
-                        D2D1::RectF(rect.left + dx, rect.top + dy, rect.right + dx, rect.bottom + dy),
-                        edgeBrush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+        if (const wchar_t* chosen = fontFamilyName(settings.fontFamily)) {
+            family = chosen;
+        }
+        const DWRITE_FONT_WEIGHT weight = settings.fontBold ? DWRITE_FONT_WEIGHT_BOLD : base->GetFontWeight();
+        const DWRITE_FONT_STYLE style = settings.fontItalic ? DWRITE_FONT_STYLE_ITALIC : base->GetFontStyle();
+
+        IDWriteTextFormat* format = nullptr;
+        if (FAILED(factory->CreateTextFormat(family.c_str(), nullptr, weight, style, base->GetFontStretch(),
+                base->GetFontSize() * factor, L"ru-ru", &format))) {
+            return nullptr;
+        }
+
+        format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+        format->SetParagraphAlignment(base->GetParagraphAlignment());
+        format->SetTextAlignment(base->GetTextAlignment());
+        return format;
+    }
+
+    struct OverlayChrome
+    {
+        bool background = true;
+        bool border = true;
+        bool shadow = true;
+        // -1 — радиус из пресета.
+        float radius = -1.0f;
+        // Множитель толщины рамки и силы тени: 1 — как в пресете.
+        float borderWidth = 1.0f;
+        float shadowStrength = 1.0f;
+    };
+
+    class Painter
+    {
+    public:
+        Painter(ID2D1RenderTarget* target, const Theme& theme, const OverlayFormats& formats, float scale,
+            float opacity, const OverlayChrome& chrome, int outline = 0)
+            : m_target(target)
+            , m_theme(theme)
+            , m_formats(formats)
+            , m_scale(scale)
+            , m_opacity(opacity)
+            , m_chrome(chrome)
+            , m_outline(static_cast<float>(std::max(outline, 0)))
+        {
+        }
+
+        // Подложка оверлея: уважает переключатель «Фон» и пользовательский радиус углов.
+        void plate(const Rect& rect, float radius, const Color& color, float alphaScale = 1.0f)
+        {
+            if (!m_chrome.background || m_backgroundOpacity <= 0.0f) {
+                return;
+            }
+            fillRound(rect, chromeRadius(radius), color, alphaScale * m_backgroundOpacity);
+        }
+
+        // Прозрачность самой подложки: общая прозрачность окна и прозрачность плашки
+        // настраиваются отдельно, иначе «Фон» нельзя сделать почти незаметным.
+        void setBackgroundOpacity(float value) { m_backgroundOpacity = std::clamp(value, 0.0f, 1.0f); }
+
+        void outline(
+            const Rect& rect, float radius, const Color& color, float thickness, float alphaScale = 1.0f)
+        {
+            if (!m_chrome.border) {
+                return;
+            }
+            strokeRound(rect, chromeRadius(radius), color, thickness * m_chrome.borderWidth, alphaScale);
+        }
+
+        void dropShadow(const Rect& rect, float radius, const Color& color, float alphaScale)
+        {
+            if (!m_chrome.shadow) {
+                return;
+            }
+            fillRound(rect, chromeRadius(radius), color, alphaScale * m_chrome.shadowStrength);
+        }
+
+        float textSize() const { return m_scale; }
+
+        void fillRect(const Rect& rect, const Color& color, float alphaScale = 1.0f)
+        {
+            ID2D1SolidColorBrush* brush = nullptr;
+            if (FAILED(m_target->CreateSolidColorBrush(toD2D(color, alphaScale), &brush))) {
+                return;
+            }
+            m_target->FillRectangle(D2D1::RectF(rect.left, rect.top, rect.right, rect.bottom), brush);
+            brush->Release();
+        }
+
+        void fillRound(const Rect& rect, float radius, const Color& color, float alphaScale = 1.0f)
+        {
+            ID2D1SolidColorBrush* brush = nullptr;
+            if (FAILED(m_target->CreateSolidColorBrush(toD2D(color, alphaScale), &brush))) {
+                return;
+            }
+            m_target->FillRoundedRectangle(
+                D2D1::RoundedRect(D2D1::RectF(rect.left, rect.top, rect.right, rect.bottom), radius, radius),
+                brush);
+            brush->Release();
+        }
+
+        void fillCircle(
+            float centerX, float centerY, float radius, const Color& color, float alphaScale = 1.0f)
+        {
+            fillRound(Rect { centerX - radius, centerY - radius, centerX + radius, centerY + radius }, radius,
+                color, alphaScale);
+        }
+
+        void strokeRound(
+            const Rect& rect, float radius, const Color& color, float thickness, float alphaScale = 1.0f)
+        {
+            ID2D1SolidColorBrush* brush = nullptr;
+            if (FAILED(m_target->CreateSolidColorBrush(toD2D(color, alphaScale), &brush))) {
+                return;
+            }
+            m_target->DrawRoundedRectangle(
+                D2D1::RoundedRect(D2D1::RectF(rect.left, rect.top, rect.right, rect.bottom), radius, radius),
+                brush, thickness);
+            brush->Release();
+        }
+
+        void line(float x1, float y1, float x2, float y2, const Color& color, float thickness,
+            float alphaScale = 1.0f)
+        {
+            ID2D1SolidColorBrush* brush = nullptr;
+            if (FAILED(m_target->CreateSolidColorBrush(toD2D(color, alphaScale), &brush))) {
+                return;
+            }
+            m_target->DrawLine(D2D1::Point2F(x1, y1), D2D1::Point2F(x2, y2), brush, thickness);
+            brush->Release();
+        }
+
+        void text(std::wstring_view value, const Rect& rect, TextRole role, const Color& color,
+            TextAlign align = TextAlign::Left, float alphaScale = 1.0f)
+        {
+            IDWriteTextFormat* format = formatFor(role);
+            if (format == nullptr) {
+                return;
+            }
+
+            const DWRITE_TEXT_ALIGNMENT previous = format->GetTextAlignment();
+            format->SetTextAlignment(align == TextAlign::Right ? DWRITE_TEXT_ALIGNMENT_TRAILING
+                    : align == TextAlign::Center               ? DWRITE_TEXT_ALIGNMENT_CENTER
+                                                               : DWRITE_TEXT_ALIGNMENT_LEADING);
+
+            // Обводка: контрастный контур, чтобы текст читался на любом фоне игры.
+            if (m_outline > 0.0f) {
+                const float luminance = color.r * 0.299f + color.g * 0.587f + color.b * 0.114f;
+                const Color edge = luminance > 0.55f ? Color { 0.02f, 0.03f, 0.05f, 0.9f }
+                                                     : Color { 0.97f, 0.98f, 1.0f, 0.9f };
+                ID2D1SolidColorBrush* edgeBrush = nullptr;
+                if (SUCCEEDED(m_target->CreateSolidColorBrush(toD2D(edge, alphaScale), &edgeBrush))) {
+                    const float step = m_outline * m_scale;
+                    const std::array<std::pair<float, float>, 8> shifts {
+                        std::pair<float, float> { -step, 0.0f }, { step, 0.0f }, { 0.0f, -step },
+                        { 0.0f, step }, { -step, -step }, { step, -step }, { -step, step }, { step, step }
+                    };
+                    for (const auto& [dx, dy] : shifts) {
+                        m_target->DrawTextW(value.data(), static_cast<UINT32>(value.size()), format,
+                            D2D1::RectF(rect.left + dx, rect.top + dy, rect.right + dx, rect.bottom + dy),
+                            edgeBrush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                    }
+                    edgeBrush->Release();
                 }
-                edgeBrush->Release();
+            }
+
+            ID2D1SolidColorBrush* brush = nullptr;
+            if (FAILED(m_target->CreateSolidColorBrush(toD2D(color, alphaScale), &brush))) {
+                format->SetTextAlignment(previous);
+                return;
+            }
+
+            m_target->DrawTextW(value.data(), static_cast<UINT32>(value.size()), format,
+                D2D1::RectF(rect.left, rect.top, rect.right, rect.bottom), brush,
+                D2D1_DRAW_TEXT_OPTIONS_CLIP);
+            format->SetTextAlignment(previous);
+            brush->Release();
+        }
+
+        float measure(std::wstring_view value, TextRole role) const
+        {
+            IDWriteTextFormat* format = formatFor(role);
+            if (format == nullptr || m_formats.factory == nullptr) {
+                return 0.0f;
+            }
+            IDWriteTextLayout* layout = nullptr;
+            if (FAILED(m_formats.factory->CreateTextLayout(
+                    value.data(), static_cast<UINT32>(value.size()), format, 4096.0f, 200.0f, &layout))) {
+                return 0.0f;
+            }
+            DWRITE_TEXT_METRICS metrics { };
+            layout->GetMetrics(&metrics);
+            layout->Release();
+            return metrics.widthIncludingTrailingWhitespace;
+        }
+
+        float scale() const { return m_scale; }
+        float opacity() const { return m_opacity; }
+        const Theme& theme() const { return m_theme; }
+
+    private:
+        float chromeRadius(float presetRadius) const
+        {
+            return m_chrome.radius >= 0.0f ? m_chrome.radius * m_scale : presetRadius;
+        }
+
+        IDWriteTextFormat* formatFor(TextRole role) const
+        {
+            switch (role) {
+            case TextRole::Display:
+            case TextRole::Value:
+                return m_formats.value;
+            case TextRole::Heading:
+            case TextRole::Body:
+                return m_formats.key;
+            case TextRole::Mono:
+                return m_formats.mono;
+            default:
+                return m_formats.smallText;
             }
         }
 
-        ID2D1SolidColorBrush* brush = nullptr;
-        if (FAILED(m_target->CreateSolidColorBrush(toD2D(color, alphaScale), &brush))) {
-            format->SetTextAlignment(previous);
-            return;
-        }
+        ID2D1RenderTarget* m_target = nullptr;
+        const Theme& m_theme;
+        OverlayFormats m_formats;
+        float m_scale = 1.0f;
+        float m_opacity = 1.0f;
+        OverlayChrome m_chrome;
+        float m_outline = 0.0f;
+        float m_backgroundOpacity = 1.0f;
+    };
 
-        m_target->DrawTextW(value.data(), static_cast<UINT32>(value.size()), format,
-            D2D1::RectF(rect.left, rect.top, rect.right, rect.bottom), brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
-        format->SetTextAlignment(previous);
-        brush->Release();
-    }
-
-    float measure(std::wstring_view value, TextRole role) const
+    // Полный визуальный набор стиля: палитра, форма, типографика. Раньше стили отличались
+    // только подложкой, теперь меняется всё сразу — как в пресетах Fpsmon2.0.
+    struct StyleLook
     {
-        IDWriteTextFormat* format = formatFor(role);
-        if (format == nullptr || m_formats.factory == nullptr) {
-            return 0.0f;
-        }
-        IDWriteTextLayout* layout = nullptr;
-        if (FAILED(m_formats.factory->CreateTextLayout(value.data(), static_cast<UINT32>(value.size()), format,
-                4096.0f, 200.0f, &layout))) {
-            return 0.0f;
-        }
-        DWRITE_TEXT_METRICS metrics{};
-        layout->GetMetrics(&metrics);
-        layout->Release();
-        return metrics.widthIncludingTrailingWhitespace;
-    }
+        Color background;
+        Color border;
+        Color label;
+        Color accent;
+        Color value;
+        std::array<Color, kLabelCount> palette { };
+        std::array<Color, kMetricCount> rowPalette { };
+        float radius = 8.0f;
+        float padding = 10.0f;
+        float rowGap = 2.0f;
+        float labelWidth = 110.0f;
+        float valueWidth = 140.0f;
+        float letterSpacing = 0.0f;
+        bool borderVisible = true;
+        bool uppercase = false;
+        bool separators = false;
+        bool mono = false;
+        bool shadow = false;
+    };
 
-    float scale() const { return m_scale; }
-    float opacity() const { return m_opacity; }
-    const Theme& theme() const { return m_theme; }
-
-private:
-    float chromeRadius(float presetRadius) const
+    StyleLook lookFor(OverlayStyle style)
     {
-        return m_chrome.radius >= 0.0f ? m_chrome.radius * m_scale : presetRadius;
+        StyleLook look;
+        switch (style) {
+        case OverlayStyle::Neon:
+            look.background = styleColor(0x05070Bu);
+            look.border = styleColor(0x94A3B8u);
+            look.label = styleColor(0xCBD5E1u);
+            look.accent = styleColor(0x00FF88u);
+            look.value = styleColor(0xF1FFF7u);
+            look.palette = { styleColor(0x22FF66u), styleColor(0x4DB3FFu), styleColor(0xB9A7FFu),
+                styleColor(0xFFCC4Du), styleColor(0x6EF3D6u) };
+            look.radius = 10.0f;
+            look.padding = 10.0f;
+            look.rowGap = 2.0f;
+            look.letterSpacing = 0.06f;
+            look.uppercase = true;
+            look.separators = true;
+            look.mono = true;
+            look.shadow = true;
+            break;
+        case OverlayStyle::Rtss:
+            // Как RivaTuner: без подложки и рамки, крупный моноширинный, только цифры и подписи.
+            look.background = styleColor(0x000000u, 0.0f);
+            look.border = styleColor(0x000000u, 0.0f);
+            look.label = styleColor(0x9FE8B4u);
+            look.accent = styleColor(0x44FF77u);
+            look.value = styleColor(0x44FF77u);
+            look.palette = { styleColor(0x44FF77u), styleColor(0x44FF77u), styleColor(0x44FF77u),
+                styleColor(0x44FF77u), styleColor(0x44FF77u) };
+            look.radius = 0.0f;
+            look.padding = 4.0f;
+            look.rowGap = 0.0f;
+            look.letterSpacing = 0.02f;
+            look.borderVisible = false;
+            look.uppercase = true;
+            look.mono = true;
+            break;
+        case OverlayStyle::Frosted:
+            // Светлое стекло: подложка почти непрозрачная, поэтому и текст тёмный.
+            look.background = styleColor(0xF3F6FBu);
+            look.border = styleColor(0xFFFFFFu);
+            look.label = styleColor(0x33415Cu);
+            look.accent = styleColor(0x0B1220u);
+            look.value = styleColor(0x0B1220u);
+            look.palette = { styleColor(0x0B1220u), styleColor(0x123E63u), styleColor(0x3B2A5Cu),
+                styleColor(0x5A3E12u), styleColor(0x0F3B36u) };
+            look.radius = 14.0f;
+            look.padding = 12.0f;
+            look.rowGap = 4.0f;
+            look.letterSpacing = 0.01f;
+            look.shadow = true;
+            break;
+        case OverlayStyle::Terminal:
+            look.background = styleColor(0x000000u);
+            look.border = styleColor(0xFFB03Au);
+            look.label = styleColor(0x9A6B22u);
+            look.accent = styleColor(0xFFB03Au);
+            look.value = styleColor(0xFFC76Bu);
+            look.palette = { styleColor(0xFFB03Au), styleColor(0xFFC76Bu), styleColor(0xFFA021u),
+                styleColor(0xE09020u), styleColor(0xD98020u) };
+            look.radius = 0.0f;
+            look.padding = 8.0f;
+            look.rowGap = 1.0f;
+            look.letterSpacing = 0.12f;
+            look.uppercase = true;
+            look.separators = true;
+            look.mono = true;
+            break;
+        case OverlayStyle::Cyber:
+            look.background = styleColor(0x120418u);
+            look.border = styleColor(0xFF2BD1u);
+            look.label = styleColor(0xC58AE0u);
+            look.accent = styleColor(0xFF2BD1u);
+            look.value = styleColor(0xFFE8FBu);
+            look.palette = { styleColor(0xFF2BD1u), styleColor(0x00E5FFu), styleColor(0xB47AFFu),
+                styleColor(0xFFD23Fu), styleColor(0x6EF3D6u) };
+            look.radius = 4.0f;
+            look.padding = 11.0f;
+            look.rowGap = 3.0f;
+            look.letterSpacing = 0.18f;
+            look.uppercase = true;
+            look.separators = true;
+            look.shadow = true;
+            break;
+        case OverlayStyle::Mono:
+            look.background = styleColor(0x000000u, 0.28f);
+            look.border = styleColor(0xFFFFFFu, 0.0f);
+            look.label = styleColor(0x8F98A6u);
+            look.accent = styleColor(0xFFFFFFu);
+            look.value = styleColor(0xFFFFFFu);
+            look.palette = { styleColor(0xFFFFFFu), styleColor(0xE2E8F0u), styleColor(0xE2E8F0u),
+                styleColor(0xE2E8F0u), styleColor(0xE2E8F0u) };
+            look.radius = 8.0f;
+            look.padding = 8.0f;
+            look.rowGap = 2.0f;
+            look.borderVisible = false;
+            break;
+        case OverlayStyle::Esport:
+            look.background = styleColor(0x070B12u);
+            look.border = styleColor(0x1F2B3Du);
+            look.label = styleColor(0x64748Bu);
+            look.accent = styleColor(0x38BDF8u);
+            look.value = styleColor(0xE2E8F0u);
+            look.palette = { styleColor(0x38BDF8u), styleColor(0xF472B6u), styleColor(0xA78BFAu),
+                styleColor(0xFACC15u), styleColor(0x4ADE80u) };
+            look.radius = 6.0f;
+            look.padding = 7.0f;
+            look.rowGap = 0.0f;
+            look.letterSpacing = 0.08f;
+            look.uppercase = true;
+            look.separators = true;
+            look.mono = true;
+            look.shadow = true;
+            break;
+        case OverlayStyle::Retro:
+            look.background = styleColor(0x021206u);
+            look.border = styleColor(0x2DFF6Au);
+            look.label = styleColor(0x1F8F3Fu);
+            look.accent = styleColor(0x2DFF6Au);
+            look.value = styleColor(0x88FFAAu);
+            look.palette = { styleColor(0x2DFF6Au), styleColor(0x55FF88u), styleColor(0x88FFAAu),
+                styleColor(0xAAFFBBu), styleColor(0x2DFF6Au) };
+            look.radius = 3.0f;
+            look.padding = 10.0f;
+            look.rowGap = 2.0f;
+            look.letterSpacing = 0.14f;
+            look.uppercase = true;
+            look.separators = true;
+            look.mono = true;
+            break;
+        }
+        return look;
     }
 
-    IDWriteTextFormat* formatFor(TextRole role) const
+    struct StyleSpec
     {
-        switch (role) {
-        case TextRole::Display:
-        case TextRole::Value:
-            return m_formats.value;
-        case TextRole::Heading:
-        case TextRole::Body:
-            return m_formats.key;
-        case TextRole::Mono:
-            return m_formats.mono;
-        default:
-            return m_formats.smallText;
+        float width = 200.0f;
+        float height = 96.0f;
+    };
+
+    bool rowShown(const OverlayText& text, std::size_t index)
+    {
+        if (!text.visible[index]) {
+            return false;
         }
+        return true;
     }
 
-    ID2D1RenderTarget* m_target = nullptr;
-    const Theme& m_theme;
-    OverlayFormats m_formats;
-    float m_scale = 1.0f;
-    float m_opacity = 1.0f;
-    OverlayChrome m_chrome;
-    float m_outline = 0.0f;
-    float m_backgroundOpacity = 1.0f;
-};
-
-// Полный визуальный набор стиля: палитра, форма, типографика. Раньше стили отличались
-// только подложкой, теперь меняется всё сразу — как в пресетах Fpsmon2.0.
-struct StyleLook {
-    Color background;
-    Color border;
-    Color label;
-    Color accent;
-    Color value;
-    std::array<Color, kLabelCount> palette{};
-    std::array<Color, kMetricCount> rowPalette{};
-    float radius = 8.0f;
-    float padding = 10.0f;
-    float rowGap = 2.0f;
-    float labelWidth = 110.0f;
-    float valueWidth = 140.0f;
-    float letterSpacing = 0.0f;
-    bool borderVisible = true;
-    bool uppercase = false;
-    bool separators = false;
-    bool mono = false;
-    bool shadow = false;
-};
-
-StyleLook lookFor(OverlayStyle style)
-{
-    StyleLook look;
-    switch (style) {
-    case OverlayStyle::Neon:
-        look.background = styleColor(0x05070Bu);
-        look.border = styleColor(0x94A3B8u);
-        look.label = styleColor(0xCBD5E1u);
-        look.accent = styleColor(0x00FF88u);
-        look.value = styleColor(0xF1FFF7u);
-        look.palette = { styleColor(0x22FF66u), styleColor(0x4DB3FFu), styleColor(0xB9A7FFu),
-            styleColor(0xFFCC4Du), styleColor(0x6EF3D6u) };
-        look.radius = 10.0f;
-        look.padding = 10.0f;
-        look.rowGap = 2.0f;
-        look.letterSpacing = 0.06f;
-        look.uppercase = true;
-        look.separators = true;
-        look.mono = true;
-        look.shadow = true;
-        break;
-    case OverlayStyle::Rtss:
-        // Как RivaTuner: без подложки и рамки, крупный моноширинный, только цифры и подписи.
-        look.background = styleColor(0x000000u, 0.0f);
-        look.border = styleColor(0x000000u, 0.0f);
-        look.label = styleColor(0x9FE8B4u);
-        look.accent = styleColor(0x44FF77u);
-        look.value = styleColor(0x44FF77u);
-        look.palette = { styleColor(0x44FF77u), styleColor(0x44FF77u), styleColor(0x44FF77u),
-            styleColor(0x44FF77u), styleColor(0x44FF77u) };
-        look.radius = 0.0f;
-        look.padding = 4.0f;
-        look.rowGap = 0.0f;
-        look.letterSpacing = 0.02f;
-        look.borderVisible = false;
-        look.uppercase = true;
-        look.mono = true;
-        break;
-    case OverlayStyle::Frosted:
-        // Светлое стекло: подложка почти непрозрачная, поэтому и текст тёмный.
-        look.background = styleColor(0xF3F6FBu);
-        look.border = styleColor(0xFFFFFFu);
-        look.label = styleColor(0x33415Cu);
-        look.accent = styleColor(0x0B1220u);
-        look.value = styleColor(0x0B1220u);
-        look.palette = { styleColor(0x0B1220u), styleColor(0x123E63u), styleColor(0x3B2A5Cu),
-            styleColor(0x5A3E12u), styleColor(0x0F3B36u) };
-        look.radius = 14.0f;
-        look.padding = 12.0f;
-        look.rowGap = 4.0f;
-        look.letterSpacing = 0.01f;
-        look.shadow = true;
-        break;
-    case OverlayStyle::Terminal:
-        look.background = styleColor(0x000000u);
-        look.border = styleColor(0xFFB03Au);
-        look.label = styleColor(0x9A6B22u);
-        look.accent = styleColor(0xFFB03Au);
-        look.value = styleColor(0xFFC76Bu);
-        look.palette = { styleColor(0xFFB03Au), styleColor(0xFFC76Bu), styleColor(0xFFA021u),
-            styleColor(0xE09020u), styleColor(0xD98020u) };
-        look.radius = 0.0f;
-        look.padding = 8.0f;
-        look.rowGap = 1.0f;
-        look.letterSpacing = 0.12f;
-        look.uppercase = true;
-        look.separators = true;
-        look.mono = true;
-        break;
-    case OverlayStyle::Cyber:
-        look.background = styleColor(0x120418u);
-        look.border = styleColor(0xFF2BD1u);
-        look.label = styleColor(0xC58AE0u);
-        look.accent = styleColor(0xFF2BD1u);
-        look.value = styleColor(0xFFE8FBu);
-        look.palette = { styleColor(0xFF2BD1u), styleColor(0x00E5FFu), styleColor(0xB47AFFu),
-            styleColor(0xFFD23Fu), styleColor(0x6EF3D6u) };
-        look.radius = 4.0f;
-        look.padding = 11.0f;
-        look.rowGap = 3.0f;
-        look.letterSpacing = 0.18f;
-        look.uppercase = true;
-        look.separators = true;
-        look.shadow = true;
-        break;
-    case OverlayStyle::Mono:
-        look.background = styleColor(0x000000u, 0.28f);
-        look.border = styleColor(0xFFFFFFu, 0.0f);
-        look.label = styleColor(0x8F98A6u);
-        look.accent = styleColor(0xFFFFFFu);
-        look.value = styleColor(0xFFFFFFu);
-        look.palette = { styleColor(0xFFFFFFu), styleColor(0xE2E8F0u), styleColor(0xE2E8F0u),
-            styleColor(0xE2E8F0u), styleColor(0xE2E8F0u) };
-        look.radius = 8.0f;
-        look.padding = 8.0f;
-        look.rowGap = 2.0f;
-        look.borderVisible = false;
-        break;
-    case OverlayStyle::Esport:
-        look.background = styleColor(0x070B12u);
-        look.border = styleColor(0x1F2B3Du);
-        look.label = styleColor(0x64748Bu);
-        look.accent = styleColor(0x38BDF8u);
-        look.value = styleColor(0xE2E8F0u);
-        look.palette = { styleColor(0x38BDF8u), styleColor(0xF472B6u), styleColor(0xA78BFAu),
-            styleColor(0xFACC15u), styleColor(0x4ADE80u) };
-        look.radius = 6.0f;
-        look.padding = 7.0f;
-        look.rowGap = 0.0f;
-        look.letterSpacing = 0.08f;
-        look.uppercase = true;
-        look.separators = true;
-        look.mono = true;
-        look.shadow = true;
-        break;
-    case OverlayStyle::Retro:
-        look.background = styleColor(0x021206u);
-        look.border = styleColor(0x2DFF6Au);
-        look.label = styleColor(0x1F8F3Fu);
-        look.accent = styleColor(0x2DFF6Au);
-        look.value = styleColor(0x88FFAAu);
-        look.palette = { styleColor(0x2DFF6Au), styleColor(0x55FF88u), styleColor(0x88FFAAu),
-            styleColor(0xAAFFBBu), styleColor(0x2DFF6Au) };
-        look.radius = 3.0f;
-        look.padding = 10.0f;
-        look.rowGap = 2.0f;
-        look.letterSpacing = 0.14f;
-        look.uppercase = true;
-        look.separators = true;
-        look.mono = true;
-        break;
-    }
-    return look;
-}
-
-struct StyleSpec {
-    float width = 200.0f;
-    float height = 96.0f;
-};
-
-bool rowShown(const OverlayText& text, std::size_t index)
-{
-    if (!text.visible[index]) {
-        return false;
-    }
-    return true;
-}
-
-// Сколько строк реально рисуем: выключенные в «Составе» не занимают место.
-std::size_t visibleRows(const OverlayText& text)
-{
-    std::size_t rows = 0;
-    for (std::size_t index = 0; index < text.labels.size(); ++index) {
-        if (rowShown(text, index)) {
-            ++rows;
+    // Сколько строк реально рисуем: выключенные в «Составе» не занимают место.
+    std::size_t visibleRows(const OverlayText& text)
+    {
+        std::size_t rows = 0;
+        for (std::size_t index = 0; index < text.labels.size(); ++index) {
+            if (rowShown(text, index)) {
+                ++rows;
+            }
         }
+        return rows;
     }
-    return rows;
-}
 
-const std::vector<std::wstring>& rowValues(const OverlayText& text)
-{
-    return text.values;
-}
+    const std::vector<std::wstring>& rowValues(const OverlayText& text)
+    {
+        return text.values;
+    }
 
-std::vector<std::wstring> rowLabels(const OverlayText& text, const StyleLook& look)
-{
-    std::vector<std::wstring> labels = text.labels;
-    if (look.uppercase) {
+    std::vector<std::wstring> rowLabels(const OverlayText& text, const StyleLook& look)
+    {
+        std::vector<std::wstring> labels = text.labels;
+        if (look.uppercase) {
+            for (std::wstring& label : labels) {
+                label = upperCase(label);
+            }
+        }
         for (std::wstring& label : labels) {
-            label = upperCase(label);
+            label = tracked(label, look.letterSpacing);
+        }
+        return labels;
+    }
+
+    StyleSpec styleSpec(const OverlaySettings& settings, const OverlayText& text, float lineWidth)
+    {
+        const std::size_t rows = std::max<std::size_t>(visibleRows(text), 1);
+        StyleSpec spec;
+        if (settings.layout == OverlayLayout::Line) {
+            const float height = settings.style == OverlayStyle::Rtss ? 24.0f
+                : settings.style == OverlayStyle::Esport              ? 32.0f
+                                                                      : 30.0f;
+            return StyleSpec { std::max(lineWidth + 28.0f, 140.0f), height };
+        }
+        if (settings.layout == OverlayLayout::Gauge) {
+            return StyleSpec { 242.0f, 14.0f + static_cast<float>(rows) * 32.0f };
+        }
+
+        switch (settings.style) {
+        case OverlayStyle::Neon:
+            spec = { 244.0f, 74.0f + static_cast<float>(rows > 1 ? rows - 1 : 0) * 19.0f };
+            break;
+        case OverlayStyle::Rtss:
+            spec = { 196.0f, 6.0f + static_cast<float>(rows) * 19.0f };
+            break;
+        case OverlayStyle::Frosted:
+            spec = { 224.0f, 82.0f + static_cast<float>(rows > 1 ? rows - 1 : 0) * 20.0f };
+            break;
+        case OverlayStyle::Terminal:
+            spec = { 214.0f, 34.0f + static_cast<float>(rows) * 18.0f };
+            break;
+        case OverlayStyle::Cyber:
+            spec = { 232.0f, 78.0f + static_cast<float>(rows > 1 ? rows - 1 : 0) * 20.0f };
+            break;
+        case OverlayStyle::Mono:
+            spec = { 188.0f, 8.0f + static_cast<float>(rows) * 18.0f };
+            break;
+        case OverlayStyle::Esport:
+            // Одна плотная полоса: строка FPS крупно и остальные показатели следом.
+            spec = { std::max(320.0f, lineWidth + 40.0f), 44.0f };
+            break;
+        case OverlayStyle::Retro:
+            spec = { 226.0f, 34.0f + static_cast<float>(rows) * 19.0f };
+            break;
+        }
+        return spec;
+    }
+
+    void drawShadow(Painter& painter, const Rect& frame, float radius)
+    {
+        const float scale = painter.scale();
+        painter.dropShadow(Rect { frame.left + 2.0f * scale, frame.top + 4.0f * scale,
+                               frame.right + 3.0f * scale, frame.bottom + 5.0f * scale },
+            radius, styleColor(0x000000u), 0.28f);
+    }
+
+    // Плитки «плат»: крупный FPS и строки показателей. Frosted Glass.
+    void drawFrosted(Painter& painter, const OverlayText& text, const Rect& frame, const StyleLook& look)
+    {
+        const float scale = painter.scale();
+        const std::vector<std::wstring> labels = rowLabels(text, look);
+        const std::vector<std::wstring> values = rowValues(text);
+
+        drawShadow(painter, frame, look.radius * scale);
+        painter.plate(frame, look.radius * scale, look.background, 0.35f + 0.6f * painter.opacity());
+        painter.outline(frame, look.radius * scale, look.label, 1.0f, 0.25f);
+
+        const float left = frame.left + look.padding * scale;
+        const float right = frame.right - look.padding * scale;
+
+        if (rowShown(text, 0)) {
+            const Rect chip { left, frame.top + 8.0f * scale, left + 66.0f * scale,
+                frame.top + 26.0f * scale };
+            painter.fillRound(chip, 9.0f * scale, look.label, 0.12f);
+            painter.text(labels[0], chip, TextRole::Tiny, look.label, TextAlign::Center);
+            painter.text(values[0],
+                Rect { left - 2.0f * scale, frame.top + 24.0f * scale, left + 120.0f * scale,
+                    frame.top + 62.0f * scale },
+                TextRole::Display, look.value);
+            painter.text(L"fps",
+                Rect { left + 62.0f * scale, frame.top + 46.0f * scale, left + 96.0f * scale,
+                    frame.top + 60.0f * scale },
+                TextRole::Tiny, look.label);
+            painter.line(
+                left, frame.top + 64.0f * scale, right, frame.top + 64.0f * scale, look.border, 1.0f, 0.22f);
+        }
+
+        float y = frame.top + (rowShown(text, 0) ? 70.0f : 8.0f) * scale;
+        for (std::size_t index = 1; index < text.labels.size(); ++index) {
+            if (!rowShown(text, index)) {
+                continue;
+            }
+            painter.text(labels[index],
+                Rect { left, y, left + look.labelWidth * scale, y + kRowHeight * scale }, TextRole::Tiny,
+                look.label);
+            painter.text(values[index],
+                Rect { right - look.valueWidth * scale, y, right, y + kRowHeight * scale }, TextRole::Small,
+                look.rowPalette[index], TextAlign::Right);
+            y += (18.0f + look.rowGap) * scale;
         }
     }
-    for (std::wstring& label : labels) {
-        label = tracked(label, look.letterSpacing);
-    }
-    return labels;
-}
 
-StyleSpec styleSpec(const OverlaySettings& settings, const OverlayText& text, float lineWidth)
-{
-    const std::size_t rows = std::max<std::size_t>(visibleRows(text), 1);
-    StyleSpec spec;
-    if (settings.layout == OverlayLayout::Line) {
-        const float height = settings.style == OverlayStyle::Rtss ? 24.0f
-            : settings.style == OverlayStyle::Esport                    ? 32.0f
-                                                                       : 30.0f;
-        return StyleSpec{ std::max(lineWidth + 28.0f, 140.0f), height };
-    }
+    // Neon Grid: неоновый акцент, сетка показателей с разделителями и цветом на устройство.
+    void drawNeon(Painter& painter, const OverlayText& text, const Rect& frame, const StyleLook& look)
+    {
+        const float scale = painter.scale();
+        const std::vector<std::wstring> labels = rowLabels(text, look);
+        const std::vector<std::wstring> values = rowValues(text);
 
-    switch (settings.style) {
-    case OverlayStyle::Neon:
-        spec = { 244.0f, 74.0f + static_cast<float>(rows > 1 ? rows - 1 : 0) * 19.0f };
-        break;
-    case OverlayStyle::Rtss:
-        spec = { 196.0f, 6.0f + static_cast<float>(rows) * 19.0f };
-        break;
-    case OverlayStyle::Frosted:
-        spec = { 224.0f, 82.0f + static_cast<float>(rows > 1 ? rows - 1 : 0) * 20.0f };
-        break;
-    case OverlayStyle::Terminal:
-        spec = { 214.0f, 34.0f + static_cast<float>(rows) * 18.0f };
-        break;
-    case OverlayStyle::Cyber:
-        spec = { 232.0f, 78.0f + static_cast<float>(rows > 1 ? rows - 1 : 0) * 20.0f };
-        break;
-    case OverlayStyle::Mono:
-        spec = { 188.0f, 8.0f + static_cast<float>(rows) * 18.0f };
-        break;
-    case OverlayStyle::Esport:
-        // Одна плотная полоса: строка FPS крупно и остальные показатели следом.
-        spec = { std::max(320.0f, lineWidth + 40.0f), 44.0f };
-        break;
-    case OverlayStyle::Retro:
-        spec = { 226.0f, 34.0f + static_cast<float>(rows) * 19.0f };
-        break;
-    }
-    return spec;
-}
+        drawShadow(painter, frame, look.radius * scale);
+        painter.plate(frame, look.radius * scale, look.background, 0.72f * painter.opacity() + 0.18f);
+        painter.outline(Rect { frame.left - 2.0f * scale, frame.top - 2.0f * scale,
+                            frame.right + 2.0f * scale, frame.bottom + 2.0f * scale },
+            (look.radius + 2.0f) * scale, look.accent, 2.0f, 0.18f);
+        painter.outline(frame, look.radius * scale, look.border, 1.0f, 0.35f);
 
-void drawShadow(Painter& painter, const Rect& frame, float radius)
-{
-    const float scale = painter.scale();
-    painter.dropShadow(Rect{ frame.left + 2.0f * scale, frame.top + 4.0f * scale, frame.right + 3.0f * scale,
-                               frame.bottom + 5.0f * scale },
-        radius, styleColor(0x000000u), 0.28f);
-}
+        const float left = frame.left + look.padding * scale;
+        const float right = frame.right - look.padding * scale;
 
-// Плитки «плат»: крупный FPS и строки показателей. Frosted Glass.
-void drawFrosted(Painter& painter, const OverlayText& text, const Rect& frame, const StyleLook& look)
-{
-    const float scale = painter.scale();
-    const std::vector<std::wstring> labels = rowLabels(text, look);
-    const std::vector<std::wstring> values = rowValues(text);
+        if (rowShown(text, 0)) {
+            painter.text(labels[0],
+                Rect { left, frame.top + 8.0f * scale, left + 120.0f * scale, frame.top + 22.0f * scale },
+                TextRole::Tiny, look.accent);
+            painter.text(values[0],
+                Rect { left, frame.top + 20.0f * scale, left + 118.0f * scale, frame.top + 60.0f * scale },
+                TextRole::Display, look.value);
+            painter.text(L"FPS",
+                Rect { left + 84.0f * scale, frame.top + 32.0f * scale, left + 118.0f * scale,
+                    frame.top + 46.0f * scale },
+                TextRole::Tiny, look.accent);
 
-    drawShadow(painter, frame, look.radius * scale);
-    painter.plate(frame, look.radius * scale, look.background, 0.35f + 0.6f * painter.opacity());
-    painter.outline(frame, look.radius * scale, look.label, 1.0f, 0.25f);
-
-    const float left = frame.left + look.padding * scale;
-    const float right = frame.right - look.padding * scale;
-
-    if (rowShown(text, 0)) {
-        const Rect chip{ left, frame.top + 8.0f * scale, left + 66.0f * scale, frame.top + 26.0f * scale };
-        painter.fillRound(chip, 9.0f * scale, look.label, 0.12f);
-        painter.text(labels[0], chip, TextRole::Tiny, look.label, TextAlign::Center);
-        painter.text(values[0], Rect{ left - 2.0f * scale, frame.top + 24.0f * scale, left + 120.0f * scale,
-                                      frame.top + 62.0f * scale },
-            TextRole::Display, look.value);
-        painter.text(L"fps", Rect{ left + 62.0f * scale, frame.top + 46.0f * scale, left + 96.0f * scale,
-                                   frame.top + 60.0f * scale },
-            TextRole::Tiny, look.label);
-        painter.line(left, frame.top + 64.0f * scale, right, frame.top + 64.0f * scale, look.border, 1.0f, 0.22f);
-    }
-
-    float y = frame.top + (rowShown(text, 0) ? 70.0f : 8.0f) * scale;
-    for (std::size_t index = 1; index < text.labels.size(); ++index) {
-        if (!rowShown(text, index)) {
-            continue;
+            painter.line(
+                left, frame.top + 60.0f * scale, right, frame.top + 60.0f * scale, look.accent, 1.0f, 0.35f);
         }
-        painter.text(labels[index], Rect { left, y, left + look.labelWidth * scale, y + kRowHeight * scale },
-            TextRole::Tiny, look.label);
-        painter.text(values[index],
-            Rect { right - look.valueWidth * scale, y, right, y + kRowHeight * scale }, TextRole::Small,
-            look.rowPalette[index], TextAlign::Right);
-        y += (18.0f + look.rowGap) * scale;
-    }
-}
 
-// Neon Grid: неоновый акцент, сетка показателей с разделителями и цветом на устройство.
-void drawNeon(Painter& painter, const OverlayText& text, const Rect& frame, const StyleLook& look)
-{
-    const float scale = painter.scale();
-    const std::vector<std::wstring> labels = rowLabels(text, look);
-    const std::vector<std::wstring> values = rowValues(text);
-
-    drawShadow(painter, frame, look.radius * scale);
-    painter.plate(frame, look.radius * scale, look.background, 0.72f * painter.opacity() + 0.18f);
-    painter.outline(Rect{ frame.left - 2.0f * scale, frame.top - 2.0f * scale, frame.right + 2.0f * scale,
-                            frame.bottom + 2.0f * scale },
-        (look.radius + 2.0f) * scale, look.accent, 2.0f, 0.18f);
-    painter.outline(frame, look.radius * scale, look.border, 1.0f, 0.35f);
-
-    const float left = frame.left + look.padding * scale;
-    const float right = frame.right - look.padding * scale;
-
-    if (rowShown(text, 0)) {
-        painter.text(labels[0], Rect{ left, frame.top + 8.0f * scale, left + 120.0f * scale,
-                                      frame.top + 22.0f * scale },
-            TextRole::Tiny, look.accent);
-        painter.text(values[0], Rect{ left, frame.top + 20.0f * scale, left + 118.0f * scale,
-                                      frame.top + 60.0f * scale },
-            TextRole::Display, look.value);
-        painter.text(L"FPS", Rect{ left + 84.0f * scale, frame.top + 32.0f * scale, left + 118.0f * scale,
-                                   frame.top + 46.0f * scale },
-            TextRole::Tiny, look.accent);
-
-        painter.line(left, frame.top + 60.0f * scale, right, frame.top + 60.0f * scale, look.accent, 1.0f, 0.35f);
-    }
-
-    float y = frame.top + (rowShown(text, 0) ? 64.0f : 8.0f) * scale;
-    for (std::size_t index = 1; index < text.labels.size(); ++index) {
-        if (!rowShown(text, index)) {
-            continue;
+        float y = frame.top + (rowShown(text, 0) ? 64.0f : 8.0f) * scale;
+        for (std::size_t index = 1; index < text.labels.size(); ++index) {
+            if (!rowShown(text, index)) {
+                continue;
+            }
+            painter.fillCircle(left + 2.0f * scale, y + 8.0f * scale, 2.0f * scale, look.rowPalette[index]);
+            painter.text(labels[index],
+                Rect { left + 10.0f * scale, y, left + look.labelWidth * scale, y + kRowHeight * scale },
+                TextRole::Tiny, look.label);
+            painter.text(values[index],
+                Rect { right - look.valueWidth * scale, y, right, y + kRowHeight * scale }, TextRole::Small,
+                look.rowPalette[index], TextAlign::Right);
+            y += (18.0f + look.rowGap) * scale;
         }
-        painter.fillCircle(
-            left + 2.0f * scale, y + 8.0f * scale, 2.0f * scale, look.rowPalette[index]);
-        painter.text(labels[index],
-            Rect { left + 10.0f * scale, y, left + look.labelWidth * scale, y + kRowHeight * scale },
-            TextRole::Tiny, look.label);
-        painter.text(values[index],
-            Rect { right - look.valueWidth * scale, y, right, y + kRowHeight * scale }, TextRole::Small,
-            look.rowPalette[index], TextAlign::Right);
-        y += (18.0f + look.rowGap) * scale;
     }
-}
 
-// RTSS Classic: без фона, каждая строка «подпись значение», моноширинный.
-void drawRtss(Painter& painter, const OverlayText& text, const Rect& frame, const StyleLook& look)
-{
-    const float scale = painter.scale();
-    const std::vector<std::wstring> labels = rowLabels(text, look);
-    const std::vector<std::wstring> values = rowValues(text);
+    // RTSS Classic: без фона, каждая строка «подпись значение», моноширинный.
+    void drawRtss(Painter& painter, const OverlayText& text, const Rect& frame, const StyleLook& look)
+    {
+        const float scale = painter.scale();
+        const std::vector<std::wstring> labels = rowLabels(text, look);
+        const std::vector<std::wstring> values = rowValues(text);
 
-    painter.plate(frame, look.radius * scale, look.background, 0.75f);
-    painter.outline(frame, look.radius * scale, look.border, 1.0f, 0.6f);
+        painter.plate(frame, look.radius * scale, look.background, 0.75f);
+        painter.outline(frame, look.radius * scale, look.border, 1.0f, 0.6f);
 
-    float y = frame.top + 2.0f * scale;
-    for (std::size_t index = 0; index < text.labels.size(); ++index) {
-        if (!rowShown(text, index)) {
-            continue;
+        float y = frame.top + 2.0f * scale;
+        for (std::size_t index = 0; index < text.labels.size(); ++index) {
+            if (!rowShown(text, index)) {
+                continue;
+            }
+            painter.text(labels[index],
+                Rect { frame.left, y, frame.left + look.padding * scale + look.labelWidth * scale,
+                    y + kRowHeight * scale },
+                TextRole::Mono, look.label);
+            painter.text(values[index],
+                Rect { frame.left + look.padding * scale + look.labelWidth * scale, y, frame.right,
+                    y + kRowHeight * scale },
+                TextRole::Mono, look.value);
+            y += 19.0f * scale;
         }
-        painter.text(labels[index],
-            Rect { frame.left, y, frame.left + look.padding * scale + look.labelWidth * scale,
-                y + kRowHeight * scale },
-            TextRole::Mono, look.label);
-        painter.text(values[index],
-            Rect { frame.left + look.padding * scale + look.labelWidth * scale, y, frame.right,
-                y + kRowHeight * scale },
-            TextRole::Mono, look.value);
-        y += 19.0f * scale;
     }
-}
 
-// Terminal: чёрный бокс, янтарная рамка, строки с приглашением «>».
-void drawTerminal(Painter& painter, const OverlayText& text, const Rect& frame, const StyleLook& look)
-{
-    const float scale = painter.scale();
-    const std::vector<std::wstring> labels = rowLabels(text, look);
-    const std::vector<std::wstring> values = rowValues(text);
+    // Terminal: чёрный бокс, янтарная рамка, строки с приглашением «>».
+    void drawTerminal(Painter& painter, const OverlayText& text, const Rect& frame, const StyleLook& look)
+    {
+        const float scale = painter.scale();
+        const std::vector<std::wstring> labels = rowLabels(text, look);
+        const std::vector<std::wstring> values = rowValues(text);
 
-    painter.plate(frame, look.radius * scale, look.background, 0.86f * painter.opacity() + 0.12f);
-    painter.outline(frame, look.radius * scale, look.border, 1.0f, 0.9f);
+        painter.plate(frame, look.radius * scale, look.background, 0.86f * painter.opacity() + 0.12f);
+        painter.outline(frame, look.radius * scale, look.border, 1.0f, 0.9f);
 
-    const float left = frame.left + look.padding * scale;
-    const float right = frame.right - look.padding * scale;
+        const float left = frame.left + look.padding * scale;
+        const float right = frame.right - look.padding * scale;
 
-    painter.text(tracked(L"YAWAFPSHUB", look.letterSpacing),
-        Rect{ left, frame.top + 6.0f * scale, right, frame.top + 20.0f * scale }, TextRole::Mono, look.accent);
-    painter.line(left, frame.top + 24.0f * scale, right, frame.top + 24.0f * scale, look.accent, 1.0f, 0.35f);
+        painter.text(tracked(L"YAWAFPSHUB", look.letterSpacing),
+            Rect { left, frame.top + 6.0f * scale, right, frame.top + 20.0f * scale }, TextRole::Mono,
+            look.accent);
+        painter.line(
+            left, frame.top + 24.0f * scale, right, frame.top + 24.0f * scale, look.accent, 1.0f, 0.35f);
 
-    float y = frame.top + 28.0f * scale;
-    for (std::size_t index = 0; index < text.labels.size(); ++index) {
-        if (!rowShown(text, index)) {
-            continue;
+        float y = frame.top + 28.0f * scale;
+        for (std::size_t index = 0; index < text.labels.size(); ++index) {
+            if (!rowShown(text, index)) {
+                continue;
+            }
+            painter.text(L"> " + labels[index],
+                Rect { left, y, left + look.labelWidth * scale, y + kRowHeight * scale }, TextRole::Mono,
+                look.label);
+            painter.text(tracked(values[index], look.letterSpacing),
+                Rect { right - look.valueWidth * scale, y, right, y + kRowHeight * scale }, TextRole::Mono,
+                look.rowPalette[index], TextAlign::Right);
+            y += (18.0f + look.rowGap) * scale;
         }
-        painter.text(L"> " + labels[index],
-            Rect { left, y, left + look.labelWidth * scale, y + kRowHeight * scale }, TextRole::Mono,
+    }
+
+    // Cyber Magenta: угловые скобки, широкий трекинг, пурпурная подсветка.
+    void drawCyber(Painter& painter, const OverlayText& text, const Rect& frame, const StyleLook& look)
+    {
+        const float scale = painter.scale();
+        const std::vector<std::wstring> labels = rowLabels(text, look);
+        const std::vector<std::wstring> values = rowValues(text);
+
+        drawShadow(painter, frame, look.radius * scale);
+        painter.plate(frame, look.radius * scale, look.background, 0.78f * painter.opacity() + 0.14f);
+        painter.outline(frame, look.radius * scale, look.border, 1.2f, 0.85f);
+
+        const float corner = 12.0f * scale;
+        const float inset = 3.0f * scale;
+        const Rect brackets { frame.left + inset, frame.top + inset, frame.right - inset,
+            frame.bottom - inset };
+        painter.line(brackets.left, brackets.top, brackets.left + corner, brackets.top, look.accent, 2.0f);
+        painter.line(brackets.left, brackets.top, brackets.left, brackets.top + corner, look.accent, 2.0f);
+        painter.line(
+            brackets.right - corner, brackets.bottom, brackets.right, brackets.bottom, look.accent, 2.0f);
+        painter.line(
+            brackets.right, brackets.bottom - corner, brackets.right, brackets.bottom, look.accent, 2.0f);
+
+        const float left = frame.left + look.padding * scale;
+        const float right = frame.right - look.padding * scale;
+
+        if (rowShown(text, 0)) {
+            painter.text(labels[0],
+                Rect { left, frame.top + 8.0f * scale, left + 140.0f * scale, frame.top + 22.0f * scale },
+                TextRole::Tiny, look.accent);
+            painter.text(values[0],
+                Rect { left, frame.top + 20.0f * scale, left + 124.0f * scale, frame.top + 60.0f * scale },
+                TextRole::Display, look.value);
+            painter.line(
+                left, frame.top + 62.0f * scale, right, frame.top + 62.0f * scale, look.border, 1.0f, 0.35f);
+        }
+
+        float y = frame.top + (rowShown(text, 0) ? 68.0f : 10.0f) * scale;
+        for (std::size_t index = 1; index < text.labels.size(); ++index) {
+            if (!rowShown(text, index)) {
+                continue;
+            }
+            painter.text(labels[index],
+                Rect { left, y, left + look.labelWidth * scale, y + kRowHeight * scale }, TextRole::Tiny,
+                look.label);
+            painter.text(values[index],
+                Rect { right - look.valueWidth * scale, y, right, y + kRowHeight * scale }, TextRole::Small,
+                look.rowPalette[index], TextAlign::Right);
+            y += (18.0f + look.rowGap) * scale;
+        }
+    }
+
+    // Minimal Mono: только текст, прозрачная плашка, выравненные колонки.
+    void drawMono(Painter& painter, const OverlayText& text, const Rect& frame, const StyleLook& look)
+    {
+        const float scale = painter.scale();
+        const std::vector<std::wstring> labels = rowLabels(text, look);
+        const std::vector<std::wstring> values = rowValues(text);
+
+        painter.plate(frame, look.radius * scale, look.background, 0.28f * painter.opacity() + 0.10f);
+
+        float y = frame.top + 6.0f * scale;
+        for (std::size_t index = 0; index < text.labels.size(); ++index) {
+            if (!rowShown(text, index)) {
+                continue;
+            }
+            painter.text(labels[index],
+                Rect { frame.left + look.padding * scale, y, frame.left + 86.0f * scale,
+                    y + kRowHeight * scale },
+                TextRole::Tiny, look.label);
+            painter.text(values[index],
+                Rect { frame.right - look.padding * scale - look.valueWidth * scale, y,
+                    frame.right - look.padding * scale, y + kRowHeight * scale },
+                TextRole::Small, look.rowPalette[index], TextAlign::Right);
+            y += (18.0f + look.rowGap) * scale;
+        }
+    }
+
+    // Esport Bar: одна плотная полоса с цветными значениями и разделителями.
+    void drawEsport(Painter& painter, const OverlayText& text, const Rect& frame, const StyleLook& look)
+    {
+        const float scale = painter.scale();
+        const std::vector<std::wstring> labels = rowLabels(text, look);
+        const std::vector<std::wstring> values = rowValues(text);
+
+        drawShadow(painter, frame, look.radius * scale);
+        painter.plate(frame, look.radius * scale, look.background, 0.9f * painter.opacity() + 0.10f);
+        painter.outline(frame, look.radius * scale, look.border, 1.0f, 0.9f);
+
+        float x = frame.left + look.padding * scale;
+        const float top = frame.top + look.padding * scale;
+        const float bottom = frame.bottom - look.padding * scale;
+
+        for (std::size_t index = 0; index < text.labels.size(); ++index) {
+            if (!rowShown(text, index)) {
+                continue;
+            }
+
+            const bool big = index == 0;
+            const float labelWidth = painter.measure(labels[index], TextRole::Tiny);
+            const float valueWidth = big ? painter.measure(values[index], TextRole::Value)
+                                         : painter.measure(values[index], TextRole::Small);
+            const float cellWidth = std::max(labelWidth, valueWidth) + 10.0f * scale;
+
+            painter.text(labels[index], Rect { x, top, x + cellWidth, top + 12.0f * scale }, TextRole::Tiny,
+                look.label);
+            painter.text(values[index], Rect { x, top + (big ? 8.0f : 12.0f) * scale, x + cellWidth, bottom },
+                big ? TextRole::Value : TextRole::Small, look.rowPalette[index]);
+            x += cellWidth;
+
+            if (look.separators) {
+                painter.line(x, top + 2.0f * scale, x, bottom - 2.0f * scale, look.border, 1.0f, 0.8f);
+                x += 9.0f * scale;
+            } else {
+                x += 6.0f * scale;
+            }
+        }
+    }
+
+    // Retro CRT: фосфорный зелёный, развёртка и лёгкое свечение строк.
+    void drawRetro(Painter& painter, const OverlayText& text, const Rect& frame, const StyleLook& look)
+    {
+        const float scale = painter.scale();
+        const std::vector<std::wstring> labels = rowLabels(text, look);
+        const std::vector<std::wstring> values = rowValues(text);
+
+        painter.plate(frame, look.radius * scale, look.background, 0.82f * painter.opacity() + 0.18f);
+        painter.outline(frame, look.radius * scale, look.border, 1.0f, 0.8f);
+        painter.outline(Rect { frame.left + 2.0f * scale, frame.top + 2.0f * scale,
+                            frame.right - 2.0f * scale, frame.bottom - 2.0f * scale },
+            std::max(look.radius - 1.0f, 0.0f) * scale, look.accent, 1.0f, 0.18f);
+
+        // Строки развёртки: тонкие линии через каждые 4 пикселя.
+        for (float y = frame.top + 3.0f * scale; y < frame.bottom - 2.0f * scale; y += 4.0f * scale) {
+            painter.line(
+                frame.left + 2.0f * scale, y, frame.right - 2.0f * scale, y, look.accent, 1.0f, 0.06f);
+        }
+
+        const float left = frame.left + look.padding * scale;
+        const float right = frame.right - look.padding * scale;
+
+        painter.text(tracked(L"YAWAFPSHUB · CRT", look.letterSpacing),
+            Rect { left, frame.top + 6.0f * scale, right, frame.top + 20.0f * scale }, TextRole::Mono,
             look.label);
-        painter.text(tracked(values[index], look.letterSpacing),
-            Rect { right - look.valueWidth * scale, y, right, y + kRowHeight * scale }, TextRole::Mono,
-            look.rowPalette[index], TextAlign::Right);
-        y += (18.0f + look.rowGap) * scale;
-    }
-}
+        painter.line(
+            left, frame.top + 24.0f * scale, right, frame.top + 24.0f * scale, look.accent, 1.0f, 0.25f);
 
-// Cyber Magenta: угловые скобки, широкий трекинг, пурпурная подсветка.
-void drawCyber(Painter& painter, const OverlayText& text, const Rect& frame, const StyleLook& look)
-{
-    const float scale = painter.scale();
-    const std::vector<std::wstring> labels = rowLabels(text, look);
-    const std::vector<std::wstring> values = rowValues(text);
-
-    drawShadow(painter, frame, look.radius * scale);
-    painter.plate(frame, look.radius * scale, look.background, 0.78f * painter.opacity() + 0.14f);
-    painter.outline(frame, look.radius * scale, look.border, 1.2f, 0.85f);
-
-    const float corner = 12.0f * scale;
-    const float inset = 3.0f * scale;
-    const Rect brackets{ frame.left + inset, frame.top + inset, frame.right - inset, frame.bottom - inset };
-    painter.line(brackets.left, brackets.top, brackets.left + corner, brackets.top, look.accent, 2.0f);
-    painter.line(brackets.left, brackets.top, brackets.left, brackets.top + corner, look.accent, 2.0f);
-    painter.line(brackets.right - corner, brackets.bottom, brackets.right, brackets.bottom, look.accent, 2.0f);
-    painter.line(brackets.right, brackets.bottom - corner, brackets.right, brackets.bottom, look.accent, 2.0f);
-
-    const float left = frame.left + look.padding * scale;
-    const float right = frame.right - look.padding * scale;
-
-    if (rowShown(text, 0)) {
-        painter.text(labels[0], Rect{ left, frame.top + 8.0f * scale, left + 140.0f * scale,
-                                      frame.top + 22.0f * scale },
-            TextRole::Tiny, look.accent);
-        painter.text(values[0], Rect{ left, frame.top + 20.0f * scale, left + 124.0f * scale,
-                                      frame.top + 60.0f * scale },
-            TextRole::Display, look.value);
-        painter.line(left, frame.top + 62.0f * scale, right, frame.top + 62.0f * scale, look.border, 1.0f, 0.35f);
-    }
-
-    float y = frame.top + (rowShown(text, 0) ? 68.0f : 10.0f) * scale;
-    for (std::size_t index = 1; index < text.labels.size(); ++index) {
-        if (!rowShown(text, index)) {
-            continue;
-        }
-        painter.text(labels[index], Rect { left, y, left + look.labelWidth * scale, y + kRowHeight * scale },
-            TextRole::Tiny, look.label);
-        painter.text(values[index],
-            Rect { right - look.valueWidth * scale, y, right, y + kRowHeight * scale }, TextRole::Small,
-            look.rowPalette[index], TextAlign::Right);
-        y += (18.0f + look.rowGap) * scale;
-    }
-}
-
-// Minimal Mono: только текст, прозрачная плашка, выравненные колонки.
-void drawMono(Painter& painter, const OverlayText& text, const Rect& frame, const StyleLook& look)
-{
-    const float scale = painter.scale();
-    const std::vector<std::wstring> labels = rowLabels(text, look);
-    const std::vector<std::wstring> values = rowValues(text);
-
-    painter.plate(frame, look.radius * scale, look.background, 0.28f * painter.opacity() + 0.10f);
-
-    float y = frame.top + 6.0f * scale;
-    for (std::size_t index = 0; index < text.labels.size(); ++index) {
-        if (!rowShown(text, index)) {
-            continue;
-        }
-        painter.text(labels[index], Rect{ frame.left + look.padding * scale, y, frame.left + 86.0f * scale,
-                                          y + kRowHeight * scale },
-            TextRole::Tiny, look.label);
-        painter.text(values[index],
-            Rect { frame.right - look.padding * scale - look.valueWidth * scale, y,
-                frame.right - look.padding * scale, y + kRowHeight * scale },
-            TextRole::Small, look.rowPalette[index], TextAlign::Right);
-        y += (18.0f + look.rowGap) * scale;
-    }
-}
-
-// Esport Bar: одна плотная полоса с цветными значениями и разделителями.
-void drawEsport(Painter& painter, const OverlayText& text, const Rect& frame, const StyleLook& look)
-{
-    const float scale = painter.scale();
-    const std::vector<std::wstring> labels = rowLabels(text, look);
-    const std::vector<std::wstring> values = rowValues(text);
-
-    drawShadow(painter, frame, look.radius * scale);
-    painter.plate(frame, look.radius * scale, look.background, 0.9f * painter.opacity() + 0.10f);
-    painter.outline(frame, look.radius * scale, look.border, 1.0f, 0.9f);
-
-    float x = frame.left + look.padding * scale;
-    const float top = frame.top + look.padding * scale;
-    const float bottom = frame.bottom - look.padding * scale;
-
-    for (std::size_t index = 0; index < text.labels.size(); ++index) {
-        if (!rowShown(text, index)) {
-            continue;
-        }
-
-        const bool big = index == 0;
-        const float labelWidth = painter.measure(labels[index], TextRole::Tiny);
-        const float valueWidth = big ? painter.measure(values[index], TextRole::Value)
-                                     : painter.measure(values[index], TextRole::Small);
-        const float cellWidth = std::max(labelWidth, valueWidth) + 10.0f * scale;
-
-        painter.text(labels[index], Rect{ x, top, x + cellWidth, top + 12.0f * scale }, TextRole::Tiny,
-            look.label);
-        painter.text(values[index], Rect { x, top + (big ? 8.0f : 12.0f) * scale, x + cellWidth, bottom },
-            big ? TextRole::Value : TextRole::Small, look.rowPalette[index]);
-        x += cellWidth;
-
-        if (look.separators) {
-            painter.line(x, top + 2.0f * scale, x, bottom - 2.0f * scale, look.border, 1.0f, 0.8f);
-            x += 9.0f * scale;
-        } else {
-            x += 6.0f * scale;
+        float y = frame.top + 28.0f * scale;
+        for (std::size_t index = 0; index < text.labels.size(); ++index) {
+            if (!rowShown(text, index)) {
+                continue;
+            }
+            painter.text(labels[index],
+                Rect { left, y, left + look.labelWidth * scale, y + kRowHeight * scale }, TextRole::Mono,
+                look.label);
+            painter.text(tracked(values[index], look.letterSpacing),
+                Rect { right - look.valueWidth * scale, y, right, y + kRowHeight * scale }, TextRole::Mono,
+                look.rowPalette[index], TextAlign::Right);
+            y += (18.0f + look.rowGap) * scale;
         }
     }
-}
 
-// Retro CRT: фосфорный зелёный, развёртка и лёгкое свечение строк.
-void drawRetro(Painter& painter, const OverlayText& text, const Rect& frame, const StyleLook& look)
-{
-    const float scale = painter.scale();
-    const std::vector<std::wstring> labels = rowLabels(text, look);
-    const std::vector<std::wstring> values = rowValues(text);
-
-    painter.plate(frame, look.radius * scale, look.background, 0.82f * painter.opacity() + 0.18f);
-    painter.outline(frame, look.radius * scale, look.border, 1.0f, 0.8f);
-    painter.outline(Rect{ frame.left + 2.0f * scale, frame.top + 2.0f * scale, frame.right - 2.0f * scale,
-                            frame.bottom - 2.0f * scale },
-        std::max(look.radius - 1.0f, 0.0f) * scale, look.accent, 1.0f, 0.18f);
-
-    // Строки развёртки: тонкие линии через каждые 4 пикселя.
-    for (float y = frame.top + 3.0f * scale; y < frame.bottom - 2.0f * scale; y += 4.0f * scale) {
-        painter.line(frame.left + 2.0f * scale, y, frame.right - 2.0f * scale, y, look.accent, 1.0f, 0.06f);
-    }
-
-    const float left = frame.left + look.padding * scale;
-    const float right = frame.right - look.padding * scale;
-
-    painter.text(tracked(L"YAWAFPSHUB · CRT", look.letterSpacing),
-        Rect{ left, frame.top + 6.0f * scale, right, frame.top + 20.0f * scale }, TextRole::Mono, look.label);
-    painter.line(left, frame.top + 24.0f * scale, right, frame.top + 24.0f * scale, look.accent, 1.0f, 0.25f);
-
-    float y = frame.top + 28.0f * scale;
-    for (std::size_t index = 0; index < text.labels.size(); ++index) {
-        if (!rowShown(text, index)) {
-            continue;
+    // Шкала заполняется только для реально прочитанной нагрузки CPU/GPU. Для FPS,
+    // температур и неизвестных значений остаётся нейтральная дорожка без выдуманного процента.
+    void drawGauge(Painter& painter, const OverlayText& text, const Rect& frame, const StyleLook& look)
+    {
+        const float scale = painter.scale();
+        const float left = frame.left + look.padding * scale;
+        const float right = frame.right - look.padding * scale;
+        const auto labels = rowLabels(text, look);
+        painter.plate(frame, look.radius * scale, look.background, 0.95f);
+        painter.outline(frame, look.radius * scale, look.border, 1.0f);
+        float y = frame.top + look.padding * scale;
+        for (std::size_t index = 0; index < text.labels.size(); ++index) {
+            if (!rowShown(text, index)) {
+                continue;
+            }
+            painter.text(labels[index], Rect { left, y, right - 90.0f * scale, y + 17.0f * scale },
+                TextRole::Small, look.label);
+            painter.text(text.values[index], Rect { right - 90.0f * scale, y, right, y + 17.0f * scale },
+                TextRole::Small, look.rowPalette[index], TextAlign::Right);
+            const float barTop = y + 20.0f * scale;
+            const Rect track { left, barTop, right, barTop + 3.0f * scale };
+            painter.fillRound(track, 1.5f * scale, look.border, 0.35f);
+            if (index < text.gaugeFill.size() && text.gaugeFill[index] >= 0.0f) {
+                const float end = left + (right - left) * text.gaugeFill[index];
+                if (end > left) {
+                    painter.fillRound(
+                        Rect { left, barTop, end, track.bottom }, 1.5f * scale, look.rowPalette[index], 0.9f);
+                }
+            }
+            y += (30.0f + look.rowGap) * scale;
         }
-        painter.text(labels[index], Rect { left, y, left + look.labelWidth * scale, y + kRowHeight * scale },
-            TextRole::Mono, look.label);
-        painter.text(tracked(values[index], look.letterSpacing),
-            Rect { right - look.valueWidth * scale, y, right, y + kRowHeight * scale }, TextRole::Mono,
-            look.rowPalette[index], TextAlign::Right);
-        y += (18.0f + look.rowGap) * scale;
     }
-}
 
-void drawInline(Painter& painter, const OverlaySettings& settings, const OverlayText& text, const Rect& frame,
-    const StyleLook& look)
-{
-    const float scale = painter.scale();
-    const Rect inner = Rect{ frame.left + look.padding * scale, frame.top, frame.right - look.padding * scale,
-        frame.bottom };
-    const TextRole role = look.mono ? TextRole::Mono : TextRole::Small;
+    void drawInline(Painter& painter, const OverlaySettings& settings, const OverlayText& text,
+        const Rect& frame, const StyleLook& look)
+    {
+        const float scale = painter.scale();
+        const Rect inner = Rect { frame.left + look.padding * scale, frame.top,
+            frame.right - look.padding * scale, frame.bottom };
+        const TextRole role = look.mono ? TextRole::Mono : TextRole::Small;
 
-    if (settings.style != OverlayStyle::Rtss) {
-        painter.plate(frame, look.radius * scale, look.background, look.shadow ? 0.72f : 0.35f);
-        painter.outline(frame, look.radius * scale, look.border,
-            settings.style == OverlayStyle::Neon ? 1.4f : 1.0f, 0.85f);
+        if (settings.style != OverlayStyle::Rtss || settings.surfaceActive) {
+            painter.plate(frame, look.radius * scale, look.background, look.shadow ? 0.72f : 0.35f);
+            painter.outline(frame, look.radius * scale, look.border,
+                settings.style == OverlayStyle::Neon ? 1.4f : 1.0f, 0.85f);
+        }
+        float x = inner.left;
+        const float separator = painter.measure(tracked(L"   ", look.letterSpacing), role);
+        for (std::size_t index = 0; index < text.labels.size(); ++index) {
+            if (!rowShown(text, index)) {
+                continue;
+            }
+            const std::wstring label = look.uppercase ? upperCase(text.labels[index]) : text.labels[index];
+            const std::wstring segment = tracked(label + L" " + text.values[index], look.letterSpacing);
+            const float width = painter.measure(segment, role);
+            const auto group = overlayColorGroup(text.ids[index]);
+            const bool customized = settings.metricColors[static_cast<std::size_t>(text.ids[index])] >= 0
+                || settings.metricRgba[static_cast<std::size_t>(text.ids[index])] || settings.valueColor >= 0
+                || settings.valueRgba || settings.rowColors[index % kLabelCount] >= 0
+                || (group && settings.rowRgba[*group]);
+            painter.text(segment, Rect { x, inner.top, x + width + 4.0f, inner.bottom }, role,
+                settings.style == OverlayStyle::Rtss && !customized ? look.accent : look.rowPalette[index]);
+            x += width + separator;
+        }
     }
-    float x = inner.left;
-    const float separator = painter.measure(tracked(L"   ", look.letterSpacing), role);
-    for (std::size_t index = 0; index < text.labels.size(); ++index) {
-        if (!rowShown(text, index)) { continue; }
-        const std::wstring label = look.uppercase ? upperCase(text.labels[index]) : text.labels[index];
-        const std::wstring segment = tracked(label + L" " + text.values[index], look.letterSpacing);
-        const float width = painter.measure(segment, role);
-        const bool customized = settings.metricColors[static_cast<std::size_t>(text.ids[index])] >= 0
-            || settings.valueColor >= 0 || settings.rowColors[index % kLabelCount] >= 0;
-        painter.text(segment, Rect{ x, inner.top, x + width + 4.0f, inner.bottom }, role,
-            settings.style == OverlayStyle::Rtss && !customized ? look.accent : look.rowPalette[index]);
-        x += width + separator;
-    }
-}
 
 } // namespace
 
@@ -947,6 +1019,11 @@ OverlayText makeOverlayText(const OverlaySettings& settings, const MetricStore& 
         text.values.push_back(wideLabel(row.value));
         text.visible.push_back(true);
         text.ids.push_back(row.id);
+        const bool percentage = row.id == MetricId::CpuLoad || row.id == MetricId::GpuLoad;
+        const double value = percentage && store.hasValue(row.id) ? store.value(row.id) : -1.0;
+        text.gaugeFill.push_back(percentage && std::isfinite(value) && value >= 0.0
+                ? static_cast<float>(std::clamp(value / 100.0, 0.0, 1.0))
+                : -1.0f);
     }
     return text;
 }
@@ -955,12 +1032,20 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
     const OverlayText& text, const Rect& bounds, float scale, const OverlayFormats& formats)
 {
     if (target == nullptr || visibleRows(text) == 0) {
-        return Rect{};
+        return Rect { };
     }
 
     const float opacity = static_cast<float>(std::clamp(settings.opacityPercent, 0, 100)) / 100.0f;
     const StyleLook preset = lookFor(settings.style);
     StyleLook look = preset;
+    if (settings.surfaceActive && settings.style == OverlayStyle::Rtss) {
+        // Старый RTSS прозрачен; новая ось поверхности может запросить подложку.
+        look.background = styleColor(0x101820u);
+        look.border = look.accent;
+    }
+    if (settings.surfaceActive && settings.surface == OverlaySurface::Plate) {
+        look.background.a = 1.0f;
+    }
     // Ручные подстройки: отступы, интервал, цвета и типографика. -1 — как в пресете.
     if (settings.paddingPx >= 0) {
         look.padding = static_cast<float>(settings.paddingPx);
@@ -970,6 +1055,8 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
     }
     const std::array<Color, kOverlayColorCount> palette = overlayColorPalette();
     const auto pickColor = [&palette](int index) { return palette[static_cast<std::size_t>(index)]; };
+    const auto customColor
+        = [](std::uint32_t rgba) { return fromRgba((rgba >> 8) | ((rgba & 0xFFu) << 24)); };
     if (settings.valueColor >= 0 && settings.valueColor < kOverlayColorCount) {
         look.value = pickColor(settings.valueColor);
     }
@@ -979,23 +1066,43 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
     if (settings.accentColor >= 0 && settings.accentColor < kOverlayColorCount) {
         look.accent = pickColor(settings.accentColor);
     }
+    if (settings.valueRgba)
+        look.value = customColor(*settings.valueRgba);
+    if (settings.labelRgba)
+        look.label = customColor(*settings.labelRgba);
+    if (settings.accentRgba)
+        look.accent = customColor(*settings.accentRgba);
     // Цвет каждой строки: в демо и в пресетах строки раскрашены по-разному.
     for (std::size_t index = 0; index < kLabelCount; ++index) {
         const int color = settings.rowColors[index];
         if (color >= 0 && color < kOverlayColorCount) {
             look.palette[index] = pickColor(color);
         }
+        if (settings.rowRgba[index])
+            look.palette[index] = customColor(*settings.rowRgba[index]);
     }
     for (std::size_t index = 0; index < text.ids.size() && index < kMetricCount; ++index) {
         const int metric = settings.metricColors[static_cast<std::size_t>(text.ids[index])];
         const int row = settings.rowColors[index % kLabelCount];
-        look.rowPalette[index] = metric >= 0 && metric < kOverlayColorCount ? pickColor(metric)
-            : row >= 0 && row < kOverlayColorCount ? pickColor(row)
+        const auto& exact = settings.metricRgba[static_cast<std::size_t>(text.ids[index])];
+        const auto groupIndex = overlayColorGroup(text.ids[index]);
+        const auto group = groupIndex ? settings.rowRgba[*groupIndex] : std::nullopt;
+        look.rowPalette[index] = exact                   ? customColor(*exact)
+            : metric >= 0 && metric < kOverlayColorCount ? pickColor(metric)
+            : group                                      ? customColor(*group)
+            : row >= 0 && row < kOverlayColorCount       ? pickColor(row)
+            : settings.valueRgba                         ? customColor(*settings.valueRgba)
             : settings.valueColor >= 0 && settings.valueColor < kOverlayColorCount
-                ? pickColor(settings.valueColor) : look.palette[index % kLabelCount];
+            ? pickColor(settings.valueColor)
+            : look.palette[index % kLabelCount];
     }
-    if (!text.ids.empty() && settings.metricColors[static_cast<std::size_t>(text.ids[0])] >= 0) {
-        look.value = look.rowPalette[0];
+    if (!text.ids.empty()) {
+        const auto group = overlayColorGroup(text.ids[0]);
+        if (settings.metricColors[static_cast<std::size_t>(text.ids[0])] >= 0
+            || settings.metricRgba[static_cast<std::size_t>(text.ids[0])]
+            || (group && settings.rowRgba[*group])) {
+            look.value = look.rowPalette[0];
+        }
     }
     // Регистр и разделители: -1 — из стиля, иначе явное значение пользователя.
     if (settings.uppercaseMode >= 0) {
@@ -1017,7 +1124,7 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
 
     // Шрифты масштабируются вместе с рамкой, а семейство, начертание и обводка берутся
     // из редактора текста: иначе «Масштаб» растягивал только подложку.
-    std::array<IDWriteTextFormat*, 4> owned{};
+    std::array<IDWriteTextFormat*, 4> owned { };
     OverlayFormats scaled = formats;
     const bool customFont = settings.fontFamily != 0 || settings.fontBold || settings.fontItalic;
     const float textScale = (scale > 0.0f ? scale : 1.0f) * textFactor;
@@ -1028,14 +1135,14 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
             styledFormat(formats.factory, formats.smallText, factor, settings),
             styledFormat(formats.factory, formats.mono, factor, settings) };
         if (owned[0] != nullptr && owned[1] != nullptr && owned[2] != nullptr && owned[3] != nullptr) {
-            scaled = OverlayFormats{ formats.factory, owned[0], owned[1], owned[2], owned[3] };
+            scaled = OverlayFormats { formats.factory, owned[0], owned[1], owned[2], owned[3] };
         } else {
             for (IDWriteTextFormat* format : owned) {
                 if (format != nullptr) {
                     format->Release();
                 }
             }
-            owned = {};
+            owned = { };
             scaled = formats;
         }
     }
@@ -1138,17 +1245,21 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
     const float fittedHeight = height * fit;
 
     const float margin = kMargin * scale;
-    const bool isLeft = settings.position == OverlayPosition::TopLeft
-        || settings.position == OverlayPosition::BottomLeft;
-    const bool isTop = settings.position == OverlayPosition::TopLeft
-        || settings.position == OverlayPosition::TopRight;
+    const bool isLeft
+        = settings.position == OverlayPosition::TopLeft || settings.position == OverlayPosition::BottomLeft;
+    const bool isTop
+        = settings.position == OverlayPosition::TopLeft || settings.position == OverlayPosition::TopRight;
 
     // Смещение — в экранных пикселях и не зависит от масштаба: раньше смена масштаба
     // сдвигала оверлей из-за умножения сдвига на коэффициент.
-    float left = isLeft ? bounds.left + margin + static_cast<float>(settings.offsetX)
-                        : bounds.right - fittedWidth - margin + static_cast<float>(settings.offsetX);
-    float top = isTop ? bounds.top + margin + static_cast<float>(settings.offsetY)
-                      : bounds.bottom - fittedHeight - margin + static_cast<float>(settings.offsetY);
+    float left = settings.anchorMode == OverlayAnchorMode::Free
+        ? bounds.left + static_cast<float>(settings.originX)
+        : isLeft ? bounds.left + margin + static_cast<float>(settings.offsetX)
+                 : bounds.right - fittedWidth - margin + static_cast<float>(settings.offsetX);
+    float top = settings.anchorMode == OverlayAnchorMode::Free
+        ? bounds.top + static_cast<float>(settings.originY)
+        : isTop ? bounds.top + margin + static_cast<float>(settings.offsetY)
+                : bounds.bottom - fittedHeight - margin + static_cast<float>(settings.offsetY);
 
     left = std::clamp(left, bounds.left, std::max(bounds.left, bounds.right - fittedWidth));
     top = std::clamp(top, bounds.top, std::max(bounds.top, bounds.bottom - fittedHeight));
@@ -1156,7 +1267,7 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
     D2D1::Matrix3x2F previousTransform;
     target->GetTransform(&previousTransform);
     target->SetTransform(D2D1::Matrix3x2F::Scale(fit, fit, D2D1::Point2F(left, top)) * previousTransform);
-    const Rect frame{ left, top, left + width, top + height };
+    const Rect frame { left, top, left + width, top + height };
     Painter painter(target, theme, scaled, scale, opacity, chrome, settings.textOutline);
     painter.setBackgroundOpacity(backgroundOpacity);
 
@@ -1189,6 +1300,8 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
         }
     } else if (settings.layout == OverlayLayout::Line) {
         drawInline(painter, settings, text, frame, look);
+    } else if (settings.layout == OverlayLayout::Gauge) {
+        drawGauge(painter, text, frame, look);
     } else {
         switch (settings.style) {
         case OverlayStyle::Neon:

@@ -1,5 +1,7 @@
 #include "platform/overlay_window.h"
+#include "platform/overlay_monitor.h"
 #include "platform/win_util.h"
+#include "ui/canvas_transform.h"
 #include "ui/layout.h"
 
 #include <d2d1helper.h>
@@ -247,6 +249,15 @@ void OverlayWindow::setAccent(Accent accent)
     repaint();
 }
 
+void OverlayWindow::setGameMonitor(const RECT* monitor)
+{
+    if (monitor == nullptr || monitor->right <= monitor->left || monitor->bottom <= monitor->top) {
+        m_gameMonitor.reset();
+    } else {
+        m_gameMonitor = *monitor;
+    }
+}
+
 void OverlayWindow::setSettings(const OverlaySettings& settings)
 {
     // Плавный переход считаем от текущего видимого состояния, а не от нового:
@@ -264,7 +275,10 @@ void OverlayWindow::setSettings(const OverlaySettings& settings)
         || settings.scalePercent != m_settings.scalePercent
         || settings.opacityPercent != m_settings.opacityPercent
         || settings.backgroundOpacityPercent != m_settings.backgroundOpacityPercent;
-    const bool movedOnly = settings.offsetX != m_settings.offsetX || settings.offsetY != m_settings.offsetY;
+    const bool movedOnly = settings.offsetX != m_settings.offsetX || settings.offsetY != m_settings.offsetY
+        || settings.originX != m_settings.originX || settings.originY != m_settings.originY
+        || settings.anchorMode != m_settings.anchorMode
+        || settings.followGameMonitor != m_settings.followGameMonitor;
     m_settings = settings;
     if (m_window != nullptr) {
         // HTTRANSPARENT передаёт hit-test только окнам того же потока. Для игры
@@ -304,8 +318,10 @@ void OverlayWindow::beginDrag(int screenX, int screenY)
 {
     m_dragging = true;
     m_dragOrigin = POINT{ screenX, screenY };
-    m_dragOffsetX = m_settings.offsetX;
-    m_dragOffsetY = m_settings.offsetY;
+    m_dragOffsetX
+        = m_settings.anchorMode == OverlayAnchorMode::Free ? m_settings.originX : m_settings.offsetX;
+    m_dragOffsetY
+        = m_settings.anchorMode == OverlayAnchorMode::Free ? m_settings.originY : m_settings.offsetY;
 }
 
 void OverlayWindow::updateDrag(int screenX, int screenY)
@@ -313,15 +329,26 @@ void OverlayWindow::updateDrag(int screenX, int screenY)
     if (!m_dragging) {
         return;
     }
-    // Смещение задаётся в экранных пикселях от выбранного угла: двигаем ровно на столько,
-    // на сколько уехал курсор, без множителей масштаба.
     const int deltaX = screenX - static_cast<int>(m_dragOrigin.x);
     const int deltaY = screenY - static_cast<int>(m_dragOrigin.y);
-    m_settings.offsetX = std::clamp(m_dragOffsetX + deltaX, -8192, 8192);
-    m_settings.offsetY = std::clamp(m_dragOffsetY + deltaY, -8192, 8192);
+    int x = 0;
+    int y = 0;
+    if (m_settings.anchorMode == OverlayAnchorMode::Free) {
+        x = m_settings.originX = std::clamp(m_dragOffsetX + deltaX, 0,
+            std::max(0,
+                static_cast<int>(m_bitmapWidth)
+                    - static_cast<int>(m_contentRectD2D.right - m_contentRectD2D.left)));
+        y = m_settings.originY = std::clamp(m_dragOffsetY + deltaY, 0,
+            std::max(0,
+                static_cast<int>(m_bitmapHeight)
+                    - static_cast<int>(m_contentRectD2D.bottom - m_contentRectD2D.top)));
+    } else {
+        x = m_settings.offsetX = std::clamp(m_dragOffsetX + deltaX, -8192, 8192);
+        y = m_settings.offsetY = std::clamp(m_dragOffsetY + deltaY, -8192, 8192);
+    }
     repaint();
     if (m_onMove) {
-        m_onMove(m_settings.offsetX, m_settings.offsetY, false);
+        m_onMove(x, y, false);
     }
 }
 
@@ -332,7 +359,8 @@ void OverlayWindow::endDrag()
     }
     m_dragging = false;
     if (m_onMove) {
-        m_onMove(m_settings.offsetX, m_settings.offsetY, true);
+        m_onMove(m_settings.anchorMode == OverlayAnchorMode::Free ? m_settings.originX : m_settings.offsetX,
+            m_settings.anchorMode == OverlayAnchorMode::Free ? m_settings.originY : m_settings.offsetY, true);
     }
 }
 
@@ -446,6 +474,7 @@ bool OverlayWindow::show(std::string* error)
 
 void OverlayWindow::hide()
 {
+    m_gameMonitor.reset();
     if (m_window == nullptr) {
         return;
     }
@@ -544,12 +573,47 @@ void OverlayWindow::drawScene(float scale)
 {
     OverlayFormats formats{ m_dwrite, m_keyFormat, m_valueFormat, m_smallFormat, m_monoFormat };
     const OverlayText text = makeOverlayText(m_settings, m_store);
-    const Rect bounds{ 0.0f, 0.0f, static_cast<float>(m_bitmapWidth), static_cast<float>(m_bitmapHeight) };
+    Rect bounds { 0.0f, 0.0f, static_cast<float>(m_bitmapWidth), static_cast<float>(m_bitmapHeight) };
+    OverlaySettings painted = m_settings;
+    RECT savedMonitor {};
+    const bool savedAvailable = painted.anchorMode == OverlayAnchorMode::Free
+        && findOverlayMonitor(painted.savedMonitorId, savedMonitor);
+    if (savedAvailable) {
+        painted.originX = originFromMonitor(painted.monitorOriginX, savedMonitor.left, m_monitorRect.left);
+        painted.originY = originFromMonitor(painted.monitorOriginY, savedMonitor.top, m_monitorRect.top);
+    }
+    if (m_settings.followGameMonitor && m_gameMonitor) {
+        const RECT& game = *m_gameMonitor;
+        ScreenBox target;
+        if (monitorOnCanvas(ScreenBox { m_monitorRect.left, m_monitorRect.top, m_monitorRect.right,
+                                m_monitorRect.bottom },
+                ScreenBox { game.left, game.top, game.right, game.bottom }, target)) {
+            bounds = Rect { static_cast<float>(target.left), static_cast<float>(target.top),
+                static_cast<float>(target.right), static_cast<float>(target.bottom) };
+            if (painted.anchorMode == OverlayAnchorMode::Free) {
+                if (!painted.savedMonitorId.empty()) {
+                    painted.originX = painted.monitorOriginX;
+                    painted.originY = painted.monitorOriginY;
+                } else {
+                    const POINT saved { m_monitorRect.left + painted.originX,
+                        m_monitorRect.top + painted.originY };
+                    MONITORINFO monitor { sizeof(monitor) };
+                    const HMONITOR original = MonitorFromPoint(saved, MONITOR_DEFAULTTONULL);
+                    if (original != nullptr && GetMonitorInfoW(original, &monitor)) {
+                        painted.originX
+                            = originOnMonitor(painted.originX, monitor.rcMonitor.left - m_monitorRect.left);
+                        painted.originY
+                            = originOnMonitor(painted.originY, monitor.rcMonitor.top - m_monitorRect.top);
+                    }
+                }
+            }
+        }
+    }
     m_contentRectD2D = D2D1::RectF(0.0f, 0.0f, 0.0f, 0.0f);
 
     m_target->BeginDraw();
     m_target->Clear(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.0f));
-    const Rect content = paintOverlay(m_target, m_settings, m_theme, text, bounds, scale, formats);
+    const Rect content = paintOverlay(m_target, painted, m_theme, text, bounds, scale, formats);
     m_contentRectD2D = D2D1::RectF(content.left, content.top, content.right, content.bottom);
     m_target->EndDraw();
 }

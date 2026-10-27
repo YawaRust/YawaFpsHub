@@ -3,10 +3,12 @@
 #include "platform/app_paths.h"
 #include "platform/display_info.h"
 #include "platform/hardware_info_win.h"
+#include "platform/overlay_monitor.h"
 #include "platform/pawnio_package.h"
 #include "platform/win_util.h"
 #include "render/overlay_painter.h"
 #include "ui/bottleneck_view.h"
+#include "ui/canvas_transform.h"
 #include "ui/chrome.h"
 #include "ui/dashboard_view.h"
 #include "ui/layout.h"
@@ -15,9 +17,10 @@
 #include "ui/settings_view.h"
 #include "ui/system_view.h"
 
-#include <windowsx.h>
+#include <commdlg.h>
 #include <dwmapi.h>
 #include <shellapi.h>
+#include <windowsx.h>
 
 #include <algorithm>
 #include <array>
@@ -30,43 +33,63 @@
 namespace yawa {
 namespace {
 
-constexpr wchar_t kClassName[] = L"YawaFpsHubMain";
-constexpr UINT kTrayMessage = WM_APP + 1;
-constexpr UINT kTickMessage = WM_APP + 2;
-constexpr UINT kExportMessage = WM_APP + 3;
-constexpr UINT kSensorElevationMessage = WM_APP + 4;
-constexpr UINT kHardwareInfoMessage = WM_APP + 5;
-constexpr UINT kSensorInitMessage = WM_APP + 6;
+    constexpr wchar_t kClassName[] = L"YawaFpsHubMain";
+    constexpr UINT kTrayMessage = WM_APP + 1;
+    constexpr UINT kTickMessage = WM_APP + 2;
+    constexpr UINT kExportMessage = WM_APP + 3;
+    constexpr UINT kSensorElevationMessage = WM_APP + 4;
+    constexpr UINT kHardwareInfoMessage = WM_APP + 5;
+    constexpr UINT kSensorInitMessage = WM_APP + 6;
 
-struct HardwareReport
-{
-    HardwareIdentity hardware;
-    std::string error;
-    bool success = false;
-};
+    struct HardwareReport
+    {
+        HardwareIdentity hardware;
+        std::string error;
+        bool success = false;
+    };
 
-struct SensorInitReport
-{
-    std::vector<std::wstring> gpuNames;
-    GpuSelection gpu;
-    std::size_t activeGpu = 0;
-};
-constexpr UINT kTrayIconId = 1;
-// DWMWA_BORDER_COLOR = 34, DWMWA_COLOR_NONE = 0xFFFFFFFE. На Windows 10 атрибут
-// неизвестен, вызов просто вернёт ошибку — там рамку убирает растянутая рамка DWM.
-constexpr DWORD kDwmBorderColor = 34;
-constexpr COLORREF kDwmColorNone = 0xFFFFFFFE;
+    struct SensorInitReport
+    {
+        std::optional<AmdDdr4Timings> memoryTimings;
+        std::vector<std::wstring> gpuNames;
+        GpuSelection gpu;
+        std::size_t activeGpu = 0;
+    };
+    constexpr UINT kTrayIconId = 1;
+    // DWMWA_BORDER_COLOR = 34, DWMWA_COLOR_NONE = 0xFFFFFFFE. На Windows 10 атрибут
+    // неизвестен, вызов просто вернёт ошибку — там рамку убирает растянутая рамка DWM.
+    constexpr DWORD kDwmBorderColor = 34;
+    constexpr COLORREF kDwmColorNone = 0xFFFFFFFE;
 
-void removeDwmBorder(HWND window)
-{
-    DwmSetWindowAttribute(window, kDwmBorderColor, &kDwmColorNone, sizeof(kDwmColorNone));
-}
-// Идентификаторы WM_HOTKEY: RegisterHotKey принимает int, поэтому и константы int.
-constexpr int kHotkeyOverlay = 1;
-constexpr int kHotkeyPosition = 2;
-constexpr int kHotkeyWindow = 3;
-constexpr int kHotkeyClickThrough = 4;
-constexpr int kHotkeyEmergencyExit = 5;
+    bool chooseOverlayRgba(HWND owner, std::optional<std::uint32_t>& rgba)
+    {
+        static COLORREF custom[16] { };
+        const std::uint32_t current = rgba.value_or(0xFFFFFFFFu);
+        CHOOSECOLORW picker { };
+        picker.lStructSize = sizeof(picker);
+        picker.hwndOwner = owner;
+        picker.lpCustColors = custom;
+        picker.rgbResult = RGB((current >> 24) & 0xFFu, (current >> 16) & 0xFFu, (current >> 8) & 0xFFu);
+        picker.Flags = CC_RGBINIT | CC_FULLOPEN;
+        if (!ChooseColorW(&picker)) {
+            return false;
+        }
+        rgba = (static_cast<std::uint32_t>(GetRValue(picker.rgbResult)) << 24)
+            | (static_cast<std::uint32_t>(GetGValue(picker.rgbResult)) << 16)
+            | (static_cast<std::uint32_t>(GetBValue(picker.rgbResult)) << 8) | (current & 0xFFu);
+        return true;
+    }
+
+    void removeDwmBorder(HWND window)
+    {
+        DwmSetWindowAttribute(window, kDwmBorderColor, &kDwmColorNone, sizeof(kDwmColorNone));
+    }
+    // Идентификаторы WM_HOTKEY: RegisterHotKey принимает int, поэтому и константы int.
+    constexpr int kHotkeyOverlay = 1;
+    constexpr int kHotkeyPosition = 2;
+    constexpr int kHotkeyWindow = 3;
+    constexpr int kHotkeyClickThrough = 4;
+    constexpr int kHotkeyEmergencyExit = 5;
 
 } // namespace
 
@@ -96,7 +119,7 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
     m_instance = instance;
     m_log = &log;
 
-    WNDCLASSEXW windowClass{};
+    WNDCLASSEXW windowClass { };
     windowClass.cbSize = sizeof(windowClass);
     windowClass.style = CS_HREDRAW | CS_VREDRAW;
     windowClass.lpfnWndProc = &MainWindow::windowProc;
@@ -120,8 +143,8 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
     // WS_POPUP + WS_THICKFRAME: рамка нужна только для изменения размера, заголовок
     // рисуем сами — системный светлый caption выбивался из тёмного интерфейса.
     m_window = CreateWindowExW(WS_EX_APPWINDOW, kClassName, L"YawaFpsHub",
-        WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU, CW_USEDEFAULT, CW_USEDEFAULT, 1280,
-        800, nullptr, nullptr, instance, this);
+        WS_POPUP | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU, CW_USEDEFAULT, CW_USEDEFAULT,
+        1280, 800, nullptr, nullptr, instance, this);
 
     if (m_window == nullptr) {
         error = "не удалось создать главное окно";
@@ -145,9 +168,8 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
     // На Windows 10 атрибута 34 нет, и DWM дорисовывает вокруг окна светлую кромку.
     // Растянутая рамка (лист стекла) убирает её и на десятке: клиентскую область
     // окно рисует само, поэтому negative margins ничего не портят.
-    const MARGINS glass{ -1, -1, -1, -1 };
+    const MARGINS glass { -1, -1, -1, -1 };
     DwmExtendFrameIntoClientArea(m_window, &glass);
-
 
     if (!m_renderer.initialize(error)) {
         return false;
@@ -191,13 +213,23 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
         m_overlay.setSettings(m_model.settings.overlay);
         // Перетаскивание прямо по оверлею: позицию сохраняем только по отпускании,
         // иначе ini переписывался бы сотни раз за одно движение.
-        m_overlay.setMoveHandler([this](int offsetX, int offsetY, bool finished) {
+        m_overlay.setMoveHandler([this](int x, int y, bool finished) {
             {
                 std::lock_guard<std::mutex> guard(m_modelMutex);
-                m_model.settings.overlay.offsetX = offsetX;
-                m_model.settings.overlay.offsetY = offsetY;
+                auto& overlay = m_model.settings.overlay;
+                if (overlay.anchorMode == OverlayAnchorMode::Free) {
+                    overlay.originX = x;
+                    overlay.originY = y;
+                } else {
+                    overlay.offsetX = x;
+                    overlay.offsetY = y;
+                }
             }
             if (finished) {
+                if (m_model.settings.overlay.anchorMode == OverlayAnchorMode::Free) {
+                    rememberOverlayMonitor(m_model.settings.overlay, overlayVirtualScreen());
+                    m_overlay.setSettings(m_model.settings.overlay);
+                }
                 saveSettings();
             }
             InvalidateRect(m_window, nullptr, FALSE);
@@ -213,7 +245,7 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
 
     // Сначала рисуем кадр в ещё невидимое окно и только потом показываем его:
     // так при запуске нет белой полосы неотрисованной клиентской области.
-    RECT client{};
+    RECT client { };
     GetClientRect(m_window, &client);
     m_dpiScale = static_cast<float>(GetDpiForWindow(m_window)) / 96.0f;
     m_renderer.resize(static_cast<UINT>(client.right), static_cast<UINT>(client.bottom), m_dpiScale);
@@ -233,7 +265,7 @@ void MainWindow::scheduleSensorElevation()
 
 void MainWindow::openEditorForSmoke()
 {
-    applyAction(UiHit{ {}, ActionKind::OpenOverlayEditor, 0 });
+    applyAction(UiHit { { }, ActionKind::OpenOverlayEditor, 0 });
 }
 
 void MainWindow::exportOverlayStyles()
@@ -242,8 +274,8 @@ void MainWindow::exportOverlayStyles()
         return;
     }
 
-    static constexpr std::array<std::wstring_view, 5> kStyles{
-        L"glass", L"neon", L"capsule", L"terminal", L"minimal" };
+    static constexpr std::array<std::wstring_view, 5> kStyles { L"glass", L"neon", L"capsule", L"terminal",
+        L"minimal" };
 
     OverlaySettings original;
     {
@@ -329,7 +361,7 @@ int MainWindow::run(int smokeSeconds, const std::wstring& overlayShotDir)
         });
     }
 
-    MSG message{};
+    MSG message { };
     while (GetMessageW(&message, nullptr, 0, 0) > 0) {
         TranslateMessage(&message);
         DispatchMessageW(&message);
@@ -411,14 +443,14 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         break;
 
     case WM_NCHITTEST: {
-        POINT cursor{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        POINT cursor { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
         ScreenToClient(m_window, &cursor);
 
         // Края тянем сами: у окна без системного заголовка DefWindowProc не отдаёт
         // HTLEFT/HTBOTTOM, и за края изменить размер было нельзя.
         if (IsZoomed(m_window) == FALSE) {
             const LONG border = static_cast<LONG>(8.0f * m_dpiScale);
-            RECT client{};
+            RECT client { };
             GetClientRect(m_window, &client);
 
             const bool left = cursor.x < border;
@@ -470,7 +502,7 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     }
 
     case WM_PAINT: {
-        PAINTSTRUCT paint{};
+        PAINTSTRUCT paint { };
         BeginPaint(m_window, &paint);
         this->paint();
         EndPaint(m_window, &paint);
@@ -485,6 +517,7 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         {
             std::lock_guard<std::mutex> guard(m_modelMutex);
             m_model.gpuNames = std::move(report->gpuNames);
+            m_model.memoryTimings = report->memoryTimings;
             m_model.activeGpu = report->activeGpu;
             // Сохраняем только восстановленный из конфигурации LUID, не переписывая
             // выбор, который пользователь успел сделать после начала опроса.
@@ -540,7 +573,7 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     case WM_APP + 10:
         m_dpiScale = static_cast<float>(GetDpiForWindow(m_window)) / 96.0f;
         if (m_renderer.isReady()) {
-            RECT client{};
+            RECT client { };
             GetClientRect(m_window, &client);
             m_renderer.resize(static_cast<UINT>(client.right), static_cast<UINT>(client.bottom), m_dpiScale);
         }
@@ -564,8 +597,13 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
                 m_dragAction = ActionKind::DragOverlay;
                 m_dragStartX = x;
                 m_dragStartY = y;
-                m_dragOffsetX = m_model.settings.overlay.offsetX;
-                m_dragOffsetY = m_model.settings.overlay.offsetY;
+                m_dragOffsetX = m_model.settings.overlay.anchorMode == OverlayAnchorMode::Free
+                    ? m_model.settings.overlay.originX
+                    : m_model.settings.overlay.offsetX;
+                m_dragOffsetY = m_model.settings.overlay.anchorMode == OverlayAnchorMode::Free
+                    ? m_model.settings.overlay.originY
+                    : m_model.settings.overlay.offsetY;
+                m_dragRect = hit.rect;
                 SetCapture(m_window);
                 return 0;
             }
@@ -605,7 +643,8 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
                 const float limit = std::max(contentDesignHeight() - contentArea().height(), 0.0f);
                 const float step = contentArea().height() * 0.85f;
                 const bool forward = y > hit.rect.centerY();
-                m_model.contentScroll = std::clamp(m_model.contentScroll + (forward ? step : -step), 0.0f, limit);
+                m_model.contentScroll
+                    = std::clamp(m_model.contentScroll + (forward ? step : -step), 0.0f, limit);
                 InvalidateRect(m_window, nullptr, FALSE);
                 return 0;
             }
@@ -619,7 +658,7 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         const float cursorX = static_cast<float>(GET_X_LPARAM(lParam)) / m_dpiScale;
         const float cursorY = static_cast<float>(GET_Y_LPARAM(lParam)) / m_dpiScale;
         if (!m_trackingMouse) {
-            TRACKMOUSEEVENT track{};
+            TRACKMOUSEEVENT track { };
             track.cbSize = sizeof(track);
             track.dwFlags = TME_LEAVE;
             track.hwndTrack = m_window;
@@ -648,17 +687,18 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         }
 
         if (m_draggingScroll || m_draggingSensors) {
-            const float limit = m_draggingSensors ? m_model.sensorScrollMax
+            const float limit = m_draggingSensors
+                ? m_model.sensorScrollMax
                 : std::max(contentDesignHeight() - contentArea().height(), 0.0f);
             // Геометрия полосы берётся из сохранённой дорожки и текущего вылета бегунка.
             const Rect& track = m_scrollTrack;
-            const float viewportHeight = m_draggingSensors ? m_model.sensorViewportHeight
-                : contentArea().height();
-            const float designHeight = m_draggingSensors ? std::max(viewportHeight + limit, 1.0f)
-                : contentDesignHeight();
+            const float viewportHeight
+                = m_draggingSensors ? m_model.sensorViewportHeight : contentArea().height();
+            const float designHeight
+                = m_draggingSensors ? std::max(viewportHeight + limit, 1.0f) : contentDesignHeight();
             const float trackHeight = track.height();
-            const float thumbHeight = std::max(m_draggingSensors ? 24.0f : 40.0f,
-                trackHeight * viewportHeight / designHeight);
+            const float thumbHeight
+                = std::max(m_draggingSensors ? 24.0f : 40.0f, trackHeight * viewportHeight / designHeight);
             const float travel = std::max(trackHeight - thumbHeight, 1.0f);
             const float thumbTop = std::clamp(cursorY - m_scrollGrabDy, track.top, track.top + travel);
             const float fraction = (thumbTop - track.top) / travel;
@@ -675,8 +715,8 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             for (const UiHit& hit : m_hits) {
                 if (hit.action == ActionKind::ReorderMetric && hit.value != static_cast<int>(m_dragMetric)
                     && hit.rect.contains(cursorX, cursorY)) {
-                    moveOverlayMetric(m_model.settings.overlay, m_dragMetric,
-                        static_cast<MetricId>(hit.value));
+                    moveOverlayMetric(
+                        m_model.settings.overlay, m_dragMetric, static_cast<MetricId>(hit.value));
                     m_overlay.setSettings(m_model.settings.overlay);
                     InvalidateRect(m_window, nullptr, FALSE);
                     break;
@@ -688,10 +728,22 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         if (m_dragAction == ActionKind::DragOverlay) {
             const float x = static_cast<float>(GET_X_LPARAM(lParam)) / m_dpiScale;
             const float y = static_cast<float>(GET_Y_LPARAM(lParam)) / m_dpiScale;
-            m_model.settings.overlay.offsetX
-                = std::clamp(m_dragOffsetX + static_cast<int>(std::lround(x - m_dragStartX)), -8192, 8192);
-            m_model.settings.overlay.offsetY
-                = std::clamp(m_dragOffsetY + static_cast<int>(std::lround(y - m_dragStartY)), -8192, 8192);
+            auto& overlay = m_model.settings.overlay;
+            if (overlay.anchorMode == OverlayAnchorMode::Free) {
+                overlay.originX = std::clamp(m_dragOffsetX
+                        + scaledOverlayOffset(
+                            x - m_dragStartX, m_dragRect.width(), GetSystemMetrics(SM_CXVIRTUALSCREEN)),
+                    0, 32768);
+                overlay.originY = std::clamp(m_dragOffsetY
+                        + scaledOverlayOffset(
+                            y - m_dragStartY, m_dragRect.height(), GetSystemMetrics(SM_CYVIRTUALSCREEN)),
+                    0, 32768);
+            } else {
+                overlay.offsetX = std::clamp(
+                    m_dragOffsetX + static_cast<int>(std::lround(x - m_dragStartX)), -8192, 8192);
+                overlay.offsetY = std::clamp(
+                    m_dragOffsetY + static_cast<int>(std::lround(y - m_dragStartY)), -8192, 8192);
+            }
             m_overlay.setSettings(m_model.settings.overlay);
             InvalidateRect(m_window, nullptr, FALSE);
             return 0;
@@ -705,7 +757,7 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
 
     case WM_SETCURSOR:
         if (LOWORD(lParam) == HTCLIENT) {
-            POINT cursor{};
+            POINT cursor { };
             GetCursorPos(&cursor);
             ScreenToClient(m_window, &cursor);
             const float x = static_cast<float>(cursor.x) / m_dpiScale;
@@ -757,6 +809,11 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             return 0;
         }
         if (m_dragAction != ActionKind::None) {
+            if (m_dragAction == ActionKind::DragOverlay
+                && m_model.settings.overlay.anchorMode == OverlayAnchorMode::Free) {
+                rememberOverlayMonitor(m_model.settings.overlay, overlayVirtualScreen());
+                m_overlay.setSettings(m_model.settings.overlay);
+            }
             m_dragAction = ActionKind::None;
             ReleaseCapture();
             saveSettings();
@@ -819,6 +876,7 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         } else if (wParam == static_cast<WPARAM>(kHotkeyPosition)) {
             const int next = (static_cast<int>(m_model.settings.overlay.position) + 1) % 4;
             m_model.settings.overlay.position = static_cast<OverlayPosition>(next);
+            m_model.settings.overlay.anchorMode = OverlayAnchorMode::Corner;
             m_overlay.setSettings(m_model.settings.overlay);
             saveSettings();
             InvalidateRect(m_window, nullptr, FALSE);
@@ -888,7 +946,7 @@ Rect MainWindow::contentArea() const
 {
     const float top = kTitleBarHeight + kTopBarHeight + 8.0f;
     const float bottom = m_renderer.height() - kStatusBarHeight - 10.0f;
-    return Rect{ kRailWidth + 30.0f, top, m_renderer.width() - 22.0f, bottom };
+    return Rect { kRailWidth + 30.0f, top, m_renderer.width() - 22.0f, bottom };
 }
 
 float MainWindow::contentDesignHeight() const
@@ -938,16 +996,16 @@ void MainWindow::drawScrollBar(const Rect& viewport, std::vector<UiHit>& hits)
     const float thumbTop = trackTop + travel * fraction;
 
     // Дорожка и бегунок: по дорожке кликаем, бегунок тянем мышью.
-    const Rect track{ viewport.right + 4.0f, trackTop, viewport.right + 11.0f, trackBottom };
-    const Rect thumb{ track.left, thumbTop, track.right, thumbTop + thumbHeight };
+    const Rect track { viewport.right + 4.0f, trackTop, viewport.right + 11.0f, trackBottom };
+    const Rect thumb { track.left, thumbTop, track.right, thumbTop + thumbHeight };
     const bool hovered = isHovered(m_model, track) || m_draggingScroll;
     m_renderer.fillRoundRect(track, 3.0f, m_theme.line.withAlpha(hovered ? 0.55f : 0.28f));
-    m_renderer.fillRoundRect(thumb, 3.0f,
-        m_theme.lineStrong.withAlpha(hovered || m_draggingScroll ? 1.0f : 0.8f));
+    m_renderer.fillRoundRect(
+        thumb, 3.0f, m_theme.lineStrong.withAlpha(hovered || m_draggingScroll ? 1.0f : 0.8f));
 
-    hits.push_back(UiHit{ Rect{ track.left - 2.0f, thumbTop, track.right + 2.0f, thumbTop + thumbHeight },
+    hits.push_back(UiHit { Rect { track.left - 2.0f, thumbTop, track.right + 2.0f, thumbTop + thumbHeight },
         ActionKind::ScrollContentThumb, 0 });
-    hits.push_back(UiHit{ track, ActionKind::ScrollContentTrack, 0 });
+    hits.push_back(UiHit { track, ActionKind::ScrollContentTrack, 0 });
     m_scrollTrack = track;
 }
 
@@ -959,7 +1017,7 @@ std::vector<UiHit> MainWindow::buildHits()
     // Экран рисуется в демо-высоте и прокручивается: на маленьком окне видно меньше
     // карточек, но их размеры те же, что в прототипе.
     m_model.contentHeight = std::max(viewport.height(), contentDesignHeight());
-    const Rect area{ viewport.left, viewport.top, viewport.right, viewport.top + m_model.contentHeight };
+    const Rect area { viewport.left, viewport.top, viewport.right, viewport.top + m_model.contentHeight };
     // Клип по рабочей области: содержимое карточек не может вылезти в статус-бар.
     m_renderer.pushClip(viewport);
     const bool scrolled = m_model.contentScroll > 0.5f;
@@ -1091,7 +1149,7 @@ void MainWindow::applySlider(ActionKind action, const Rect& rect, float x)
     }
 
     const float fraction = std::clamp((x - rect.left) / rect.width(), 0.0f, 1.0f);
-    UiHit hit{ rect, action, 0 };
+    UiHit hit { rect, action, 0 };
 
     if (action == ActionKind::SetScale) {
         // Шаг 1 %: ползунок идёт за курсором без рывков.
@@ -1213,8 +1271,7 @@ void MainWindow::applyAction(const UiHit& hit)
         break;
 
     case ActionKind::SetStyle:
-        // Пресет приносит свои переключатели: у RTSS нет фона и рамки, у стекла есть.
-        applyStyleDefaults(m_model.settings.overlay, static_cast<OverlayStyle>(hit.value));
+        applyOverlayRecipe(m_model.settings.overlay, static_cast<OverlayRecipe>(hit.value));
         m_overlay.setSettings(m_model.settings.overlay);
         saveSettings();
         InvalidateRect(m_window, nullptr, FALSE);
@@ -1225,12 +1282,14 @@ void MainWindow::applyAction(const UiHit& hit)
         break;
 
     case ActionKind::ToggleOverlayBackground:
+        m_model.settings.overlay.surfaceActive = false;
         m_model.settings.overlay.showBackground = !m_model.settings.overlay.showBackground;
         m_overlay.setSettings(m_model.settings.overlay);
         saveSettings();
         break;
 
     case ActionKind::ToggleOverlayBorder:
+        m_model.settings.overlay.surfaceActive = false;
         m_model.settings.overlay.showBorder = !m_model.settings.overlay.showBorder;
         m_overlay.setSettings(m_model.settings.overlay);
         saveSettings();
@@ -1243,6 +1302,7 @@ void MainWindow::applyAction(const UiHit& hit)
         break;
 
     case ActionKind::ToggleOverlayShadow:
+        m_model.settings.overlay.surfaceActive = false;
         m_model.settings.overlay.showShadow = !m_model.settings.overlay.showShadow;
         m_overlay.setSettings(m_model.settings.overlay);
         saveSettings();
@@ -1281,12 +1341,25 @@ void MainWindow::applyAction(const UiHit& hit)
 
     case ActionKind::SetPosition:
         m_model.settings.overlay.position = static_cast<OverlayPosition>(hit.value);
+        m_model.settings.overlay.anchorMode = OverlayAnchorMode::Corner;
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
+    case ActionKind::ToggleFollowGameMonitor:
+        m_model.settings.overlay.followGameMonitor = !m_model.settings.overlay.followGameMonitor;
         m_overlay.setSettings(m_model.settings.overlay);
         saveSettings();
         break;
 
     case ActionKind::SetLayout:
         m_model.settings.overlay.layout = static_cast<OverlayLayout>(hit.value);
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
+    case ActionKind::SetOverlaySurface:
+        setOverlaySurface(m_model.settings.overlay, static_cast<OverlaySurface>(hit.value));
         m_overlay.setSettings(m_model.settings.overlay);
         saveSettings();
         break;
@@ -1313,36 +1386,38 @@ void MainWindow::applyAction(const UiHit& hit)
         break;
 
     case ActionKind::SelectLabel: {
-        const LabelField field = static_cast<LabelField>(std::clamp(hit.value, 0, static_cast<int>(kLabelCount) - 1));
+        const LabelField field
+            = static_cast<LabelField>(std::clamp(hit.value, 0, static_cast<int>(kLabelCount) - 1));
         m_labelBackup = labelValue(m_model.settings.overlay, field);
         // Поле очищается сразу: иначе новое название пришлось бы стирать посимвольно.
         // Esc возвращает прежнюю подпись.
-        setLabel(m_model.settings.overlay, field, std::string{});
+        setLabel(m_model.settings.overlay, field, std::string { });
         m_model.editingLabel = hit.value;
         m_overlay.setSettings(m_model.settings.overlay);
         break;
     }
 
     case ActionKind::ClearLabel: {
-        const LabelField field = static_cast<LabelField>(std::clamp(hit.value, 0, static_cast<int>(kLabelCount) - 1));
-        setLabel(m_model.settings.overlay, field, std::string{});
+        const LabelField field
+            = static_cast<LabelField>(std::clamp(hit.value, 0, static_cast<int>(kLabelCount) - 1));
+        setLabel(m_model.settings.overlay, field, std::string { });
         m_overlay.setSettings(m_model.settings.overlay);
         saveSettings();
         break;
     }
 
     case ActionKind::ApplyLabelPreset:
-        m_model.settings.overlay.labels = hit.value == 0 ? std::array<std::string, kLabelCount>{ "FPS", "CPU", "GPU",
-                                                                    "RAM", "VRAM" }
-            : hit.value == 1                                ? std::array<std::string, kLabelCount>{ "КАДРЫ", "ЦП",
-                                                                       "ГП", "ОЗУ", "ВИДЕО" }
-                                                            : std::array<std::string, kLabelCount>{ "", "", "", "", "" };
+        m_model.settings.overlay.labels = hit.value == 0
+            ? std::array<std::string, kLabelCount> { "FPS", "CPU", "GPU", "RAM", "VRAM" }
+            : hit.value == 1 ? std::array<std::string, kLabelCount> { "КАДРЫ", "ЦП", "ГП", "ОЗУ", "ВИДЕО" }
+                             : std::array<std::string, kLabelCount> { "", "", "", "", "" };
         m_model.editingLabel = -1;
         m_overlay.setSettings(m_model.settings.overlay);
         saveSettings();
         break;
 
     case ActionKind::ResetOverlayPlacement:
+        m_model.settings.overlay.anchorMode = OverlayAnchorMode::Corner;
         m_model.settings.overlay.offsetX = 0;
         m_model.settings.overlay.offsetY = 0;
         m_model.settings.overlay.scalePercent = 100;
@@ -1353,7 +1428,7 @@ void MainWindow::applyAction(const UiHit& hit)
 
     case ActionKind::ResetLabels:
         // Сбрасываем только подписи: остальные настройки оверлея не трогаем.
-        m_model.settings.overlay.labels = OverlaySettings{}.labels;
+        m_model.settings.overlay.labels = OverlaySettings { }.labels;
         m_model.editingLabel = -1;
         m_overlay.setSettings(m_model.settings.overlay);
         saveSettings();
@@ -1437,19 +1512,37 @@ void MainWindow::applyAction(const UiHit& hit)
         break;
 
     case ActionKind::SetValueColor:
-        m_model.settings.overlay.valueColor = std::clamp(hit.value, -1, kOverlayColorCount - 1);
+        if (hit.value == kOverlayColorCount) {
+            if (!chooseOverlayRgba(GetActiveWindow(), m_model.settings.overlay.valueRgba))
+                break;
+        } else {
+            m_model.settings.overlay.valueColor = std::clamp(hit.value, -1, kOverlayColorCount - 1);
+            m_model.settings.overlay.valueRgba.reset();
+        }
         m_overlay.setSettings(m_model.settings.overlay);
         saveSettings();
         break;
 
     case ActionKind::SetLabelColor:
-        m_model.settings.overlay.labelColor = std::clamp(hit.value, -1, kOverlayColorCount - 1);
+        if (hit.value == kOverlayColorCount) {
+            if (!chooseOverlayRgba(GetActiveWindow(), m_model.settings.overlay.labelRgba))
+                break;
+        } else {
+            m_model.settings.overlay.labelColor = std::clamp(hit.value, -1, kOverlayColorCount - 1);
+            m_model.settings.overlay.labelRgba.reset();
+        }
         m_overlay.setSettings(m_model.settings.overlay);
         saveSettings();
         break;
 
     case ActionKind::SetAccentColor:
-        m_model.settings.overlay.accentColor = std::clamp(hit.value, -1, kOverlayColorCount - 1);
+        if (hit.value == kOverlayColorCount) {
+            if (!chooseOverlayRgba(GetActiveWindow(), m_model.settings.overlay.accentRgba))
+                break;
+        } else {
+            m_model.settings.overlay.accentColor = std::clamp(hit.value, -1, kOverlayColorCount - 1);
+            m_model.settings.overlay.accentRgba.reset();
+        }
         m_overlay.setSettings(m_model.settings.overlay);
         saveSettings();
         break;
@@ -1458,9 +1551,16 @@ void MainWindow::applyAction(const UiHit& hit)
         const int field = hit.value / 8;
         const int color = hit.value % 8 - 1;
         if (field >= 0 && field < static_cast<int>(kLabelCount)) {
-            m_model.settings.overlay.rowColors[static_cast<std::size_t>(field)]
-                = std::clamp(color, -1, kOverlayColorCount - 1);
-            m_overlay.setSettings(m_model.settings.overlay);
+            auto& overlay = m_model.settings.overlay;
+            const auto index = static_cast<std::size_t>(field);
+            if (color == kOverlayColorCount) {
+                if (!chooseOverlayRgba(GetActiveWindow(), overlay.rowRgba[index]))
+                    break;
+            } else {
+                overlay.rowColors[index] = std::clamp(color, -1, kOverlayColorCount - 1);
+                overlay.rowRgba[index].reset();
+            }
+            m_overlay.setSettings(overlay);
             saveSettings();
         }
         break;
@@ -1504,6 +1604,10 @@ void MainWindow::applyAction(const UiHit& hit)
         saveSettings();
         break;
 
+    case ActionKind::EnableCpuSensors:
+        scheduleSensorElevation();
+        break;
+
     case ActionKind::ToggleSensor:
         if (hit.value >= 0 && hit.value < static_cast<int>(kMetricCount)) {
             auto& selected = m_model.settings.overlay.metrics[static_cast<std::size_t>(hit.value)];
@@ -1541,15 +1645,25 @@ void MainWindow::applyAction(const UiHit& hit)
         break;
 
     case ActionKind::OffsetX:
-        m_model.settings.overlay.offsetX
-            = std::clamp(m_model.settings.overlay.offsetX + hit.value, -8192, 8192);
+        if (m_model.settings.overlay.anchorMode == OverlayAnchorMode::Free) {
+            auto& x = m_model.settings.overlay.originX;
+            x = std::clamp(x + hit.value, 0, 32768);
+        } else {
+            auto& x = m_model.settings.overlay.offsetX;
+            x = std::clamp(x + hit.value, -8192, 8192);
+        }
         m_overlay.setSettings(m_model.settings.overlay);
         saveSettings();
         break;
 
     case ActionKind::OffsetY:
-        m_model.settings.overlay.offsetY
-            = std::clamp(m_model.settings.overlay.offsetY + hit.value, -8192, 8192);
+        if (m_model.settings.overlay.anchorMode == OverlayAnchorMode::Free) {
+            auto& y = m_model.settings.overlay.originY;
+            y = std::clamp(y + hit.value, 0, 32768);
+        } else {
+            auto& y = m_model.settings.overlay.offsetY;
+            y = std::clamp(y + hit.value, -8192, 8192);
+        }
         m_overlay.setSettings(m_model.settings.overlay);
         saveSettings();
         break;
@@ -1558,9 +1672,13 @@ void MainWindow::applyAction(const UiHit& hit)
         toggleOverlay();
         break;
 
-    case ActionKind::TogglePause:
+    case ActionKind::TogglePause: {
+        std::lock_guard<std::mutex> guard(m_modelMutex);
         m_model.paused = !m_model.paused;
+        if (m_model.paused)
+            m_model.findings.clear();
         break;
+    }
 
     case ActionKind::WindowMinimize:
         ShowWindow(m_window, SW_MINIMIZE);
@@ -1583,12 +1701,102 @@ void MainWindow::applyAction(const UiHit& hit)
         m_model.sensorScroll = 0;
         break;
 
+    case ActionKind::ImportOverlayRecipe: {
+        wchar_t filename[MAX_PATH] { };
+        OPENFILENAMEW dialog { };
+        dialog.lStructSize = sizeof(dialog);
+        dialog.hwndOwner = GetActiveWindow() != nullptr ? GetActiveWindow() : m_window;
+        dialog.lpstrFilter = L"Рецепт JSON (*.json)\0*.json\0\0";
+        dialog.lpstrFile = filename;
+        dialog.nMaxFile = MAX_PATH;
+        dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+        if (GetOpenFileNameW(&dialog) == FALSE)
+            break;
+
+        std::string json;
+        std::string error;
+        const HANDLE file = CreateFileW(
+            filename, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE) {
+            error = "Не удалось открыть рецепт JSON: " + win32ErrorText(GetLastError());
+        } else {
+            LARGE_INTEGER length { };
+            if (GetFileSizeEx(file, &length) == FALSE || length.QuadPart < 0) {
+                error = "Не удалось определить размер рецепта JSON";
+            } else if (length.QuadPart > 16384) {
+                error = "Файл рецепта слишком большой (предел 16 КБ)";
+            } else {
+                json.resize(static_cast<std::size_t>(length.QuadPart));
+                DWORD received = 0;
+                if (ReadFile(file, json.data(), static_cast<DWORD>(json.size()), &received, nullptr) == FALSE
+                    || received != static_cast<DWORD>(json.size())) {
+                    error = "Не удалось прочитать рецепт JSON";
+                }
+            }
+            CloseHandle(file);
+        }
+        OverlaySettings imported = m_model.settings.overlay;
+        if (error.empty())
+            importOverlayRecipeJson(json, imported, error);
+        if (!error.empty()) {
+            if (m_log)
+                m_log->warning("импорт рецепта JSON: " + error);
+            MessageBoxW(dialog.hwndOwner, widen(error).c_str(), L"YawaFpsHub", MB_OK | MB_ICONERROR);
+            break;
+        }
+        m_model.settings.overlay = std::move(imported);
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        m_overlayEditor.refresh();
+        InvalidateRect(m_window, nullptr, FALSE);
+        break;
+    }
+
+    case ActionKind::ExportOverlayRecipe: {
+        wchar_t filename[MAX_PATH] = L"yawa-overlay-recipe.json";
+        OPENFILENAMEW dialog { };
+        dialog.lStructSize = sizeof(dialog);
+        dialog.hwndOwner = GetActiveWindow() != nullptr ? GetActiveWindow() : m_window;
+        dialog.lpstrFilter = L"Рецепт JSON (*.json)\0*.json\0\0";
+        dialog.lpstrFile = filename;
+        dialog.nMaxFile = MAX_PATH;
+        dialog.lpstrDefExt = L"json";
+        dialog.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
+        if (GetSaveFileNameW(&dialog) != FALSE) {
+            const std::string json = serializeOverlayRecipeJson(m_model.settings.overlay);
+            const HANDLE file = CreateFileW(
+                filename, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+            DWORD written = 0;
+            const bool saved = file != INVALID_HANDLE_VALUE
+                && WriteFile(file, json.data(), static_cast<DWORD>(json.size()), &written, nullptr) != FALSE
+                && written == static_cast<DWORD>(json.size());
+            const DWORD writeError = GetLastError();
+            if (file != INVALID_HANDLE_VALUE) {
+                CloseHandle(file);
+                if (!saved) {
+                    DeleteFileW(filename);
+                }
+            }
+            if (!saved) {
+                if (m_log) {
+                    m_log->warning("не удалось сохранить рецепт JSON: " + win32ErrorText(writeError));
+                }
+                MessageBoxW(dialog.hwndOwner, L"Не удалось сохранить рецепт JSON.", L"YawaFpsHub",
+                    MB_OK | MB_ICONERROR);
+            }
+        }
+        break;
+    }
+
     case ActionKind::OpenOverlayEditor:
-        if (!m_overlayEditor.open(m_window, m_instance, m_model, m_theme,
+        if (!m_overlayEditor.open(
+                m_window, m_instance, m_model, m_theme,
                 [this](const UiHit& control, float x, bool finished) {
                     if (isSliderAction(control.action)) {
                         applySlider(control.action, control.rect, x);
-                        if (finished) { saveSettings(); }
+                        if (finished) {
+                            saveSettings();
+                        }
                     } else {
                         applyAction(control);
                     }
@@ -1599,12 +1807,18 @@ void MainWindow::applyAction(const UiHit& hit)
                     m_overlayEditor.refresh();
                     InvalidateRect(m_window, nullptr, FALSE);
                 },
-                [this](wchar_t symbol) { editLabelChar(symbol); m_overlayEditor.refresh(); },
+                [this](wchar_t symbol) {
+                    editLabelChar(symbol);
+                    m_overlayEditor.refresh();
+                },
                 [this](bool finished) {
                     m_overlay.setSettings(m_model.settings.overlay);
-                    if (finished) { saveSettings(); }
+                    if (finished) {
+                        saveSettings();
+                    }
                     InvalidateRect(m_window, nullptr, FALSE);
-                }) && m_log) {
+                })
+            && m_log) {
             m_log->warning("не удалось открыть редактор оверлея");
         }
         break;
@@ -1658,6 +1872,7 @@ void MainWindow::restartSampling()
     {
         std::lock_guard<std::mutex> guard(m_modelMutex);
         m_model.etwRunning = false;
+        m_model.findings.clear();
         m_model.store.reset();
     }
     m_etwRestartRequested = true;
@@ -1674,15 +1889,15 @@ bool MainWindow::isSystemProcessCached(std::uint32_t processId)
 
     // Имя процесса: dwm.exe, explorer.exe и хосты оболочки подают кадры постоянно,
     // но игрой они не являются.
-    static constexpr std::array<std::wstring_view, 14> kSystemNames{ L"dwm.exe", L"explorer.exe",
+    static constexpr std::array<std::wstring_view, 14> kSystemNames { L"dwm.exe", L"explorer.exe",
         L"csrss.exe", L"winlogon.exe", L"wininit.exe", L"services.exe", L"lsass.exe", L"smss.exe",
-        L"searchhost.exe", L"startmenuexperiencehost.exe", L"textinputhost.exe",
-        L"shellexperiencehost.exe", L"applicationframehost.exe", L"lockapp.exe" };
+        L"searchhost.exe", L"startmenuexperiencehost.exe", L"textinputhost.exe", L"shellexperiencehost.exe",
+        L"applicationframehost.exe", L"lockapp.exe" };
 
     bool system = true;
     HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId);
     if (process != nullptr) {
-        wchar_t path[512]{};
+        wchar_t path[512] { };
         DWORD size = static_cast<DWORD>(std::size(path));
         if (QueryFullProcessImageNameW(process, 0, path, &size) != FALSE && size > 0) {
             std::wstring name(path, size);
@@ -1727,6 +1942,7 @@ void MainWindow::samplingLoop()
 
     const GpuRegistry& registry = m_sensors.gpus();
     auto ready = std::make_unique<SensorInitReport>();
+    ready->memoryTimings = m_sensors.memoryTimings();
     for (std::size_t index = 0; index < registry.count(); ++index) {
         if (const GpuAdapter* adapter = registry.byIndex(index)) {
             ready->gpuNames.push_back(adapter->name);
@@ -1828,9 +2044,9 @@ void MainWindow::samplingLoop()
             }
             tracker.setForegroundProcess(static_cast<std::uint32_t>(foregroundPid));
 
-            std::array<std::uint32_t, yawa::FrameTracker::kMaxStreams> streamPids{};
+            std::array<std::uint32_t, yawa::FrameTracker::kMaxStreams> streamPids { };
             const std::size_t streamCount = tracker.streamProcesses(streamPids.data(), streamPids.size());
-            std::array<std::uint32_t, yawa::FrameTracker::kMaxStreams> systemPids{};
+            std::array<std::uint32_t, yawa::FrameTracker::kMaxStreams> systemPids { };
             std::size_t systemCount = 0;
             for (std::size_t index = 0; index < streamCount; ++index) {
                 if (isSystemProcessCached(streamPids[index])) {
@@ -1854,6 +2070,29 @@ void MainWindow::samplingLoop()
             const yawa::SystemSampler::Deltas deltas = sampler.compute(snapshot, elapsed);
             const yawa::DerivedValues values = yawa::deriveValues(snapshot, deltas);
             const yawa::FpsSummary fps = tracker.summary(static_cast<double>(targetHz));
+            const bool etwRunning = m_etw.isRunning();
+            GameDiagnosisInput diagnosis;
+            diagnosis.gameProcessId = gamePid;
+            diagnosis.sampledAtMs = static_cast<std::uint64_t>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count());
+            diagnosis.nowMs
+                = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch())
+                        .count());
+            diagnosis.capture
+                = gamePid != 0 && etwRunning ? GameCaptureState::Running : GameCaptureState::Unknown;
+            if (gamePid != 0 && fps.currentFps > 0.0)
+                diagnosis.fps = fps.currentFps;
+            if (gamePid != 0 && snapshot.gameCpuLoad >= 0.0)
+                diagnosis.gameCpuLoad = snapshot.gameCpuLoad;
+            if (gamePid != 0 && snapshot.gamePeakThreadLoad >= 0.0)
+                diagnosis.gameThreadLoad = snapshot.gamePeakThreadLoad;
+            // Этот счётчик PDH уже отфильтрован по PID, 3D-движку и LUID выбранной карты.
+            if (gamePid != 0 && snapshot.gameGpuLoad >= 0.0) {
+                diagnosis.gpuLoad = snapshot.gameGpuLoad;
+                diagnosis.gpuMatchesGame = true;
+            }
+            auto findings = diagnoseGame(diagnosis);
 
             const std::wstring foreground = foregroundProcessName();
 
@@ -1870,6 +2109,7 @@ void MainWindow::samplingLoop()
                 // Узкое место пересчитываем на том же снимке, что и экраны: отдельного
                 // опроса железа нет, и цифры на «Балансе» всегда совпадают с «Обзором».
                 m_model.gameName = gamePid != 0 ? foreground : L"";
+                m_model.gameProcessId = gamePid;
                 m_model.gameCpuLoad = gamePid != 0 ? snapshot.gameCpuLoad : -1.0;
                 m_model.gamePeakThreadLoad = gamePid != 0 ? snapshot.gamePeakThreadLoad : -1.0;
                 m_model.gameGpuLoad = gamePid != 0 ? snapshot.gameGpuLoad : -1.0;
@@ -1878,7 +2118,8 @@ void MainWindow::samplingLoop()
                 gameLoad.cpuPeakCore = snapshot.gamePeakThreadLoad;
                 gameLoad.gpuLoad = snapshot.gameGpuLoad;
                 m_model.balance = analyzeActiveGame(m_model.hardware, gameLoad, gamePid != 0);
-                m_model.etwRunning = m_etw.isRunning();
+                m_model.findings = m_model.paused ? std::vector<Finding> { } : std::move(findings);
+                m_model.etwRunning = etwRunning;
                 if (!foreground.empty()) {
                     m_model.foregroundApp = foreground;
                 }
@@ -1907,16 +2148,60 @@ void MainWindow::onTick()
 {
     static const auto started = std::chrono::steady_clock::now();
     const auto now = std::chrono::steady_clock::now();
+    std::uint32_t gamePid = 0;
+    bool followGameMonitor = false;
+    bool movedSavedMonitor = false;
+    OverlaySettings resolvedPlacement;
 
     {
         std::lock_guard<std::mutex> guard(m_modelMutex);
         m_model.elapsedMs = static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::milliseconds>(now - started).count());
         m_model.overlayVisible = m_overlay.isVisible();
+        auto& placement = m_model.settings.overlay;
+        if (placement.anchorMode == OverlayAnchorMode::Free && !placement.savedMonitorId.empty()
+            && m_dragAction != ActionKind::DragOverlay && !m_overlay.isDragging()
+            && !m_overlayEditor.isDragging()) {
+            RECT savedMonitor { };
+            if (findOverlayMonitor(placement.savedMonitorId, savedMonitor)) {
+                const RECT screen = overlayVirtualScreen();
+                const int x = originFromMonitor(placement.monitorOriginX, savedMonitor.left, screen.left);
+                const int y = originFromMonitor(placement.monitorOriginY, savedMonitor.top, screen.top);
+                if (placement.originX != x || placement.originY != y) {
+                    placement.originX = x;
+                    placement.originY = y;
+                    resolvedPlacement = placement;
+                    movedSavedMonitor = true;
+                }
+            }
+        }
+        gamePid = m_model.gameProcessId;
+        followGameMonitor = m_model.settings.overlay.followGameMonitor;
         m_overlay.setContent(m_model.store, m_model.fps,
             m_model.activeGpu < m_model.gpuNames.size() ? m_model.gpuNames[m_model.activeGpu] : L"");
     }
 
+    if (movedSavedMonitor) {
+        m_overlay.setSettings(resolvedPlacement);
+    }
+    RECT gameMonitor { };
+    const RECT* target = nullptr;
+    if (followGameMonitor && gamePid != 0) {
+        const HWND foreground = GetForegroundWindow();
+        DWORD foregroundPid = 0;
+        if (foreground != nullptr && IsIconic(foreground) == FALSE) {
+            GetWindowThreadProcessId(foreground, &foregroundPid);
+        }
+        if (foregroundPid == gamePid) {
+            MONITORINFO monitor { sizeof(monitor) };
+            const HMONITOR screen = MonitorFromWindow(foreground, MONITOR_DEFAULTTONULL);
+            if (screen != nullptr && GetMonitorInfoW(screen, &monitor)) {
+                gameMonitor = monitor.rcMonitor;
+                target = &gameMonitor;
+            }
+        }
+    }
+    m_overlay.setGameMonitor(target);
     m_overlay.repaint();
     m_overlayEditor.refresh();
 
@@ -1928,7 +2213,7 @@ void MainWindow::onTick()
 
 void MainWindow::createTrayIcon()
 {
-    NOTIFYICONDATAW icon{};
+    NOTIFYICONDATAW icon { };
     icon.cbSize = sizeof(icon);
     icon.hWnd = m_window;
     icon.uID = kTrayIconId;
@@ -1950,7 +2235,7 @@ void MainWindow::destroyTrayIcon()
         return;
     }
 
-    NOTIFYICONDATAW icon{};
+    NOTIFYICONDATAW icon { };
     icon.cbSize = sizeof(icon);
     icon.hWnd = m_window;
     icon.uID = kTrayIconId;
@@ -1966,7 +2251,7 @@ void MainWindow::showTrayMenu()
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, 1003, L"Выход");
 
-    POINT cursor{};
+    POINT cursor { };
     GetCursorPos(&cursor);
     SetForegroundWindow(m_window);
     TrackPopupMenu(menu, TPM_RIGHTBUTTON | TPM_RETURNCMD, cursor.x, cursor.y, 0, m_window, nullptr);

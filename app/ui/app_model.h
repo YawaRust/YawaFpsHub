@@ -1,6 +1,7 @@
 #pragma once
 
 #include "metrics/bottleneck.h"
+#include "metrics/diagnosis.h"
 #include "metrics/metric_store.h"
 #include "metrics/statistics.h"
 #include "platform/sensors_win.h"
@@ -23,8 +24,10 @@ enum class ActionKind : std::uint8_t {
     SetInterval,
     SetTargetHz,
     SetStyle,
+    ToggleFollowGameMonitor,
     SetPosition,
     SetLayout,
+    SetOverlaySurface,
     SetAccent,
     SetDensity,
     CycleGpu,
@@ -43,8 +46,11 @@ enum class ActionKind : std::uint8_t {
     SetOpacity,
     ToggleMetric,
     ToggleSensor,
+    EnableCpuSensors,
     ReorderMetric,
     OpenOverlayEditor,
+    ExportOverlayRecipe,
+    ImportOverlayRecipe,
     SetSensorFilter,
     ClearLabel,
     ResetOverlayPlacement,
@@ -92,21 +98,24 @@ enum class ActionKind : std::uint8_t {
     ScrollSensorsThumb,
 };
 
-struct UiHit {
-    Rect rect{};
+struct UiHit
+{
+    Rect rect { };
     ActionKind action = ActionKind::None;
     int value = 0;
 };
 
 // Всё, что нужно экранам для отрисовки. Снимок собирается в потоке окна,
 // поэтому экраны не трогают ни датчики, ни файлы.
-struct AppModel {
+struct AppModel
+{
     MetricStore store;
     Settings settings;
     FpsSummary fps;
     // Всего кадров отрисовано активной игрой — строка «Отрисовано кадров».
     std::uint64_t framesPresented = 0;
     SensorAvailability availability;
+    std::optional<AmdDdr4Timings> memoryTimings;
     std::vector<std::wstring> gpuNames;
     std::size_t activeGpu = 0;
     std::uint64_t elapsedMs = 0;
@@ -142,7 +151,7 @@ struct AppModel {
     // Предел прокрутки таблицы датчиков: нужен, чтобы бегунок работал мышью.
     float sensorScrollMax = 0.0f;
     float sensorViewportHeight = 0.0f;
-    Rect sensorScrollTrack{};
+    Rect sensorScrollTrack { };
     // Прокрутка содержимого: экран рисуется в «демо-высоте», окно показывает его часть.
     float contentScroll = 0.0f;
     // Режим монитора, определённый при запуске: показываем его и берём из него цель кадра.
@@ -156,7 +165,9 @@ struct AppModel {
     // из последних показаний: экраны только рисуют то, что лежит в модели.
     HardwareIdentity hardware;
     BottleneckResult balance;
+    std::vector<Finding> findings;
     std::wstring gameName;
+    std::uint32_t gameProcessId = 0;
     double gameCpuLoad = -1.0;
     double gamePeakThreadLoad = -1.0;
     double gameGpuLoad = -1.0;
@@ -178,6 +189,9 @@ inline bool isSliderAction(ActionKind action)
     case ActionKind::SetOverlayBgOpacity:
     case ActionKind::SetOverlayPadding:
     case ActionKind::SetOverlayRowGap:
+    case ActionKind::SetBorderWidth:
+    case ActionKind::SetShadowStrength:
+    case ActionKind::SetLetterSpacing:
         return true;
     default:
         return false;

@@ -2,13 +2,15 @@
 #include "platform/log.h"
 #include "platform/main_window.h"
 #include "platform/pawnio_package.h"
+#include "platform/pawnio_sensors.h"
 #include "platform/win_util.h"
 
-#include <windows.h>
 #include <objbase.h>
+#include <shellapi.h>
+#include <windows.h>
 
-#include <string>
 #include <initializer_list>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -18,6 +20,52 @@
 namespace {
 
 constexpr wchar_t kInstanceMutex[] = L"Global\\YawaFpsHubInstance";
+
+enum class DumpCommand { None, Run, Invalid };
+
+DumpCommand memoryDumpCommand()
+{
+    int count = 0;
+    wchar_t** arguments = CommandLineToArgvW(GetCommandLineW(), &count);
+    if (arguments == nullptr) {
+        return DumpCommand::None;
+    }
+    bool mentionsDump = false;
+    for (int index = 1; index < count; ++index) {
+        mentionsDump |= std::wstring_view(arguments[index]) == L"--probe"
+            || std::wstring_view(arguments[index]) == L"--dump=memory";
+    }
+    const bool valid = (count == 2 && std::wstring_view(arguments[1]) == L"--dump=memory")
+        || (count == 3 && std::wstring_view(arguments[1]) == L"--probe"
+            && std::wstring_view(arguments[2]) == L"--dump=memory");
+    LocalFree(arguments);
+    return valid ? DumpCommand::Run : mentionsDump ? DumpCommand::Invalid : DumpCommand::None;
+}
+
+int memoryDumpCommandOutput()
+{
+    HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (output == nullptr || output == INVALID_HANDLE_VALUE) {
+        if (!AttachConsole(ATTACH_PARENT_PROCESS)) {
+            return 2;
+        }
+        output = GetStdHandle(STD_OUTPUT_HANDLE);
+    }
+    if (output == nullptr || output == INVALID_HANDLE_VALUE) {
+        return 2;
+    }
+    yawa::Log unopenedLog;
+    yawa::PawnioSensors sensors;
+    const auto dump = sensors.initialize(unopenedLog) ? sensors.readMemoryDump() : std::nullopt;
+    const std::string text = dump ? yawa::formatAmdDdr4MemoryDump(*dump)
+                                  : "UMC dump unavailable (requires AMD Family 17h Model 71h, accessible "
+                                    "PawnIO and readable DDR4 channels).\n";
+    DWORD written = 0;
+    return WriteFile(output, text.data(), static_cast<DWORD>(text.size()), &written, nullptr)
+            && written == text.size()
+        ? (dump ? 0 : 1)
+        : 2;
+}
 
 bool anotherInstanceExists()
 {
@@ -55,6 +103,10 @@ void showExistingWindow()
 
 int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
 {
+    const DumpCommand dump = memoryDumpCommand();
+    if (dump != DumpCommand::None) {
+        return dump == DumpCommand::Run ? memoryDumpCommandOutput() : 2;
+    }
     const int sensorCommand = yawa::runSensorCommandLine();
     if (sensorCommand >= 0) {
         return sensorCommand;

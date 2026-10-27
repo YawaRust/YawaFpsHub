@@ -2,6 +2,7 @@
 #include "ui/layout.h"
 
 #include "metrics/overlay_metric.h"
+#include "metrics/sensor_status.h"
 #include "metrics/units.h"
 
 #include <algorithm>
@@ -376,6 +377,8 @@ void drawSensors(Renderer& renderer, AppModel& model, const Theme& theme, const 
             const MetricInfo& info = metricInfo(id);
             const MetricSlot& slot = model.store.slot(id);
             const bool known = valueKnown(id, model);
+            const SensorFailure failure
+                = known ? SensorFailure::Unknown : sensorMissingReason(id, model.availability.cpuHardware);
 
             // Пип группы и название.
             renderer.fillCircle(nameX + 3.0f, rowTop + kRowHeight * 0.5f, 3.0f, pipColor(entries[index].group, theme));
@@ -394,13 +397,25 @@ void drawSensors(Renderer& renderer, AppModel& model, const Theme& theme, const 
             const std::wstring value = known
                 ? wideText(combined ? displayMetricValue(id, model.store)
                                     : formatValue(slot.stats.current, info.decimals))
-                                             : L"нет данных";
+                : failure == SensorFailure::NeedsAccess ? L"нужен доступ"
+                : failure == SensorFailure::Unsupported ? L"не поддерживается"
+                                                        : L"нет данных";
             const std::wstring unit = known && !combined ? wideText(unitSuffix(info.unit)) : std::wstring();
             const float unitWidth = unit.empty() ? 0.0f : renderer.measureText(unit, TextRole::Tiny) + 4.0f;
             // Значение — главное в строке: крупнее подписи, как в демо.
-            renderer.text(value, Rect{ valueRight - 130.0f - unitWidth, rowTop, valueRight - unitWidth,
-                                   rowTop + kRowHeight },
-                known ? TextRole::Number : TextRole::Tiny, known ? theme.text : theme.textFaint, TextAlign::Right);
+            renderer.text(value,
+                Rect { valueRight - 130.0f - unitWidth, rowTop, valueRight - unitWidth,
+                    failure == SensorFailure::NeedsAccess ? rowTop + 19.0f : rowTop + kRowHeight },
+                known ? TextRole::Number : TextRole::Tiny,
+                known                                       ? theme.text
+                    : failure == SensorFailure::NeedsAccess ? theme.warn
+                                                            : theme.textFaint,
+                TextAlign::Right);
+            if (failure == SensorFailure::NeedsAccess) {
+                renderer.text(L"включить →",
+                    Rect { valueRight - 130.0f, rowTop + 18.0f, valueRight, rowTop + kRowHeight },
+                    TextRole::Tiny, theme.accent, TextAlign::Right);
+            }
             if (!unit.empty()) {
                 renderer.text(unit, Rect{ valueRight - unitWidth, rowTop, valueRight, rowTop + kRowHeight },
                     TextRole::Tiny, theme.textFaint, TextAlign::Right);
@@ -462,6 +477,11 @@ void drawSensors(Renderer& renderer, AppModel& model, const Theme& theme, const 
             // Строка попадает в список хитов раньше глаза: обработчик берёт последний
             // подходящий хит, поэтому раньше клик по глазу гасился пустым действием строки.
             hits.push_back(UiHit{ row, ActionKind::None, static_cast<int>(index) });
+            if (failure == SensorFailure::NeedsAccess) {
+                hits.push_back(
+                    UiHit { Rect { valueRight - 130.0f, rowTop + 17.0f, valueRight, rowTop + kRowHeight },
+                        ActionKind::EnableCpuSensors, 0 });
+            }
             hits.push_back(UiHit { eyeHit, ActionKind::ToggleSensor, static_cast<int>(id) });
         }
 
@@ -485,9 +505,9 @@ void drawSensors(Renderer& renderer, AppModel& model, const Theme& theme, const 
         hits.push_back(UiHit{ scrollTrack, ActionKind::ScrollSensorsTrack, 0 });
     }
 
-    renderer.text(L"ETW — кадры, PDH — счётчики диспетчера задач, NVML — NVIDIA, ACPI-термозона — процессор."
-                  L" Драйверов не требуется; «нет данных» — прошивка не отдаёт этот датчик.",
-        Rect{ inner.left, inner.bottom - 18.0f, inner.right - 14.0f, inner.bottom }, TextRole::Tiny,
+    renderer.text(L"Не все датчики доступны на каждом ПК. Для температуры процессора может потребоваться"
+                  L" доступ к драйверу.",
+        Rect { inner.left, inner.bottom - 18.0f, inner.right - 14.0f, inner.bottom }, TextRole::Tiny,
         theme.textFaint);
 }
 

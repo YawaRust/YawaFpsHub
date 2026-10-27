@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -13,7 +14,29 @@ namespace yawa {
 // типографику, форму и компоновку оверлея.
 enum class OverlayStyle : std::uint8_t { Neon, Rtss, Frosted, Terminal, Cyber, Mono, Esport, Retro };
 enum class OverlayPosition : std::uint8_t { TopLeft, TopRight, BottomLeft, BottomRight };
-enum class OverlayLayout : std::uint8_t { Plates, Line };
+enum class OverlayAnchorMode : std::uint8_t { Corner, Free };
+enum class OverlayLayout : std::uint8_t { Plates, Line, Gauge };
+enum class OverlaySurface : std::uint8_t { Glass, Plate, Outline, None };
+// Первые восемь значений соответствуют старым OverlayStyle для миграции INI.
+enum class OverlayRecipe : std::uint8_t {
+    Neon,
+    Rtss,
+    Frosted,
+    Terminal,
+    Cyber,
+    Mono,
+    Esport,
+    Retro,
+    FpsLarge,
+    Stream,
+    Laptop,
+    Hdr,
+    Recording,
+    Quiet,
+    Focus,
+    Clean
+};
+constexpr std::size_t kOverlayRecipeCount = 16;
 enum class Accent : std::uint8_t { Mint, Ice, Violet, Amber, Coral };
 
 enum class LabelField : std::uint8_t { Fps, Cpu, Gpu, Ram, Vram };
@@ -24,6 +47,7 @@ inline constexpr std::array<MetricId, kLabelCount> kOverlayPrimaryMetrics { Metr
 std::array<bool, kMetricCount> defaultOverlayMetrics();
 std::array<MetricId, kMetricCount> defaultOverlayOrder();
 std::array<int, kMetricCount> defaultOverlayMetricColors();
+std::optional<std::size_t> overlayColorGroup(MetricId id);
 
 struct OverlayRowPosition
 {
@@ -32,7 +56,8 @@ struct OverlayRowPosition
     int y = -1;
 };
 
-struct CaptureSettings {
+struct CaptureSettings
+{
     int intervalMs = 1000;
     int smoothingPercent = 40;
     bool etwEnabled = true;
@@ -45,10 +70,24 @@ struct CaptureSettings {
     bool targetAuto = true;
 };
 
-struct OverlaySettings {
+struct OverlaySettings
+{
     OverlayPosition position = OverlayPosition::TopLeft;
+    // Старые INI остаются привязаны к углу; свободное положение включается при перетаскивании плашки.
+    OverlayAnchorMode anchorMode = OverlayAnchorMode::Corner;
+    int originX = 0;
+    int originY = 0;
+    // Опциональная привязка новых свободных размещений к устройству дисплея.
+    // originX/Y остаются резервной позицией для старого INI и отсутствующего монитора.
+    std::string savedMonitorId;
+    int monitorOriginX = 0;
+    int monitorOriginY = 0;
+    bool followGameMonitor = false;
     OverlayLayout layout = OverlayLayout::Plates;
-    OverlayStyle style = OverlayStyle::Frosted;
+    OverlayStyle style = OverlayStyle::Frosted; // базовая палитра старых стилей
+    OverlayRecipe recipe = OverlayRecipe::Frosted;
+    OverlaySurface surface = OverlaySurface::Glass;
+    bool surfaceActive = false; // старый INI не должен менять вид до явного выбора оси
     int scalePercent = 100;
     int opacityPercent = 72;
     // Ручной сдвиг от выбранного угла: даёт поставить оверлей точно по месту
@@ -79,9 +118,14 @@ struct OverlaySettings {
     int valueColor = -1;
     int labelColor = -1;
     // Цвет каждой строки отдельно: в пресетах Fpsmon строки различаются цветом.
-    std::array<int, kLabelCount> rowColors{ -1, -1, -1, -1, -1 };
+    std::array<int, kLabelCount> rowColors { -1, -1, -1, -1, -1 };
     // -1 — акцент из пресета, иначе цвет палитры для линий, рамки и заголовков.
     int accentColor = -1;
+    // #RRGGBBAA у конкретного элемента имеет приоритет над старым индексом 0…5.
+    std::optional<std::uint32_t> valueRgba;
+    std::optional<std::uint32_t> labelRgba;
+    std::optional<std::uint32_t> accentRgba;
+    std::array<std::optional<std::uint32_t>, kLabelCount> rowRgba { };
     // -1 — толщина из пресета, 0 — без рамки, 1…3 — толщина в пикселях.
     int borderWidth = -1;
     // Сила тени и межбуквенный интервал — в процентах от пресета.
@@ -102,13 +146,15 @@ struct OverlaySettings {
     bool pixelLayout = false;
     std::array<OverlayRowPosition, kMetricCount> rowPositions { };
     std::array<int, kMetricCount> metricColors = defaultOverlayMetricColors(); // -1 — палитра стиля
+    std::array<std::optional<std::uint32_t>, kMetricCount> metricRgba { };
     std::array<bool, kMetricCount> customLabelSet { };
     std::array<std::string, kMetricCount> customLabels { };
-    std::array<bool, kLabelCount> visible{ true, true, true, true, true };
-    std::array<std::string, kLabelCount> labels{ "FPS", "CPU", "GPU", "RAM", "VRAM" };
+    std::array<bool, kLabelCount> visible { true, true, true, true, true };
+    std::array<std::string, kLabelCount> labels { "FPS", "CPU", "GPU", "RAM", "VRAM" };
 };
 
-struct UiSettings {
+struct UiSettings
+{
     Accent accent = Accent::Mint;
     bool compactDensity = false;
     bool animate = true;
@@ -117,7 +163,8 @@ struct UiSettings {
     bool closeToTray = false;
 };
 
-struct GpuSelection {
+struct GpuSelection
+{
     bool hasSelection = false;
     std::uint32_t luidLow = 0;
     std::int32_t luidHigh = 0;
@@ -125,7 +172,8 @@ struct GpuSelection {
 
 // Горячие клавиши хранятся как виртуальные коды Windows: F10 = 0x79, F11 = 0x7A, F12 = 0x7B.
 // Ноль означает «выключено» — клавиша не регистрируется.
-struct HotkeySettings {
+struct HotkeySettings
+{
     unsigned int overlay = 0x79;
     unsigned int position = 0x7A;
     unsigned int window = 0x7B;
@@ -133,7 +181,8 @@ struct HotkeySettings {
     unsigned int clickThrough = 0x78;
 };
 
-struct Settings {
+struct Settings
+{
     CaptureSettings capture;
     OverlaySettings overlay;
     UiSettings ui;
@@ -141,6 +190,8 @@ struct Settings {
     HotkeySettings hotkeys;
 };
 
+bool parseOverlayRgba(std::string_view text, std::uint32_t& rgba);
+std::string overlayRgbaHex(std::uint32_t rgba);
 Settings defaultSettings();
 void moveOverlayMetric(OverlaySettings& settings, MetricId moved, MetricId before);
 void enableOverlayPixelLayout(OverlaySettings& settings);
@@ -160,6 +211,28 @@ void setLabel(OverlaySettings& overlay, LabelField field, std::string value);
 // Ставит переключатели оформления в значения пресета: у RTSS нет ни фона, ни рамки,
 // у фростед-стекла есть и то, и другое.
 void applyStyleDefaults(OverlaySettings& overlay, OverlayStyle style);
+
+struct OverlayRecipeSpec
+{
+    std::string_view key;
+    OverlayStyle palette;
+    OverlayLayout shape;
+    OverlaySurface surface;
+    int fontFamily;
+    int scalePercent;
+    bool onlyFps;
+};
+const std::array<OverlayRecipeSpec, kOverlayRecipeCount>& overlayRecipes();
+void applyOverlayRecipe(OverlaySettings& overlay, OverlayRecipe recipe);
+void setOverlaySurface(OverlaySettings& overlay, OverlaySurface surface);
+bool parseOverlayRecipe(std::string_view key, OverlayRecipe& recipe);
+std::string_view overlayRecipeKey(OverlayRecipe recipe);
+std::string_view overlaySurfaceKey(OverlaySurface surface);
+bool parseOverlaySurface(std::string_view key, OverlaySurface& surface);
+// Только белый список полей оформления; не включает имя игры, монитор или показания датчиков.
+std::string serializeOverlayRecipeJson(const OverlaySettings& overlay);
+// Импорт только осей и общих цветов; при ошибке overlay остаётся неизменным.
+bool importOverlayRecipeJson(std::string_view json, OverlaySettings& overlay, std::string& error);
 
 std::string_view overlayStyleKey(OverlayStyle style);
 std::string_view overlayPositionKey(OverlayPosition position);

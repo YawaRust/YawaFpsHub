@@ -99,8 +99,14 @@
 
   const overlayState = {
     position: "tl",
+    anchorMode: "corner",
+    originX: 0,
+    originY: 0,
+    followGameMonitor: false,
     layout: "plates",
     style: "frosted",
+    recipe: "frosted",
+    surface: null,
     scale: 100,
     opacity: 72,
     radius: null,
@@ -123,6 +129,9 @@
     accentColor: null,
     // Цвет каждой строки оверлея: null — как в стиле.
     rowColors: { fps: null, cpu: null, gpu: null, ram: null, vram: null },
+    metricRgba: {},
+    customRgba: { value: null, label: null, accent: null,
+      fps: null, cpu: null, gpu: null, ram: null, vram: null },
     borderWidth: null,
     shadowStrength: 100,
     tracking: 100,
@@ -130,8 +139,65 @@
     separators: null,
     fpsDecimals: null,
     clickThrough: false,
-    labels: { ...DEFAULT_LABELS }
+    labels: { ...DEFAULT_LABELS },
+    rowPositions: {}
   };
+
+  const overlayHistory = { undo: [], redo: [], committed: null, gesture: false, restoring: false };
+
+  function recordOverlayHistory() {
+    if (overlayHistory.gesture || overlayHistory.restoring) return;
+    const next = JSON.stringify(overlayState);
+    if (overlayHistory.committed === null) {
+      overlayHistory.committed = next;
+    } else if (next !== overlayHistory.committed) {
+      overlayHistory.undo.push(overlayHistory.committed);
+      if (overlayHistory.undo.length > 30) overlayHistory.undo.shift();
+      overlayHistory.redo = [];
+      overlayHistory.committed = next;
+    }
+    $(`[data-history="undo"]`).disabled = !overlayHistory.undo.length;
+    $(`[data-history="redo"]`).disabled = !overlayHistory.redo.length;
+  }
+
+  function restoreOverlayHistory(direction) {
+    const source = overlayHistory[direction];
+    if (!source.length) return;
+    const other = direction === "undo" ? "redo" : "undo";
+    overlayHistory[other].push(JSON.stringify(overlayState));
+    const snapshot = source.pop();
+    Object.assign(overlayState, JSON.parse(snapshot));
+    overlayHistory.committed = snapshot;
+    overlayHistory.restoring = true;
+    applyOverlay();
+    overlayHistory.restoring = false;
+    syncOsdControls();
+    $$("#osdPosition button").forEach((button) => button.classList.toggle("is-active",
+      button.dataset.pos === (overlayState.anchorMode === "free" ? "free" : overlayState.position)));
+    $$("#osdLayout button").forEach((button) => button.classList.toggle("is-active",
+      button.dataset.layout === overlayState.layout));
+    $$("#osdStyles .style-tile").forEach((tile) => tile.classList.toggle("is-active",
+      tile.dataset.recipe === overlayState.recipe));
+    $$("#osdSurface button").forEach((button) => button.classList.toggle("is-active",
+      button.dataset.surface === overlayState.surface));
+    $$("#osdFont button").forEach((button) => button.classList.toggle("is-active",
+      Number(button.dataset.font) === overlayState.font));
+    $$("#osdChrome button").forEach((button) => button.classList.toggle("is-active",
+      Boolean(overlayState[button.dataset.chrome])));
+    $$("[data-style-toggle]").forEach((button) => button.classList.toggle("is-active",
+      Boolean(overlayState[button.dataset.styleToggle])));
+    $$("#osdOutline button").forEach((button) => button.classList.toggle("is-active",
+      Number(button.dataset.outline) === overlayState.outline));
+    $$(".label-input").forEach((input) => { input.value = overlayState.labels[input.dataset.label] || ""; });
+    applyLabels();
+    $("#osdFollowGame").checked = overlayState.followGameMonitor;
+    $("#osdScale").value = overlayState.scale;
+    $("#osdOpacity").value = overlayState.opacity;
+    $("#osdScaleValue").textContent = `${overlayState.scale}%`;
+    $("#osdOpacityValue").textContent = `${overlayState.opacity}%`;
+    $(`[data-history="undo"]`).disabled = !overlayHistory.undo.length;
+    $(`[data-history="redo"]`).disabled = !overlayHistory.redo.length;
+  }
 
   // Палитра оверлея: индекс соответствует Color в приложении.
   const OSD_PALETTE = [null, "#ffffff", "#5ef29b", "#6aa8ff", "#b47bff", "#ffb347", "#ff6f6f"];
@@ -178,6 +244,10 @@
       } else {
         node.textContent = text;
       }
+    }
+    for (const [id, fraction] of [["cpu", snap.cpu], ["gpu", snap.gpu]]) {
+      const row = document.querySelector(`#osdPreview [data-osd-item="${id}"]`);
+      if (row) row.style.setProperty("--gauge-fill", `${Math.max(0, Math.min(100, fraction))}%`);
     }
   }
 
@@ -275,6 +345,129 @@
   const sensorFilter = { group: "all", query: "", pinnedOnly: false };
 
   const OSD_PRIMARY = { fps: "fps", cpu: "cpu", gpu: "gpu", ramUsed: "ram", vramUsed: "vram" };
+  let selectedLayer = "fps";
+  let colorTarget = "metric";
+  const currentRgba = () => colorTarget === "metric"
+    ? overlayState.metricRgba[selectedLayer] : overlayState.customRgba[colorTarget];
+  const setRgba = (value) => {
+    if (colorTarget === "metric") {
+      if (value) overlayState.metricRgba[selectedLayer] = value;
+      else delete overlayState.metricRgba[selectedLayer];
+    } else overlayState.customRgba[colorTarget] = value;
+  };
+  const displayedLayers = new Set(["fps", "fpsLow1", "cpu", "cpuTemp", "gpu", "gpuTemp", "ramUsed", "vramUsed"]);
+
+  function selectOverlayLayer(id) {
+    selectedLayer = id;
+    const hex = currentRgba() || "#FFFFFFFF";
+    $("#osdLayerName").textContent = colorTarget === "metric"
+      ? sensorRows.get(id)?.sensor.label || id : $("#osdColorTarget").selectedOptions[0].textContent;
+    $("#osdLayerHex").value = hex;
+    $("#osdLayerPicker").value = hex.slice(0, 7);
+    $("#osdLayerAlpha").value = String(Math.round(parseInt(hex.slice(7, 9), 16) / 255 * 100));
+    $("#osdLayerAlphaValue").textContent = `${$("#osdLayerAlpha").value}%`;
+    $$("#osdLayers .workshop-layer__name").forEach((button) => {
+      button.classList.toggle("is-active", button.dataset.layer === id);
+    });
+    $$("#osdPreview .osd__row").forEach((row) => {
+      row.classList.toggle("is-selected", row.querySelector(`[data-metric="${id}"]`) !== null);
+    });
+  }
+
+  function renderOverlayLayers() {
+    const host = $("#osdLayers");
+    host.replaceChildren();
+    for (const [id, entry] of sensorRows) {
+      if (entry.sensor.pinned) displayedLayers.add(id);
+      if (!displayedLayers.has(id)) continue;
+      const row = document.createElement("div");
+      row.className = "workshop-layer";
+      const name = document.createElement("button");
+      name.type = "button";
+      name.className = "workshop-layer__name";
+      name.dataset.layer = id;
+      name.textContent = entry.sensor.label;
+      name.addEventListener("click", () => selectOverlayLayer(id));
+      const eye = document.createElement("button");
+      eye.type = "button";
+      eye.className = `workshop-layer__eye${entry.sensor.pinned ? " is-on" : ""}`;
+      eye.textContent = entry.sensor.pinned ? "◉" : "○";
+      eye.setAttribute("aria-label", `${entry.sensor.pinned ? "Скрыть" : "Показать"} ${entry.sensor.label}`);
+      eye.addEventListener("click", () => {
+        entry.sensor.pinned = !entry.sensor.pinned;
+        saveOverlaySensors();
+        rebuildOverlaySensors();
+        applySensorFilter();
+      });
+      row.append(name, eye);
+      host.appendChild(row);
+    }
+    selectOverlayLayer(selectedLayer);
+  }
+
+  function bindLayerColor() {
+    const hexInput = $("#osdLayerHex");
+    $("#osdColorTarget").addEventListener("change", (event) => {
+      colorTarget = event.target.value;
+      selectOverlayLayer(selectedLayer);
+    });
+    const picker = $("#osdLayerPicker");
+    const alpha = $("#osdLayerAlpha");
+    const apply = (rgb, percent) => {
+      const opacity = Math.round(Number(percent) * 255 / 100).toString(16).padStart(2, "0").toUpperCase();
+      setRgba(`${rgb.toUpperCase()}${opacity}`);
+      selectOverlayLayer(selectedLayer);
+      applyOverlay();
+    };
+    hexInput.addEventListener("change", () => {
+      const value = hexInput.value.trim();
+      if (!/^#[0-9a-fA-F]{8}$/.test(value)) {
+        selectOverlayLayer(selectedLayer);
+        return;
+      }
+      setRgba(value.toUpperCase());
+      selectOverlayLayer(selectedLayer);
+      applyOverlay();
+    });
+    picker.addEventListener("input", () => apply(picker.value, alpha.value));
+    alpha.addEventListener("input", () => apply(picker.value, alpha.value));
+    $("#osdLayerAuto").addEventListener("click", () => {
+      setRgba(null);
+      selectOverlayLayer(selectedLayer);
+      applyOverlay();
+    });
+    const sampleButton = $("#osdLayerSample");
+    let sampling = false;
+    sampleButton.addEventListener("click", () => {
+      sampling = !sampling;
+      sampleButton.classList.toggle("is-active", sampling);
+      if (sampling) toast("Нажмите на текст или плашку предпросмотра. Градиенты недоступны.");
+    });
+    $("#gameScene").addEventListener("pointerdown", (event) => {
+      if (!sampling) return;
+      sampling = false;
+      sampleButton.classList.remove("is-active");
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const node = event.target.closest("#osdPreview .osd__val, #osdPreview .osd__key, #osdPreview .osd__unit, #osdPreview");
+      if (!node) {
+        toast("Здесь цвет задан градиентом; выберите текст или плашку.");
+        return;
+      }
+      const style = getComputedStyle(node);
+      const source = node.id === "osdPreview" ? style.backgroundColor : style.color;
+      const channels = source.match(/[\d.]+/g)?.map(Number);
+      if (!channels || channels.length < 3 || (channels.length > 3 && channels[3] === 0)) {
+        toast("У этого элемента нет сплошного цвета.");
+        return;
+      }
+      const rgb = channels.slice(0, 3).map((channel) => Math.round(channel).toString(16).padStart(2, "0")).join("");
+      const opacity = Math.round((channels[3] ?? 1) * 255).toString(16).padStart(2, "0");
+      setRgba(`#${rgb}${opacity}`.toUpperCase());
+      selectOverlayLayer(selectedLayer);
+      applyOverlay();
+    }, true);
+  }
 
   function saveOverlaySensors() {
     const selected = Object.fromEntries([...sensorRows].map(([id, entry]) => [id, Boolean(entry.sensor.pinned)]));
@@ -317,6 +510,7 @@
     }
     updateMetrics(window.Sim.snapshot());
     applyOverlay();
+    renderOverlayLayers();
   }
 
   function buildSensorTable() {
@@ -343,7 +537,7 @@
           <i class="sensor-row__pip" style="background:${sensor.color};color:${sensor.color}"></i>
           <span>${sensor.label}</span>
         </span>
-        <span class="sensor-row__value">—</span>
+        <span class="sensor-row__value"><span class="sensor-row__reading">—</span><button class="sensor-row__access" type="button" hidden>Включить</button></span>
         <span class="sensor-row__stat">—</span>
         <span class="sensor-row__stat">—</span>
         <span class="sensor-row__stat">—</span>
@@ -362,11 +556,15 @@
         applySensorFilter();
       });
 
+      row.querySelector(".sensor-row__access").addEventListener("click", () => {
+        toast("В приложении доступ к датчикам запрашивается через стандартное подтверждение Windows");
+      });
       host.appendChild(row);
       sensorRows.set(sensor.id, {
         row,
         heading: null,
-        value: row.querySelector(".sensor-row__value"),
+        value: row.querySelector(".sensor-row__reading"),
+        access: row.querySelector(".sensor-row__access"),
         min: row.querySelectorAll(".sensor-row__stat")[0],
         avg: row.querySelectorAll(".sensor-row__stat")[1],
         max: row.querySelectorAll(".sensor-row__stat")[2],
@@ -412,9 +610,21 @@
   }
 
   function updateSensorTable(snap) {
+    // Только демонстрационный параметр: обычные показания не считаются «неподдерживаемыми».
+    const demo = new URLSearchParams(location.search).get("sensor_state");
     for (const entry of sensorRows.values()) {
       const { sensor } = entry;
       if (entry.row.hidden) continue;
+      const reason = sensor.id === "cpuTemp" && ["access", "unsupported", "unknown"].includes(demo)
+        ? demo : null;
+      entry.access.hidden = reason !== "access";
+      entry.row.dataset.reason = reason || "";
+      if (reason) {
+        entry.value.textContent = reason === "access" ? "нужен доступ"
+          : reason === "unsupported" ? "не поддерживается" : "нет данных";
+        entry.min.textContent = entry.avg.textContent = entry.max.textContent = "—";
+        continue;
+      }
       entry.value.innerHTML = `${fmt(sensor.value, sensor.decimals)} <small>${sensor.unit}</small>`;
       entry.min.textContent = fmt(sensor.min, sensor.decimals);
       entry.avg.textContent = fmt(sensor.sum / sensor.samples, sensor.decimals);
@@ -532,7 +742,7 @@
         note: gpu ? gpu.name : "нет данных", color: "var(--gpu)",
         fraction: Math.min(1, gpuIndex / 150) },
       { label: "Память", value: window.Sim.describeMemory(machine.memory),
-        note: machine.memory.profile ? "профиль памяти активен" : "XMP/EXPO не включён",
+        note: "XMP/EXPO из SMBIOS не определяется",
         color: "var(--ram)", fraction: Math.min(1, machine.memory.totalGb / 64) },
       { label: "Экран", value: display ? `${display.width}×${display.height}` : "—",
         note: display ? `${display.hz} Гц` : "нет данных", color: "var(--accent)", fraction: 1 }
@@ -590,6 +800,202 @@
     }
   }
 
+  const diagnosisCard = { image: null, masks: [], draft: null };
+  const diagnosisFrame = { x: 48, y: 138, width: 1080, height: 740 };
+
+  function drawDiagnosisCard() {
+    const canvas = $("#diagnosisCanvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.fillStyle = "#101820";
+    ctx.fillRect(0, 0, 1920, 1080);
+    ctx.fillStyle = "#e8f2f3";
+    ctx.font = "bold 39px sans-serif";
+    ctx.fillText("YawaFpsHub · диагностическая карточка", 48, 71);
+    ctx.font = "bold 24px sans-serif";
+    ctx.fillStyle = "#f8bb70";
+    ctx.fillText("ПРОТОТИП · НЕ РЕАЛЬНЫЙ ЗАМЕР", 49, 113);
+    const box = diagnosisFrame;
+    ctx.fillStyle = "#17252b";
+    ctx.fillRect(box.x, box.y, box.width, box.height);
+    const image = diagnosisCard.image;
+    if (image) {
+      const zoom = Number($("#diagnosisZoom").value) / 100;
+      const ratio = Math.max(box.width / image.width, box.height / image.height) * zoom;
+      const cropWidth = box.width / ratio;
+      const cropHeight = box.height / ratio;
+      const left = (image.width - cropWidth) * Number($("#diagnosisPanX").value) / 100;
+      const top = (image.height - cropHeight) * Number($("#diagnosisPanY").value) / 100;
+      ctx.drawImage(image, left, top, cropWidth, cropHeight, box.x, box.y, box.width, box.height);
+    } else {
+      ctx.fillStyle = "#96a9b1";
+      ctx.font = "27px sans-serif";
+      ctx.fillText("Кадр не добавлен · данных нет", box.x + 90, box.y + 340);
+    }
+    ctx.fillStyle = "#111b21";
+    for (const mask of [...diagnosisCard.masks, diagnosisCard.draft].filter(Boolean)) {
+      ctx.fillRect(mask.x, mask.y, mask.width, mask.height);
+    }
+    ctx.fillStyle = "#18282e";
+    ctx.fillRect(1160, 138, 712, 740);
+    ctx.fillStyle = "#5ef29b";
+    ctx.font = "bold 24px sans-serif";
+    ctx.fillText($("#diagnosisSource").textContent, 1190, 198);
+
+    function wrap(text, x, y, width, step, limit) {
+      let line = "";
+      let count = 0;
+      for (const word of text.split(/\s+/)) {
+        const next = line ? `${line} ${word}` : word;
+        if (ctx.measureText(next).width > width && line) {
+          ctx.fillText(line, x, y);
+          y += step;
+          if (++count === limit) return y;
+          line = word;
+        } else {
+          line = next;
+        }
+      }
+      if (line) ctx.fillText(line, x, y);
+      return y + step;
+    }
+    ctx.fillStyle = "#f2f8f8";
+    ctx.font = "bold 37px sans-serif";
+    wrap($("#diagnosisTitle").textContent, 1190, 271, 640, 49, 2);
+    ctx.fillStyle = "#b8cbd0";
+    ctx.font = "27px sans-serif";
+    wrap($("#diagnosisEvidence").textContent, 1190, 411, 640, 38, 5);
+    let y = 680;
+    for (const item of $$("#diagnosisActions li").slice(0, 3)) {
+      y = wrap(`• ${item.textContent}`, 1190, y, 640, 36, 2);
+    }
+    ctx.fillStyle = "#96a9b1";
+    ctx.font = "23px sans-serif";
+    ctx.fillText("Нет проверенных сведений о системе, температуре или сессии", 49, 947);
+    ctx.fillText("Картинка добавлена вручную; приложение не проверяло, что это кадр игры", 49, 994);
+  }
+
+  function bindDiagnosisWorkshop() {
+    const canvas = $("#diagnosisCanvas");
+    const picker = $("#diagnosisFile");
+    for (const selector of ["#diagnosisZoom", "#diagnosisPanX", "#diagnosisPanY"]) {
+      $(selector).addEventListener("input", drawDiagnosisCard);
+    }
+    picker.addEventListener("change", () => {
+      const file = picker.files?.[0];
+      picker.value = "";
+      if (!file) return;
+      if (!/^image\/(png|jpeg|webp)$/.test(file.type) || file.size > 16 * 1024 * 1024) {
+        toast("Нужен PNG, JPEG или WebP до 16 МиБ");
+        return;
+      }
+      const url = URL.createObjectURL(file);
+      const image = new Image();
+      image.onload = () => {
+        URL.revokeObjectURL(url);
+        if (image.width * image.height > 16000000) {
+          toast("Слишком большое изображение");
+          return;
+        }
+        diagnosisCard.image = image;
+        diagnosisCard.masks = [];
+        drawDiagnosisCard();
+      };
+      image.onerror = () => { URL.revokeObjectURL(url); toast("Не удалось открыть изображение"); };
+      image.src = url;
+    });
+    $("#diagnosisClear").addEventListener("click", () => {
+      diagnosisCard.image = null;
+      diagnosisCard.masks = [];
+      diagnosisCard.draft = null;
+      drawDiagnosisCard();
+    });
+    const position = (event) => {
+      const bounds = canvas.getBoundingClientRect();
+      const x = (event.clientX - bounds.left) * canvas.width / bounds.width;
+      const y = (event.clientY - bounds.top) * canvas.height / bounds.height;
+      const box = diagnosisFrame;
+      return {
+        x: Math.max(box.x, Math.min(box.x + box.width, x)),
+        y: Math.max(box.y, Math.min(box.y + box.height, y))
+      };
+    };
+    let start = null;
+    canvas.addEventListener("pointerdown", (event) => {
+      if (!diagnosisCard.image) return;
+      const point = position(event);
+      const box = diagnosisFrame;
+      const bounds = canvas.getBoundingClientRect();
+      const x = (event.clientX - bounds.left) * canvas.width / bounds.width;
+      const y = (event.clientY - bounds.top) * canvas.height / bounds.height;
+      if (x < box.x || x > box.x + box.width || y < box.y || y > box.y + box.height) return;
+      start = point;
+      canvas.setPointerCapture(event.pointerId);
+    });
+    canvas.addEventListener("pointermove", (event) => {
+      if (!start) return;
+      const end = position(event);
+      diagnosisCard.draft = { x: Math.min(start.x, end.x), y: Math.min(start.y, end.y),
+        width: Math.abs(end.x - start.x), height: Math.abs(end.y - start.y) };
+      drawDiagnosisCard();
+    });
+    const finish = (event) => {
+      if (!start) return;
+      if (event.type === "pointerup" && diagnosisCard.draft
+        && diagnosisCard.draft.width > 4 && diagnosisCard.draft.height > 4) {
+        diagnosisCard.masks.push(diagnosisCard.draft);
+      }
+      start = null;
+      diagnosisCard.draft = null;
+      drawDiagnosisCard();
+    };
+    canvas.addEventListener("pointerup", finish);
+    canvas.addEventListener("pointercancel", finish);
+    $("#diagnosisSave").addEventListener("click", () => {
+      drawDiagnosisCard();
+      canvas.toBlob((blob) => {
+        if (!blob) { toast("PNG не создан"); return; }
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "yawa-demo-card.png";
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }, "image/png");
+    });
+    drawDiagnosisCard();
+  }
+
+  function bindDiagnosisPreview() {
+    const source = $("#diagnosisSource");
+    const title = $("#diagnosisTitle");
+    const evidence = $("#diagnosisEvidence");
+    const actions = $("#diagnosisActions");
+    $("#diagnosisDemo").addEventListener("click", () => {
+      source.textContent = "УСЛОВНЫЙ ПРИМЕР · НЕ ЗАМЕР";
+      title.textContent = "Пример: упор в видеокарту";
+      evidence.textContent = "Если GPU игры 99 %, CPU игры 42 % и кадр выходит за бюджет, можно предположить упор в GPU. Здесь числа вымышлены.";
+      actions.replaceChildren();
+      for (const text of ["Проверить настройки графики и апскейл.", "Сравнить время кадра до и после изменения."]) {
+        const item = document.createElement("li");
+        item.textContent = text;
+        actions.appendChild(item);
+      }
+      drawDiagnosisCard();
+    });
+    $("#diagnosisUnknown").addEventListener("click", () => {
+      source.textContent = "НЕТ ДАННЫХ";
+      title.textContent = "Недостаточно данных для вывода";
+      evidence.textContent = "Нужны кадры и показатели процесса активной игры; общая загрузка ПК не подходит.";
+      actions.replaceChildren();
+      const item = document.createElement("li");
+      item.textContent = "Запустите игру и проверьте сбор кадров.";
+      actions.appendChild(item);
+      drawDiagnosisCard();
+    });
+    bindDiagnosisWorkshop();
+  }
+
   function specRows(selector, rows) {
     const host = $(selector);
     if (!host) return;
@@ -642,7 +1048,7 @@
         ? `${fmt(memory.configuredMt, 0)} МТ/с из ${fmt(memory.ratedMt, 0)}`
         : `${fmt(memory.configuredMt, 0)} МТ/с`],
       ["Такт tCK", tck > 0 ? `${fmt(tck, 3)} нс` : ""],
-      ["XMP/EXPO", memory.profile ? "включён" : "не включён"],
+      ["XMP/EXPO", "не определяется из SMBIOS"],
       ["Слоты", memory.slots ? `${filled} из ${memory.slots}` : ""]
     ]);
 
@@ -706,6 +1112,12 @@
   function switchView(name) {
     const view = VIEWS[name];
     if (!view) return;
+    if ($("[data-view=overlay].is-active") && name !== "overlay") {
+      overlayHistory.undo = [];
+      overlayHistory.redo = [];
+      overlayHistory.committed = JSON.stringify(overlayState);
+      recordOverlayHistory();
+    }
 
     $$(".rail__item").forEach((item) => item.classList.toggle("is-active", item.dataset.view === name));
     $$(".view").forEach((node) => node.classList.toggle("is-active", node.dataset.view === name));
@@ -736,6 +1148,19 @@
     });
   }
 
+  function updateFrameStatus() {
+    const paused = window.Sim.isPaused();
+    const enabled = $("#etwToggle").checked;
+    $("#sourceChipText").textContent = paused ? "Опрос на паузе" : enabled ? "Кадры доступны" : "Кадры выключены";
+    $("#statusSource").textContent = paused ? "Опрос приостановлен"
+      : enabled ? "Кадры доступны · сбор идёт" : "Сбор кадров выключен";
+    const source = $(".sources .source__state");
+    source.textContent = enabled ? "работает" : "выключено";
+    source.classList.toggle("source__state--ok", enabled);
+    source.classList.toggle("source__state--off", !enabled);
+    $("#aboutFramesState").textContent = enabled ? "работает" : "выключено";
+  }
+
   function bindPause() {
     const button = $("#pauseBtn");
     button.addEventListener("click", () => {
@@ -745,9 +1170,7 @@
       button.querySelector("use").setAttribute("href", paused ? "#i-play" : "#i-pause");
       $("#liveLabel").textContent = paused ? "ПАУЗА" : "LIVE";
       document.body.classList.toggle("is-paused", paused);
-      $("#statusSource").textContent = paused
-        ? "Сбор приостановлен"
-        : "ETW-сессия активна · кадры DX12";
+      updateFrameStatus();
       toast(paused ? "Опрос остановлен" : "Опрос возобновлён");
     });
   }
@@ -788,6 +1211,9 @@
     overlayState.labelColor = null;
     overlayState.accentColor = null;
     overlayState.rowColors = { fps: null, cpu: null, gpu: null, ram: null, vram: null };
+    overlayState.metricRgba = {};
+    for (const key of Object.keys(overlayState.customRgba)) overlayState.customRgba[key] = null;
+    selectOverlayLayer(selectedLayer);
     overlayState.borderWidth = null;
     overlayState.shadowStrength = 100;
     overlayState.tracking = 100;
@@ -832,6 +1258,7 @@
       if (node) node.textContent = label;
     }
     store.write("yawa.labels", JSON.stringify(overlayState.labels));
+    recordOverlayHistory();
   }
 
   function fitOverlay() {
@@ -847,8 +1274,12 @@
   function applyOverlay() {
     const osd = $("#osdPreview");
     osd.dataset.pos = overlayState.position;
+    osd.dataset.anchor = overlayState.anchorMode;
+    osd.style.setProperty("--osd-origin-x", `${overlayState.originX}px`);
+    osd.style.setProperty("--osd-origin-y", `${overlayState.originY}px`);
     osd.dataset.layout = overlayState.layout;
     osd.dataset.style = overlayState.style;
+    osd.dataset.surface = overlayState.surface || "";
     osd.style.setProperty("--osd-scale", (overlayState.scale / 100).toFixed(2));
     // Прозрачность окна и прозрачность подложки — разные настройки.
     const bgFactor = overlayState.bgOpacity === null ? 1 : overlayState.bgOpacity / 100;
@@ -862,27 +1293,40 @@
 
     // Цвета по элементам: значения и подписи независимо от пресета.
     const colorFor = osdColor;
-    const valueColor = colorFor(overlayState.valueColor);
+    const valueColor = overlayState.customRgba.value || colorFor(overlayState.valueColor);
     for (const node of osd.querySelectorAll(".osd__val")) {
       if (valueColor) node.style.setProperty("color", valueColor, "important");
       else node.style.removeProperty("color");
     }
-    const labelColor = colorFor(overlayState.labelColor);
+    const labelColor = overlayState.customRgba.label || colorFor(overlayState.labelColor);
     for (const node of osd.querySelectorAll(".osd__key, .osd__unit")) {
       if (labelColor) node.style.setProperty("color", labelColor, "important");
       else node.style.removeProperty("color");
     }
     // Цвет каждой строки: строка оверлея ссылается на свой показатель.
     for (const row of OSD_ROWS) {
-      const color = colorFor(overlayState.rowColors[row.key]);
+      const color = overlayState.customRgba[row.key] || colorFor(overlayState.rowColors[row.key]);
       const value = osd.querySelector(`[data-osd-item="${row.key}"] .osd__val`);
       if (!value) continue;
       if (color) value.style.setProperty("color", color, "important");
       else if (!valueColor) value.style.removeProperty("color");
     }
 
+    for (const node of osd.querySelectorAll("[data-metric]")) {
+      const id = node.dataset.metric;
+      const group = id.startsWith("vram") ? "vram"
+        : sensorRows.get(id)?.sensor.group === "mem" ? "ram" : sensorRows.get(id)?.sensor.group;
+      const rgba = overlayState.customRgba[group];
+      if (rgba) node.style.setProperty("color", rgba, "important");
+    }
+    for (const [id, rgba] of Object.entries(overlayState.metricRgba)) {
+      if (!/^#[0-9A-Fa-f]{8}$/.test(rgba)) continue;
+      const value = osd.querySelector(`[data-metric="${id}"]`);
+      if (value) value.style.setProperty("color", rgba, "important");
+    }
+
     // Акцент — рамка и декоративные линии стиля.
-    const accent = colorFor(overlayState.accentColor);
+    const accent = overlayState.customRgba.accent || colorFor(overlayState.accentColor);
     if (accent) osd.style.setProperty("border-color", accent, "important");
     else osd.style.removeProperty("border-color");
 
@@ -915,23 +1359,44 @@
     osd.classList.toggle("no-background", !overlayState.background);
     osd.classList.toggle("no-border", !overlayState.border);
     osd.classList.toggle("no-shadow", !overlayState.shadow);
+    osd.querySelectorAll(".osd__row").forEach((row) => {
+      const position = overlayState.rowPositions[row.dataset.osdItem] || { x: 0, y: 0 };
+      row.style.translate = `${position.x}px ${position.y}px`;
+    });
 
     fitOverlay();
     const radiusValue = $("#osdRadiusValue");
     if (radiusValue) radiusValue.textContent = `${overlayState.radius === null ? 8 : overlayState.radius} px`;
     const offsetValue = $("#osdOffsetValue");
-    if (offsetValue) offsetValue.textContent = `${overlayState.offsetX} / ${overlayState.offsetY} px`;
+    $("#osdOffsetLabel").textContent = overlayState.anchorMode === "free" ? "Координаты" : "Смещение";
+    if (offsetValue) {
+      offsetValue.textContent = overlayState.anchorMode === "free"
+        ? `${Math.round(overlayState.originX)} / ${Math.round(overlayState.originY)} px`
+        : `${overlayState.offsetX} / ${overlayState.offsetY} px`;
+    }
     const radius = $("#osdRadius");
     if (radius) {
       const shown = overlayState.radius === null ? 8 : overlayState.radius;
       radius.value = String(shown);
       radius.style.setProperty("--fill", `${(shown / 24) * 100}%`);
     }
+    recordOverlayHistory();
   }
 
   // Все органы управления оверлеем показывают значения из overlayState:
   // нужны после сброса пресета и после любой внешней правки состояния.
   function syncOsdControls() {
+    $("#osdFollowGame").checked = overlayState.followGameMonitor;
+    $$("#osdSurface button").forEach((button) => button.classList.toggle("is-active",
+      button.dataset.surface === overlayState.surface));
+    $$("#osdStyles .style-tile").forEach((tile) => tile.classList.toggle("is-active",
+      tile.dataset.recipe === overlayState.recipe));
+    $$("#osdLayout button").forEach((button) => button.classList.toggle("is-active",
+      button.dataset.layout === overlayState.layout));
+    $$("#osdFont button").forEach((button) => button.classList.toggle("is-active",
+      Number(button.dataset.font) === overlayState.font));
+    $("#osdScale").value = overlayState.scale;
+    $("#osdScaleValue").textContent = `${overlayState.scale}%`;
     const markColors = (id, value) => {
       const host = $(`#${id}`);
       if (!host) return;
@@ -1011,19 +1476,131 @@
     });
   }
 
-  // Оверлей в предпросмотре тянется мышью — как Ctrl + мышь по настоящему оверлею.
+  const canvasView = { zoom: 1, panX: 0, panY: 0, spaceDown: false };
+
+  function updateCanvasView() {
+    const viewport = $("#gameViewport");
+    viewport.style.setProperty("--canvas-zoom", canvasView.zoom);
+    viewport.style.setProperty("--canvas-pan-x", `${canvasView.panX}px`);
+    viewport.style.setProperty("--canvas-pan-y", `${canvasView.panY}px`);
+  }
+
+  function freeOverlayAnchor() {
+    if (overlayState.anchorMode === "free") return;
+    const osd = $("#osdPreview");
+    const screen = osd.offsetParent.getBoundingClientRect();
+    const plate = osd.getBoundingClientRect();
+    overlayState.originX = (plate.left - screen.left) / canvasView.zoom;
+    overlayState.originY = (plate.top - screen.top) / canvasView.zoom;
+    overlayState.offsetX = 0;
+    overlayState.offsetY = 0;
+    overlayState.anchorMode = "free";
+    $$("#osdPosition button").forEach((button) => {
+      button.classList.toggle("is-active", button.dataset.pos === "free");
+    });
+    applyOverlay();
+  }
+
+  function bindCanvasView() {
+    const scene = $("#gameScene");
+    let pan = null;
+    scene.addEventListener("wheel", (event) => {
+      event.preventDefault();
+      const bounds = scene.getBoundingClientRect();
+      const x = event.clientX - bounds.left;
+      const y = event.clientY - bounds.top;
+      const next = Math.max(0.75, Math.min(4, canvasView.zoom * (event.deltaY < 0 ? 1.15 : 1 / 1.15)));
+      canvasView.panX = x - ((x - canvasView.panX) / canvasView.zoom) * next;
+      canvasView.panY = y - ((y - canvasView.panY) / canvasView.zoom) * next;
+      canvasView.zoom = next;
+      updateCanvasView();
+    }, { passive: false });
+    document.addEventListener("keydown", (event) => {
+      if (event.code === "Space" && !event.target.closest("input, textarea, button")) {
+        canvasView.spaceDown = true;
+        event.preventDefault();
+      }
+    });
+    document.addEventListener("keyup", (event) => {
+      if (event.code === "Space") canvasView.spaceDown = false;
+    });
+    window.addEventListener("blur", () => { canvasView.spaceDown = false; });
+    scene.addEventListener("pointerdown", (event) => {
+      if (!canvasView.spaceDown || event.button !== 0) return;
+      pan = { x: event.clientX, y: event.clientY, left: canvasView.panX, top: canvasView.panY };
+      scene.setPointerCapture(event.pointerId);
+      scene.classList.add("is-panning");
+      event.preventDefault();
+      event.stopPropagation();
+    }, true);
+    scene.addEventListener("pointermove", (event) => {
+      if (!pan) return;
+      canvasView.panX = pan.left + event.clientX - pan.x;
+      canvasView.panY = pan.top + event.clientY - pan.y;
+      updateCanvasView();
+    });
+    const release = (event) => {
+      if (!pan) return;
+      pan = null;
+      scene.classList.remove("is-panning");
+      if (scene.hasPointerCapture(event.pointerId)) scene.releasePointerCapture(event.pointerId);
+    };
+    scene.addEventListener("pointerup", release);
+    scene.addEventListener("pointercancel", release);
+  }
+
+  // Ctrl выбирает строки; Shift во время движения привязывает позицию к сетке.
   function bindOsdDrag() {
     const osd = $("#osdPreview");
+    const guides = $("#osdGuides");
+    const selected = new Set();
     let drag = null;
+    const grid = (value) => Math.round(value / 8) * 8;
+    const snap = (value, extent, targets) => {
+      let best = { value, guide: null, distance: 7 };
+      targets.forEach((target) => [0, extent / 2, extent].forEach((edge) => {
+        const distance = Math.abs(value + edge - target);
+        if (distance < best.distance) best = { value: value + target - value - edge, guide: target, distance };
+      }));
+      return best;
+    };
+    const showGuide = (axis, value) => {
+      const node = $(`#osdGuide${axis.toUpperCase()}`);
+      node.classList.toggle("is-active", value !== null);
+      if (value !== null) guides.style.setProperty(`--guide-${axis}`, `${value}px`);
+    };
+    const markRows = () => osd.querySelectorAll(".osd__row").forEach((node) => {
+      node.classList.toggle("is-selected", selected.has(node.dataset.osdItem));
+    });
 
     osd.addEventListener("pointerdown", (event) => {
       if (event.button !== 0) return;
+      const row = overlayState.layout === "plates" && !event.altKey
+        ? event.target.closest(".osd__row") : null;
+      if (row) selectOverlayLayer(row.querySelector("[data-metric]")?.dataset.metric || "fps");
+      if (row && event.ctrlKey) {
+        if (selected.has(row.dataset.osdItem)) selected.delete(row.dataset.osdItem);
+        else selected.add(row.dataset.osdItem);
+        markRows();
+        event.preventDefault();
+        return;
+      }
+      if (row) {
+        if (!selected.has(row.dataset.osdItem)) {
+          selected.clear();
+          selected.add(row.dataset.osdItem);
+        }
+        markRows();
+      } else freeOverlayAnchor();
       drag = {
-        x: event.clientX,
-        y: event.clientY,
-        offsetX: overlayState.offsetX,
-        offsetY: overlayState.offsetY
+        x: event.clientX, y: event.clientY, row,
+        rows: row ? [...selected].map((key) => ({ key,
+          x: overlayState.rowPositions[key]?.x || 0,
+          y: overlayState.rowPositions[key]?.y || 0 })) : [],
+        originX: overlayState.originX, originY: overlayState.originY
       };
+      overlayHistory.gesture = true;
+      guides.classList.add("is-active");
       osd.setPointerCapture(event.pointerId);
       osd.classList.add("is-dragging");
       event.preventDefault();
@@ -1031,14 +1608,66 @@
 
     osd.addEventListener("pointermove", (event) => {
       if (!drag) return;
-      overlayState.offsetX = Math.max(-260, Math.min(260, drag.offsetX + (event.clientX - drag.x)));
-      overlayState.offsetY = Math.max(-200, Math.min(200, drag.offsetY + (event.clientY - drag.y)));
-      applyOverlay();
+      const screen = osd.offsetParent.getBoundingClientRect();
+      const plate = osd.getBoundingClientRect();
+      if (drag.row) {
+        const scale = plate.width / Math.max(1, osd.offsetWidth);
+        const primary = drag.rows.find((item) => item.key === drag.row.dataset.osdItem);
+        let nextX = primary.x + (event.clientX - drag.x) / scale;
+        let nextY = primary.y + (event.clientY - drag.y) / scale;
+        let guideY = null;
+        if (event.shiftKey) {
+          nextX = grid(nextX);
+          nextY = grid(nextY);
+        } else {
+          const others = [...osd.querySelectorAll(".osd__row:not(.is-hidden)")]
+            .filter((item) => !selected.has(item.dataset.osdItem));
+          const baseline = others.map((item) => item.offsetTop
+            + (overlayState.rowPositions[item.dataset.osdItem]?.y || 0) - drag.row.offsetTop);
+          const snapped = snap(nextY, 0, baseline);
+          nextY = snapped.value;
+          guideY = snapped.guide;
+        }
+        const dx = nextX - primary.x;
+        const dy = nextY - primary.y;
+        drag.rows.forEach((item) => {
+          const position = { x: item.x + dx, y: item.y + dy };
+          overlayState.rowPositions[item.key] = position;
+          const node = osd.querySelector(`[data-osd-item="${item.key}"]`);
+          if (node) node.style.translate = `${position.x}px ${position.y}px`;
+        });
+        showGuide("x", null);
+        showGuide("y", guideY === null ? null : (plate.top - screen.top) / canvasView.zoom
+          + (drag.row.offsetTop + guideY) * (scale / canvasView.zoom));
+      } else {
+        const width = screen.width / canvasView.zoom;
+        const height = screen.height / canvasView.zoom;
+        const plateWidth = plate.width / canvasView.zoom;
+        const plateHeight = plate.height / canvasView.zoom;
+        let x = drag.originX + (event.clientX - drag.x) / canvasView.zoom;
+        let y = drag.originY + (event.clientY - drag.y) / canvasView.zoom;
+        const xSnap = event.shiftKey ? { value: grid(x), guide: null }
+          : snap(x, plateWidth, [0, width * .05, width / 2, width * .95, width]);
+        const ySnap = event.shiftKey ? { value: grid(y), guide: null }
+          : snap(y, plateHeight, [0, height * .05, height / 2, height * .95, height]);
+        x = Math.max(0, Math.min(width - plateWidth, xSnap.value));
+        y = Math.max(0, Math.min(height - plateHeight, ySnap.value));
+        overlayState.originX = x;
+        overlayState.originY = y;
+        showGuide("x", xSnap.guide);
+        showGuide("y", ySnap.guide);
+        applyOverlay();
+      }
     });
 
     const release = (event) => {
       if (!drag) return;
       drag = null;
+      overlayHistory.gesture = false;
+      recordOverlayHistory();
+      guides.classList.remove("is-active");
+      showGuide("x", null);
+      showGuide("y", null);
       osd.classList.remove("is-dragging");
       if (osd.hasPointerCapture(event.pointerId)) osd.releasePointerCapture(event.pointerId);
     };
@@ -1052,6 +1681,10 @@
       chip.classList.toggle("is-active", Boolean(overlayState[chip.dataset.chrome]));
       chip.addEventListener("click", () => {
         overlayState[chip.dataset.chrome] = !overlayState[chip.dataset.chrome];
+        if (chip.dataset.chrome !== "clickThrough") {
+          overlayState.surface = null;
+          $$("#osdSurface button").forEach((node) => node.classList.remove("is-active"));
+        }
         chip.classList.toggle("is-active", overlayState[chip.dataset.chrome]);
         applyOverlay();
       });
@@ -1067,10 +1700,18 @@
       button.addEventListener("click", () => {
         const axis = button.dataset.offset;
         const delta = Number(button.dataset.delta);
-        const next = (axis === "x" ? overlayState.offsetX : overlayState.offsetY) + delta;
-        const clamped = Math.max(-200, Math.min(200, next));
-        if (axis === "x") overlayState.offsetX = clamped;
-        else overlayState.offsetY = clamped;
+        if (overlayState.anchorMode === "free") {
+          const screen = $("#osdPreview").offsetParent.getBoundingClientRect();
+          const plate = $("#osdPreview").getBoundingClientRect();
+          const key = axis === "x" ? "originX" : "originY";
+          const limit = (axis === "x" ? screen.width - plate.width : screen.height - plate.height) / canvasView.zoom;
+          overlayState[key] = Math.max(0, Math.min(limit, overlayState[key] + delta));
+        } else {
+          const next = (axis === "x" ? overlayState.offsetX : overlayState.offsetY) + delta;
+          const clamped = Math.max(-200, Math.min(200, next));
+          if (axis === "x") overlayState.offsetX = clamped;
+          else overlayState.offsetY = clamped;
+        }
         applyOverlay();
       });
     });
@@ -1136,27 +1777,158 @@
     });
   }
 
-  // Как в приложении: пресет приносит свои переключатели оформления и свой радиус.
+  // Первые восемь ключей — миграция старых стилей без изменения их базового вида.
+  const OSD_RECIPES = [
+    ["neon", "Неон", "neon", "plates", null, 0, 100],
+    ["rtss", "RTSS", "rtss", "plates", null, 0, 100],
+    ["frosted", "Стекло", "frosted", "plates", null, 0, 100],
+    ["terminal", "Терминал", "terminal", "plates", null, 0, 100],
+    ["cyber", "Кибер", "cyber", "plates", null, 0, 100],
+    ["mono", "Минимал", "mono", "plates", null, 0, 100],
+    ["esport", "Esport", "esport", "plates", null, 0, 100],
+    ["retro", "Retro", "retro", "plates", null, 0, 100],
+    ["fps_large", "Только FPS", "neon", "line", "none", 0, 130],
+    ["stream", "Для стрима", "frosted", "line", "plate", 0, 110],
+    ["laptop", "Ноутбук 13″", "mono", "line", "none", 2, 85],
+    ["hdr", "Для HDR", "esport", "line", "outline", 0, 120],
+    ["recording", "Для записи", "terminal", "plates", "plate", 1, 105],
+    ["quiet", "Не отвлекать", "frosted", "plates", "glass", 0, 85],
+    ["focus", "Фокус", "cyber", "gauge", "outline", 2, 110],
+    ["clean", "Чистая шкала", "mono", "gauge", "plate", 1, 100]
+  ];
   const STYLE_CHROME = {
     rtss: { background: false, border: false, shadow: false },
     mono: { background: true, border: false, shadow: false }
   };
 
+  function parseOverlayRecipeJson(text) {
+    const data = JSON.parse(text);
+    const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+    const fields = ["schema", "recipe", "palette", "shape", "surface", "typeface", "scale", "colors"];
+    const palettes = OSD_RECIPES.slice(0, 8).map(([key]) => key);
+    const fonts = ["sans", "mono", "condensed", "dense"];
+    if (!isObject(data) || data.schema !== 1 || Object.keys(data).some((key) => !fields.includes(key))
+        || !OSD_RECIPES.some(([key]) => key === data.recipe) || !palettes.includes(data.palette)
+        || !["plates", "line", "gauge"].includes(data.shape)
+        || ![null, "glass", "plate", "outline", "none", "custom"].includes(data.surface)
+        || !fonts.includes(data.typeface) || !Number.isInteger(data.scale)
+        || data.scale < 70 || data.scale > 160) {
+      throw new Error("Неверная схема или параметры рецепта");
+    }
+    const colorKeys = ["value", "label", "accent", "fps", "cpu", "gpu", "ram", "vram"];
+    if (data.colors !== undefined && (!isObject(data.colors)
+        || Object.entries(data.colors).some(([key, value]) => !colorKeys.includes(key)
+          || typeof value !== "string" || !/^#[0-9a-fA-F]{8}$/.test(value)))) {
+      throw new Error("Неверный формат цвета рецепта");
+    }
+    return data;
+  }
+
   function bindOsdStyles() {
-    $("#osdStyles").addEventListener("click", (event) => {
+    const gallery = $("#osdStyles");
+    gallery.querySelectorAll(".style-tile").forEach((tile) => { tile.dataset.recipe = tile.dataset.style; });
+    OSD_RECIPES.slice(8).forEach(([key, name, style, shape, surface]) => {
+      const tile = document.createElement("button");
+      tile.type = "button";
+      tile.className = "style-tile";
+      tile.dataset.recipe = key;
+      tile.dataset.style = style;
+      const preview = document.createElement("span");
+      preview.className = "style-tile__preview";
+      preview.dataset.style = style;
+      const value = document.createElement("b"); value.textContent = "142";
+      const label = document.createElement("i"); label.textContent = "FPS";
+      const extra = document.createElement("em"); extra.textContent = shape === "gauge" ? "▰▰▱" : "46%";
+      preview.append(value, label, extra);
+      const caption = document.createElement("span");
+      caption.className = "style-tile__name";
+      caption.textContent = name;
+      const detail = document.createElement("em");
+      detail.textContent = `${shape === "gauge" ? "шкала" : shape === "line" ? "строка" : "плитка"} · ${surface}`;
+      caption.append(detail);
+      tile.append(preview, caption);
+      gallery.append(tile);
+    });
+    const chromeForSurface = (surface, style) => {
+      if (!surface) return STYLE_CHROME[style] || { background: true, border: true, shadow: true };
+      return { background: surface === "glass" || surface === "plate",
+        border: surface === "glass" || surface === "outline", shadow: surface === "glass" };
+    };
+    gallery.addEventListener("click", (event) => {
       const tile = event.target.closest(".style-tile");
       if (!tile) return;
-      overlayState.style = tile.dataset.style;
-      const chrome = STYLE_CHROME[tile.dataset.style] || { background: true, border: true, shadow: true };
-      overlayState.background = chrome.background;
-      overlayState.border = chrome.border;
-      overlayState.shadow = chrome.shadow;
-      overlayState.radius = null;
+      const recipe = OSD_RECIPES.find(([key]) => key === tile.dataset.recipe);
+      if (!recipe) return;
+      const [key, , style, layout, surface, font, scale] = recipe;
+      const standard = new Set(["fps", "fpsLow1", "cpu", "cpuTemp", "gpu", "gpuTemp", "ramUsed", "vramUsed"]);
+      for (const [id, entry] of sensorRows) {
+        entry.sensor.pinned = key === "fps_large" ? id === "fps" : standard.has(id);
+      }
+      saveOverlaySensors(); rebuildOverlaySensors(); applySensorFilter();
+      Object.assign(overlayState, { recipe: key, style, layout, surface, font, scale, radius: null,
+        bgOpacity: null, padding: null, rowGap: null, valueColor: null, labelColor: null,
+        accentColor: null, borderWidth: null, shadowStrength: 100, tracking: 100,
+        uppercase: null, separators: null, fpsDecimals: null, textScale: 100 });
+      overlayState.rowColors = { fps: null, cpu: null, gpu: null, ram: null, vram: null };
+      overlayState.metricRgba = {};
+      for (const field of Object.keys(overlayState.customRgba)) overlayState.customRgba[field] = null;
+      selectOverlayLayer(selectedLayer);
+      const chrome = chromeForSurface(surface, style);
+      Object.assign(overlayState, chrome);
+      syncOsdControls();
       $$("#osdChrome button").forEach((chip) => {
         chip.classList.toggle("is-active", Boolean(overlayState[chip.dataset.chrome]));
       });
-      $$("#osdStyles .style-tile").forEach((node) => node.classList.toggle("is-active", node === tile));
       applyOverlay();
+    });
+    const fileInput = $("#importOsdRecipeFile");
+    $("#importOsdRecipe").addEventListener("click", () => fileInput.click());
+    fileInput.addEventListener("change", async () => {
+      const file = fileInput.files?.[0];
+      if (!file) return;
+      try {
+        if (file.size > 16384) throw new Error("Файл рецепта слишком большой (предел 16 КБ)");
+        const data = parseOverlayRecipeJson(await file.text());
+        const fonts = ["sans", "mono", "condensed", "dense"];
+        Object.assign(overlayState, { recipe: data.recipe, style: data.palette, layout: data.shape,
+          surface: data.surface, font: fonts.indexOf(data.typeface), scale: data.scale,
+          radius: null, bgOpacity: null, padding: null, rowGap: null,
+          valueColor: null, labelColor: null, accentColor: null,
+          borderWidth: null, shadowStrength: 100, tracking: 100,
+          uppercase: null, separators: null, fpsDecimals: null, textScale: 100 });
+        overlayState.rowColors = { fps: null, cpu: null, gpu: null, ram: null, vram: null };
+        for (const key of Object.keys(overlayState.customRgba)) {
+          overlayState.customRgba[key] = data.colors?.[key]?.toUpperCase() || null;
+        }
+        // В schema 1 нет фоновых ручных параметров для surface: custom.
+        if (data.surface !== "custom") Object.assign(overlayState, chromeForSurface(data.surface, data.palette));
+        selectOverlayLayer(selectedLayer);
+        syncOsdControls();
+        $$("#osdChrome button").forEach((chip) => chip.classList.toggle("is-active",
+          Boolean(overlayState[chip.dataset.chrome])));
+        applyOverlay();
+        toast(data.surface === "custom" ? "Рецепт загружен; ручная поверхность осталась прежней"
+          : "Рецепт загружен. Состав строк и личные настройки не изменены");
+      } catch (error) {
+        toast(`Не удалось импортировать: ${error instanceof Error ? error.message : "ошибка чтения"}`);
+      } finally {
+        fileInput.value = "";
+      }
+    });
+    $("#exportOsdRecipe").addEventListener("click", () => {
+      const { recipe, style, layout, surface, font, scale } = overlayState;
+      const data = { schema: 1, recipe, palette: style, shape: layout,
+        surface, typeface: ["sans", "mono", "condensed", "dense"][font], scale };
+      const colors = Object.fromEntries(Object.entries(overlayState.customRgba)
+        .filter(([, rgba]) => typeof rgba === "string" && /^#[0-9A-Fa-f]{8}$/.test(rgba)));
+      if (Object.keys(colors).length) data.colors = colors;
+      const json = JSON.stringify(data, null, 2);
+      const url = URL.createObjectURL(new Blob([json + "\n"], { type: "application/json" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "yawa-overlay-recipe.json";
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     });
   }
 
@@ -1215,12 +1987,43 @@
   }
 
   function bindOverlay() {
+    $$("[data-view=overlay] input[type=range]").forEach((range) => {
+      range.addEventListener("pointerdown", () => { overlayHistory.gesture = true; });
+      const finish = () => {
+        overlayHistory.gesture = false;
+        recordOverlayHistory();
+      };
+      range.addEventListener("pointerup", finish);
+      range.addEventListener("pointercancel", finish);
+    });
+    $("#osdHistory").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-history]");
+      if (button) restoreOverlayHistory(button.dataset.history);
+    });
+    document.addEventListener("keydown", (event) => {
+      if (!$("[data-view=overlay]").classList.contains("is-active") || !event.ctrlKey
+        || event.key.toLowerCase() !== "z" || event.target.closest("input, textarea")) return;
+      event.preventDefault();
+      restoreOverlayHistory(event.shiftKey ? "redo" : "undo");
+    });
     $("#osdPosition").addEventListener("click", (event) => {
       const button = event.target.closest("[data-pos]");
       if (!button) return;
-      overlayState.position = button.dataset.pos;
-      $$("#osdPosition button").forEach((node) => node.classList.toggle("is-active", node === button));
-      applyOverlay();
+      if (button.dataset.pos === "free") {
+        freeOverlayAnchor();
+      } else {
+        overlayState.position = button.dataset.pos;
+        overlayState.anchorMode = "corner";
+        overlayState.offsetX = 0;
+        overlayState.offsetY = 0;
+        $$("#osdPosition button").forEach((node) => node.classList.toggle("is-active", node === button));
+        applyOverlay();
+      }
+    });
+
+    $("#osdFollowGame").addEventListener("change", (event) => {
+      overlayState.followGameMonitor = event.target.checked;
+      recordOverlayHistory();
     });
 
     $("#osdLayout").addEventListener("click", (event) => {
@@ -1228,6 +2031,18 @@
       if (!button) return;
       overlayState.layout = button.dataset.layout;
       $$("#osdLayout button").forEach((node) => node.classList.toggle("is-active", node === button));
+      applyOverlay();
+    });
+    $("#osdSurface").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-surface]");
+      if (!button) return;
+      overlayState.surface = button.dataset.surface;
+      overlayState.background = ["glass", "plate"].includes(overlayState.surface);
+      overlayState.border = ["glass", "outline"].includes(overlayState.surface);
+      overlayState.shadow = overlayState.surface === "glass";
+      $$("#osdChrome button").forEach((chip) => chip.classList.toggle("is-active",
+        Boolean(overlayState[chip.dataset.chrome])));
+      $$("#osdSurface button").forEach((node) => node.classList.toggle("is-active", node === button));
       applyOverlay();
     });
 
@@ -1392,6 +2207,54 @@
       button.addEventListener("click", () => applyPreset(button.dataset.preset));
     });
 
+    // Число редактируется на месте; колесо над ползунком — 1, с Shift — 10.
+    const editable = ["osdScale", "osdTextScale", "osdOpacity", "osdBg", "osdRadius",
+      "osdPad", "osdGap", "osdBorder", "osdShadow", "osdTracking"];
+    for (const id of editable) {
+      const range = $(`#${id}`);
+      const label = $(`#${id}Value`);
+      if (!range || !label) continue;
+      range.step = "1";
+      range.addEventListener("wheel", (event) => {
+        event.preventDefault();
+        range.value = String(Math.max(Number(range.min), Math.min(Number(range.max),
+          Number(range.value) + (event.deltaY < 0 ? 1 : -1) * (event.shiftKey ? 10 : 1))));
+        range.dispatchEvent(new Event("input", { bubbles: true }));
+      }, { passive: false });
+      label.classList.add("editable-number");
+      label.tabIndex = 0;
+      label.setAttribute("role", "button");
+      label.title = "Нажмите для ввода числа";
+      const edit = () => {
+        if (label.hidden) return;
+        const input = document.createElement("input");
+        input.type = "number";
+        input.min = range.min;
+        input.max = range.max;
+        input.step = "1";
+        input.value = range.value;
+        input.className = "editable-number__input";
+        label.hidden = true;
+        label.after(input);
+        let cancelled = false;
+        input.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") { cancelled = true; input.blur(); }
+          if (event.key === "Enter") input.blur();
+        });
+        input.addEventListener("blur", () => {
+          if (!cancelled && input.value !== "") {
+            range.value = String(Math.max(Number(range.min), Math.min(Number(range.max), Number(input.value))));
+            range.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+          input.remove();
+          label.hidden = false;
+        }, { once: true });
+        input.focus();
+        input.select();
+      };
+      label.addEventListener("click", edit);
+      label.addEventListener("keydown", (event) => { if (event.key === "Enter") edit(); });
+    }
     scale.style.setProperty("--fill", `${((overlayState.scale - 70) / 90) * 100}%`);
     opacity.style.setProperty("--fill", `${overlayState.opacity}%`);
     applyOverlay();
@@ -1434,10 +2297,9 @@
       window.dispatchEvent(new Event("resize"));
     });
 
-    $("#etwToggle").addEventListener("change", (event) => {
-      $("#statusSource").textContent = event.target.checked
-        ? "ETW-сессия активна · кадры DX12"
-        : "ETW выключен · только статистика DXGI";
+    $("#etwToggle").addEventListener("change", updateFrameStatus);
+    $("#sourceHelp").addEventListener("click", () => {
+      toast("Журнал: %LOCALAPPDATA%\\YawaFpsHub\\YawaFpsHub.log");
     });
 
     $("#idleToggle").addEventListener("change", (event) => {
@@ -1535,7 +2397,9 @@
   bindPause();
   bindAccents();
   bindOverlay();
+  bindCanvasView();
   bindOsdStyles();
+  bindLayerColor();
   bindOsdChrome();
   bindOsdText();
   bindOsdDrag();
@@ -1545,7 +2409,13 @@
   bindSettings();
   bindSensors();
   bindPerfLegend();
+  bindDiagnosisPreview();
   restorePreferences();
+  overlayHistory.undo = [];
+  overlayHistory.redo = [];
+  overlayHistory.committed = JSON.stringify(overlayState);
+  recordOverlayHistory();
+  updateFrameStatus();
 
   new ResizeObserver(fitOverlay).observe($("#osdPreview").parentElement);
   window.Charts.observe($("#frameChart"));

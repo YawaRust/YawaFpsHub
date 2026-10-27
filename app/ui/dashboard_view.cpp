@@ -7,6 +7,7 @@
 #include <array>
 #include <cmath>
 #include <string>
+#include <string_view>
 
 namespace yawa {
 namespace {
@@ -50,6 +51,26 @@ void drawStatBlock(Renderer& renderer, const Rect& rect, std::wstring_view label
     renderer.text(label, Rect{ rect.left, rect.top, rect.right, rect.top + 14.0f }, TextRole::Tiny, theme.textFaint);
     renderer.text(value, Rect{ rect.left, rect.top + 14.0f, rect.right, rect.top + 38.0f }, TextRole::Number,
         theme.text);
+}
+
+void drawFpsHint(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& statsPanel)
+{
+    if (!isHovered(model, statsPanel)) {
+        return;
+    }
+    const std::array<std::wstring_view, 4> hints {
+        L"1% low — FPS по 99-му перцентилю времени кадра, не минимум.",
+        L"0.1% low — FPS по 99,9-му перцентилю времени кадра.",
+        L"Frame time — 1000 / FPS за последнюю секунду, не последний кадр.",
+        L"Пропущено — доля интервалов длиннее бюджета, не потеря событий."
+    };
+    const std::size_t index = (model.cursorY >= statsPanel.centerY() ? 2u : 0u)
+        + (model.cursorX >= statsPanel.centerX() ? 1u : 0u);
+    const Rect tip { statsPanel.left - 140.0f, statsPanel.bottom + 4.0f, statsPanel.right,
+        statsPanel.bottom + 48.0f };
+    renderer.fillRoundRect(tip, 8.0f, theme.panel);
+    renderer.strokeRoundRect(tip, 8.0f, theme.lineStrong, 1.0f);
+    drawWrappedText(renderer, hints[index], tip.inset(7.0f), TextRole::Tiny, theme.text, 13.0f, 3);
 }
 
 void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card)
@@ -129,6 +150,7 @@ void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
     const float chartTop = std::max(numberTop + 92.0f, inner.bottom - 118.0f);
     const Rect chart{ inner.left, chartTop, inner.right, inner.bottom };
     if (chart.height() < 22.0f) {
+        drawFpsHint(renderer, model, theme, statsPanel);
         return;
     }
     renderer.drawLine(chart.left, chart.bottom, chart.right, chart.bottom, theme.line, 1.0f);
@@ -150,10 +172,12 @@ void drawFpsCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
     if (count < 2) {
         renderer.text(L"данные появятся после первых кадров", chart, TextRole::Small, theme.textFaint,
             TextAlign::Center);
+        drawFpsHint(renderer, model, theme, statsPanel);
         return;
     }
 
     renderer.drawSeries(ChartSeries{ history.data(), count, theme.accent, true }, chart, 0.0f, maximum, 1.6f);
+    drawFpsHint(renderer, model, theme, statsPanel);
 }
 
 void drawSessionCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card)

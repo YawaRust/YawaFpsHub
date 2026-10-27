@@ -118,11 +118,12 @@ void drawCaptureCard(Renderer& renderer, const AppModel& model, const Theme& the
     }
 
     top += 36.0f;
-    const std::array<std::array<std::wstring_view, 2>, 3> toggles{ std::array<std::wstring_view, 2>{
-                                                                      L"Сбор кадров через ETW",
-                                                                      L"без прав администратора, провайдер DXGI" },
+    const std::array<std::array<std::wstring_view, 2>, 3> toggles {
+        std::array<std::wstring_view, 2> {
+            L"Собирать кадры игры", L"системные события Windows, без внедрения в игру" },
         { L"Останавливать опрос вне игры", L"экономит ресурсы в простое" },
-        { L"Показывать диски и сеть", L"скрывает карточку и строки в датчиках" } };
+        { L"Показывать диски и сеть", L"скрывает карточку и строки в датчиках" }
+    };
     const std::array<bool, 3> states{ model.settings.capture.etwEnabled, model.settings.capture.pauseWhenIdle,
         model.settings.capture.includeDiskNet };
     const std::array<ActionKind, 3> actions{ ActionKind::ToggleEtw, ActionKind::ToggleIdlePause,
@@ -301,7 +302,8 @@ void drawHotkeyCard(Renderer& renderer, const AppModel& model, const Theme& them
     }
 }
 
-void drawSourcesCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card)
+void drawSourcesCard(
+    Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card, std::vector<UiHit>& hits)
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
@@ -312,22 +314,16 @@ void drawSourcesCard(Renderer& renderer, const AppModel& model, const Theme& the
         std::wstring_view name;
         std::wstring_view detail;
         bool available;
-        std::wstring_view note;
     };
 
     const SensorAvailability& availability = model.availability;
-    const std::array<Source, 6> sources { Source { L"ETW · кадры", L"Microsoft-Windows-DXGI, Present_Start",
-                                              model.etwRunning, L"без инъекций в игры" },
-        { L"PDH · процессор, диски, сеть", L"те же счётчики, что у диспетчера задач", availability.cpu,
-            L"без прав администратора" },
-        { L"PDH · загрузка GPU", L"GPU Engine, движок 3D активного адаптера", availability.gpuLoad,
-            L"Windows 10 1709 и новее" },
-        { L"VRAM · DXGI, PDH, NVML", L"Объём DXGI/NVML · занято PDH/NVML", availability.gpuMemory,
-            L"ядро драйвера, без установки" },
-        { L"NVML · температура и питание GPU", L"nvml.dll из драйвера NVIDIA", availability.gpuTemperature,
-            L"только NVIDIA" },
-        { L"Датчики CPU и чипсета", L"CPU: PawnIO + администратор; ACPI не кристалл",
-            availability.cpuTemperature, L"драйвер не нужен" } };
+    const std::array<Source, 6> sources { Source { L"Кадры игры", L"События Windows, без внедрения в игру",
+                                              model.etwRunning },
+        { L"Процессор, диски и сеть", L"Системные счётчики Windows", availability.cpu },
+        { L"Загрузка видеокарты", L"Выбранная видеокарта", availability.gpuLoad },
+        { L"Видеопамять", L"Объём и занятость выбранной видеокарты", availability.gpuMemory },
+        { L"Температура видеокарты", L"Если доступна в установленном драйвере", availability.gpuTemperature },
+        { L"Температура процессора", L"Может требовать доступ к датчикам", availability.cpuTemperature } };
 
     // Две колонки по три источника: шесть строк в одну не помещаются на 1040x790.
     const float columnWidth = (inner.width() - 24.0f) / 2.0f;
@@ -343,10 +339,18 @@ void drawSourcesCard(Renderer& renderer, const AppModel& model, const Theme& the
             theme.text);
         renderer.text(source.detail, Rect{ left, rowTop + 14.0f, left + columnWidth - 74.0f, rowTop + 29.0f },
             TextRole::Tiny, theme.textFaint);
-        renderer.text(source.available ? L"работает" : L"нет данных",
-            Rect{ left + columnWidth - 70.0f, rowTop, left + columnWidth, rowTop + 15.0f }, TextRole::Tiny,
+        const bool disabled = index == 0 && !model.settings.capture.etwEnabled;
+        renderer.text(disabled     ? L"выключено"
+                : source.available ? L"работает"
+                                   : L"нет данных",
+            Rect { left + columnWidth - 70.0f, rowTop, left + columnWidth, rowTop + 15.0f }, TextRole::Tiny,
             source.available ? theme.accent : theme.textFaint, TextAlign::Right);
     }
+
+    const Rect logFolder { inner.left, inner.bottom - 28.0f, inner.left + 150.0f, inner.bottom - 2.0f };
+    renderer.fillRoundRect(logFolder, 8.0f, isHovered(model, logFolder) ? theme.accentSoft : theme.panelSoft);
+    renderer.text(L"Папка с журналом", logFolder, TextRole::Tiny, theme.text, TextAlign::Center);
+    hits.push_back(UiHit { logFolder, ActionKind::OpenSettingsFolder, 0 });
 }
 
 } // namespace
@@ -370,7 +374,8 @@ void drawSettings(Renderer& renderer, const AppModel& model, const Theme& theme,
 
     drawClipped(place(385.0f), [&](const Rect& card) { drawCaptureCard(renderer, model, theme, card, hits); });
     drawClipped(place(389.0f), [&](const Rect& card) { drawAppearanceCard(renderer, model, theme, card, hits); });
-    drawClipped(place(260.0f), [&](const Rect& card) { drawSourcesCard(renderer, model, theme, card); });
+    drawClipped(
+        place(260.0f), [&](const Rect& card) { drawSourcesCard(renderer, model, theme, card, hits); });
     drawClipped(place(262.0f), [&](const Rect& card) { drawHotkeyCard(renderer, model, theme, card, hits); });
     drawClipped(place(316.0f), [&](const Rect& card) { drawPortableCard(renderer, model, theme, card, hits); });
     drawClipped(place(200.0f), [&](const Rect& card) { drawAboutCard(renderer, model, theme, card, hits); });

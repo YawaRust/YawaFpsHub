@@ -91,9 +91,9 @@
       </div>
 
       <div class="topbar__tools">
-        <span class="chip chip--source" title="Источники данных">
-          <i class="chip__dot"></i>ETW · PDH · DXGI
-        </span>
+        <button class="chip chip--source" data-view-link="settings" type="button" title="Настройки сбора кадров">
+          <i class="chip__dot"></i><span id="sourceChipText">Кадры доступны</span>
+        </button>
         <span class="chip chip--quiet" id="intervalChip">Опрос 1000 мс</span>
         <button class="btn btn--ghost" id="pauseBtn" type="button">
           <svg class="icon icon--sm"><use href="#i-pause"/></svg>
@@ -137,19 +137,19 @@
 
               <dl class="fps-stats">
                 <div class="fps-stat">
-                  <dt>1% low</dt>
+                  <dt title="Частота по 99-му перцентилю времени кадра: редкие просадки виднее, чем в среднем FPS.">1% low</dt>
                   <dd data-metric="fpsLow1">118</dd>
                 </div>
                 <div class="fps-stat">
-                  <dt>0.1% low</dt>
+                  <dt title="Частота по 99,9-му перцентилю времени кадра: чувствительнее к очень редким просадкам.">0.1% low</dt>
                   <dd data-metric="fpsLow01">96</dd>
                 </div>
                 <div class="fps-stat">
-                  <dt>Frame time</dt>
+                  <dt title="Оценка среднего интервала кадра из FPS за последнюю секунду, в мс; не время одного конкретного кадра.">Frame time</dt>
                   <dd data-metric="frameMs">7,04 <small>мс</small></dd>
                 </div>
                 <div class="fps-stat">
-                  <dt>Пропущено</dt>
+                  <dt title="Доля кадров дольше бюджета целевой герцовки; это не потеря кадров или сетевых пакетов.">Пропущено</dt>
                   <dd data-metric="dropped">0,3 <small>%</small></dd>
                 </div>
               </dl>
@@ -408,8 +408,8 @@
               <li class="alert">
                 <span class="alert__dot"></span>
                 <div>
-                  <b>ETW-сессия запущена</b>
-                  <p>Права администратора получены</p>
+                  <b>Сбор кадров запущен</b>
+                  <p>Без внедрения в игру</p>
                 </div>
                 <time>10:39</time>
               </li>
@@ -455,8 +455,8 @@
             <div id="sensorRows"></div>
             <p class="empty" id="sensorEmpty" hidden>Ничего не найдено. Измените запрос или фильтр.</p>
           </div>
-          <p class="footnote footnote--table">Источники: PDH для счётчиков GPU, NtQuerySystemInformation для CPU и памяти,
-            D3DKMT для температур, DXGI для видеопамяти. Значения обновляются с выбранным интервалом опроса.</p>
+          <p class="footnote footnote--table">Если источник известен: «нужен доступ» предлагает включить датчики,
+            «не поддерживается» означает подтверждённое ограничение CPU. Иначе — «нет данных» без догадок о причине.</p>
         </div>
       </section>
 
@@ -523,6 +523,44 @@
             <ol class="balance__advice" id="balanceAdvice"></ol>
           </article>
 
+          <article class="card span-12" id="diagnosisCard">
+            <header class="card__head">
+              <div>
+                <h2 class="card__title">Диагностическая карточка · макет</h2>
+                <p class="card__sub">Офлайн-прототип: не снимок игры и не результат измерений</p>
+              </div>
+              <span class="tag">НЕ СОХРАНЯЕТСЯ</span>
+            </header>
+            <div class="diagnosis-preview">
+              <div class="diagnosis-preview__frame">
+                <b>Кадр игры не захвачен</b>
+                <span>В готовом снимке здесь будет только клиентская область игры.</span>
+              </div>
+              <div class="diagnosis-preview__verdict" aria-live="polite">
+                <span class="tag" id="diagnosisSource">НЕТ ДАННЫХ</span>
+                <h3 id="diagnosisTitle">Недостаточно данных для вывода</h3>
+                <p id="diagnosisEvidence">Нужны кадры и показатели процесса активной игры; общая загрузка ПК не подходит.</p>
+                <ol id="diagnosisActions"><li>Запустите игру и проверьте сбор кадров.</li></ol>
+              </div>
+            </div>
+            <div class="diagnosis-preview__controls">
+              <button class="btn btn--ghost" type="button" id="diagnosisDemo">Показать условный пример</button>
+              <button class="btn btn--ghost" type="button" id="diagnosisUnknown">Нет данных</button>
+            </div>
+            <div class="diagnosis-workshop">
+              <label class="btn btn--ghost" for="diagnosisFile">Добавить кадр вручную · демо</label>
+              <input id="diagnosisFile" type="file" accept="image/png,image/jpeg,image/webp" hidden>
+              <label>Приближение <input id="diagnosisZoom" type="range" min="100" max="300" value="100"></label>
+              <label>Сдвиг X <input id="diagnosisPanX" type="range" min="0" max="100" value="50"></label>
+              <label>Сдвиг Y <input id="diagnosisPanY" type="range" min="0" max="100" value="50"></label>
+              <button class="btn btn--ghost" id="diagnosisClear" type="button">Убрать кадр</button>
+              <button class="btn btn--ghost" id="diagnosisSave" type="button">Сохранить PNG макета</button>
+              <p>На кадре выделите мышью область, которую надо закрыть. Это локальная проверка макета: загруженная картинка не доказывает, что показана игра, числа условные.</p>
+              <canvas id="diagnosisCanvas" width="1920" height="1080" aria-label="Итоговая PNG-карточка для предпросмотра"></canvas>
+            </div>
+            <p class="card__note">PNG макета создаётся локально только по кнопке. Прототип не захватывает игру и не создаёт .yawa; никаких данных не отправляет.</p>
+          </article>
+
           <article class="card span-12 card--note">
             <header class="card__head">
               <div>
@@ -584,8 +622,8 @@
             <p class="spec__headline" id="memSummary">&mdash;</p>
             <ul class="balance__specs balance__specs--two" id="memCard"></ul>
             <ul class="balance__modules" id="memModules"></ul>
-            <p class="card__note">Точные тайминги (tCL-tRCD-tRP-tRAS) лежат в SPD на шине SMBus: их нельзя прочитать
-              без драйвера, а драйверы приложение не ставит и не грузит.</p>
+            <p class="card__note">Действующие тайминги: недоступны в демо. В приложении они читаются из контроллера UMC
+              только на подтверждённом AMD DDR4; SPD хранит паспортные профили, а не текущие значения.</p>
           </article>
 
           <article class="card col-4">
@@ -627,67 +665,108 @@
 
       <section class="view" data-view="overlay">
         <div class="grid">
-                    <article class="card span-7">
+          <div class="overlay-workshop">
+            <article class="card workshop-layers">
+              <header class="card__head"><div>
+                <h2 class="card__title">Слои</h2>
+                <p class="card__sub">Глазик управляет строкой</p>
+              </div></header>
+              <div id="osdLayers" class="workshop-layers__list"></div>
+              <div class="workshop-color">
+                <label for="osdColorTarget">Что окрасить</label>
+                <select id="osdColorTarget">
+                  <option value="metric">Выбранный показатель</option>
+                  <option value="value">Все значения</option>
+                  <option value="label">Все подписи</option>
+                  <option value="accent">Акцент</option>
+                  <option value="fps">Группа FPS</option>
+                  <option value="cpu">Группа CPU</option>
+                  <option value="gpu">Группа GPU</option>
+                  <option value="ram">Группа RAM</option>
+                  <option value="vram">Группа VRAM</option>
+                </select>
+                <label for="osdLayerHex">RGBA · <span id="osdLayerName">FPS</span></label>
+                <div><input id="osdLayerPicker" type="color" value="#ffffff" aria-label="Выбрать цвет строки">
+                  <input id="osdLayerHex" type="text" value="#FFFFFFFF" maxlength="9" spellcheck="false" aria-label="Цвет RGBA в HEX"></div>
+                <label for="osdLayerAlpha">Альфа <output id="osdLayerAlphaValue">100%</output></label>
+                <input id="osdLayerAlpha" type="range" min="0" max="100" value="100">
+                <button id="osdLayerAuto" class="btn btn--ghost" type="button">Взять из рецепта</button>
+                <button id="osdLayerSample" class="btn btn--ghost" type="button">Пипетка · из предпросмотра</button>
+              </div>
+            </article>
+            <article class="card workshop-canvas">
             <header class="card__head">
               <div>
                 <h2 class="card__title">Оверлей поверх игры</h2>
-                <p class="card__sub">Предпросмотр. В приложении — отдельное topmost-окно</p>
+                <p class="card__sub">Тяните плашку · Ctrl+клик — строки · Shift+тяга — сетка 8 px · F10 — скрыть · F11 — угол</p>
               </div>
               <span class="tag tag--live"><i></i>F10</span>
             </header>
 
-            <div class="game" id="gameScene">
-              <div class="game__sky"></div>
-              <div class="game__sun"></div>
-              <div class="game__city"></div>
-              <div class="game__ground"></div>
+            <div class="game" id="gameScene" tabindex="0" aria-label="Холст оверлея: колесо — масштаб, пробел с перетаскиванием — панорама">
+              <div class="game__viewport" id="gameViewport">
+                <div class="game__sky"></div>
+                <div class="game__sun"></div>
+                <div class="game__city"></div>
+                <div class="game__ground"></div>
 
-              <div class="hud">
-                <div class="hud__ammo"><b>24</b><span>/ 96</span></div>
-                <div class="hud__health"><i></i></div>
-                <div class="hud__cross"></div>
-                <div class="hud__minimap"></div>
-                <div class="hud__quest">Задание · Погоня в Найт-Сити</div>
-              </div>
+                <div class="hud">
+                  <div class="hud__ammo"><b>24</b><span>/ 96</span></div>
+                  <div class="hud__health"><i></i></div>
+                  <div class="hud__cross"></div>
+                  <div class="hud__minimap"></div>
+                  <div class="hud__quest">Задание · Погоня в Найт-Сити</div>
+                </div>
 
-              <div class="osd" id="osdPreview">
-                <div class="osd__row" data-osd-item="fps">
-                  <span class="osd__key">FPS</span>
-                  <b class="osd__val" data-metric="fps">142</b>
-                  <span class="osd__unit">1% low</span>
-                  <b class="osd__val osd__val--sm" data-metric="fpsLow1">118</b>
+                <div class="game__guides" id="osdGuides" aria-hidden="true">
+                  <i class="game__safe-zone"></i>
+                  <i class="game__guide game__guide--x" id="osdGuideX"></i>
+                  <i class="game__guide game__guide--y" id="osdGuideY"></i>
                 </div>
-                <div class="osd__row" data-osd-item="cpu">
-                  <span class="osd__key">CPU</span>
-                  <b class="osd__val osd__val--sm" data-metric="cpu">44</b>
-                  <span class="osd__unit">°C</span>
-                  <b class="osd__val osd__val--sm" data-metric="cpuTemp">64</b>
-                </div>
-                <div class="osd__row" data-osd-item="gpu">
-                  <span class="osd__key">GPU</span>
-                  <b class="osd__val osd__val--sm" data-metric="gpu">93</b>
-                  <span class="osd__unit">°C</span>
-                  <b class="osd__val osd__val--sm" data-metric="gpuTemp">71</b>
-                </div>
-                <div class="osd__row" data-osd-item="ram">
-                  <span class="osd__key">RAM</span>
-                  <b class="osd__val osd__val--sm" data-metric="ramUsed">21,4</b>
-                  <span class="osd__unit">ГБ</span>
-                </div>
-                <div class="osd__row is-hidden" data-osd-item="vram">
-                  <span class="osd__key">VRAM</span>
-                  <b class="osd__val osd__val--sm" data-metric="vramUsed">9,6</b>
-                  <span class="osd__unit">ГБ</span>
+                <div class="osd" id="osdPreview">
+                  <div class="osd__row" data-osd-item="fps">
+                    <span class="osd__key">FPS</span>
+                    <b class="osd__val" data-metric="fps">142</b>
+                    <span class="osd__unit">1% low</span>
+                    <b class="osd__val osd__val--sm" data-metric="fpsLow1">118</b>
+                  </div>
+                  <div class="osd__row" data-osd-item="cpu">
+                    <span class="osd__key">CPU</span>
+                    <b class="osd__val osd__val--sm" data-metric="cpu">44</b>
+                    <span class="osd__unit">°C</span>
+                    <b class="osd__val osd__val--sm" data-metric="cpuTemp">64</b>
+                  </div>
+                  <div class="osd__row" data-osd-item="gpu">
+                    <span class="osd__key">GPU</span>
+                    <b class="osd__val osd__val--sm" data-metric="gpu">93</b>
+                    <span class="osd__unit">°C</span>
+                    <b class="osd__val osd__val--sm" data-metric="gpuTemp">71</b>
+                  </div>
+                  <div class="osd__row" data-osd-item="ram">
+                    <span class="osd__key">RAM</span>
+                    <b class="osd__val osd__val--sm" data-metric="ramUsed">21,4</b>
+                    <span class="osd__unit">ГБ</span>
+                  </div>
+                  <div class="osd__row is-hidden" data-osd-item="vram">
+                    <span class="osd__key">VRAM</span>
+                    <b class="osd__val osd__val--sm" data-metric="vramUsed">9,6</b>
+                    <span class="osd__unit">ГБ</span>
+                  </div>
                 </div>
               </div>
             </div>
+            <p class="card__sub canvas-help">Колесо — масштаб · пробел + мышь — панорама · Alt + мышь — вся плашка</p>
           </article>
 
-          <article class="card span-5">
+          <article class="card workshop-inspector">
             <header class="card__head">
               <div>
-                <h2 class="card__title">Настройка оверлея</h2>
+                <h2 class="card__title">Инспектор · всё оформление</h2>
                 <p class="card__sub">Изменения видны сразу в предпросмотре</p>
+              </div>
+              <div class="segmented segmented--icons" id="osdHistory">
+                <button type="button" data-history="undo" title="Отменить · Ctrl+Z" aria-label="Отменить" disabled>↶</button>
+                <button type="button" data-history="redo" title="Повторить · Ctrl+Shift+Z" aria-label="Повторить" disabled>↷</button>
               </div>
             </header>
 
@@ -698,7 +777,17 @@
                 <button data-pos="tr" aria-label="Справа сверху">↗</button>
                 <button data-pos="bl" aria-label="Слева снизу">↙</button>
                 <button data-pos="br" aria-label="Справа снизу">↘</button>
+                <button data-pos="free" aria-label="Свободное положение">Свободно</button>
               </div>
+            </div>
+
+            <div class="field field--monitor">
+              <label class="switch" for="osdFollowGame">
+                <input type="checkbox" id="osdFollowGame">
+                <span class="switch__track"><span class="switch__knob"></span></span>
+                <span>На мониторе игры</span>
+              </label>
+              <small>По умолчанию выключено. В демо без второго монитора положение не меняется.</small>
             </div>
 
             <div class="field">
@@ -706,6 +795,17 @@
               <div class="segmented" id="osdLayout">
                 <button class="is-active" data-layout="plates">Плитки</button>
                 <button data-layout="line">Строка</button>
+                <button data-layout="gauge">Шкала</button>
+              </div>
+            </div>
+
+            <div class="field">
+              <span class="field__label">Поверхность</span>
+              <div class="segmented segmented--chips" id="osdSurface">
+                <button data-surface="glass" type="button">Стекло</button>
+                <button data-surface="plate" type="button">Плашка</button>
+                <button data-surface="outline" type="button">Контур</button>
+                <button data-surface="none" type="button">Без фона</button>
               </div>
             </div>
 
@@ -896,7 +996,7 @@
 
             <div class="field">
               <div class="field__label-row">
-                <span class="field__label">Смещение</span>
+                <span class="field__label" id="osdOffsetLabel">Смещение</span>
                 <b id="osdOffsetValue">0 / 0 px</b>
               </div>
               <div class="steppers">
@@ -913,40 +1013,6 @@
               </div>
             </div>
 
-            <div class="field">
-              <span class="field__label">Состав</span>
-              <ul class="toggles">
-                <li>
-                  <label class="switch">
-                    <input type="checkbox" data-osd-toggle="cpu" checked>
-                    <span class="switch__track"><span class="switch__knob"></span></span>
-                    <span class="switch__text">Процессор, температура</span>
-                  </label>
-                </li>
-                <li>
-                  <label class="switch">
-                    <input type="checkbox" data-osd-toggle="gpu" checked>
-                    <span class="switch__track"><span class="switch__knob"></span></span>
-                    <span class="switch__text">Видеокарта, температура</span>
-                  </label>
-                </li>
-                <li>
-                  <label class="switch">
-                    <input type="checkbox" data-osd-toggle="ram" checked>
-                    <span class="switch__track"><span class="switch__knob"></span></span>
-                    <span class="switch__text">Занятая память</span>
-                  </label>
-                </li>
-                <li>
-                  <label class="switch">
-                    <input type="checkbox" data-osd-toggle="vram">
-                    <span class="switch__track"><span class="switch__knob"></span></span>
-                    <span class="switch__text">Видеопамять</span>
-                  </label>
-                </li>
-              </ul>
-            </div>
-
             <div class="field field--row">
               <div>
                 <span class="field__label">Горячая клавиша</span>
@@ -955,13 +1021,18 @@
               <button class="keycap" type="button">F10</button>
             </div>
           </article>
+          </div>
 
-
-                    <article class="card span-7">
+          <article class="card span-12">
             <header class="card__head">
               <div>
-                <h2 class="card__title">Стиль оформления</h2>
-                <p class="card__sub">Стиль не мешает читать показатели в динамичной сцене</p>
+                <h2 class="card__title">Рецепты оформления</h2>
+                <p class="card__sub">16 рецептов · форма, поверхность и шрифт настраиваются независимо</p>
+              </div>
+              <div class="recipe-transfer">
+                <button class="btn btn--ghost" id="importOsdRecipe" type="button">Импорт JSON</button>
+                <input id="importOsdRecipeFile" type="file" accept=".json,application/json" hidden>
+                <button class="btn btn--ghost" id="exportOsdRecipe" type="button">Экспорт JSON</button>
               </div>
             </header>
 
@@ -1141,8 +1212,8 @@
                   <input type="checkbox" id="etwToggle" checked>
                   <span class="switch__track"><span class="switch__knob"></span></span>
                   <span class="switch__text">
-                    Сбор кадров через ETW
-                    <em>Требует прав администратора. Без них оверлей покажет только статистику DXGI.</em>
+                    Собирать кадры игры
+                    <em>Системные события Windows: без внедрения в игру и без прав администратора.</em>
                   </span>
                 </label>
               </li>
@@ -1299,36 +1370,37 @@
 
             <ul class="sources">
               <li class="source">
-                <span class="source__name">ETW · кадры</span>
-                <span class="source__detail">Microsoft-Windows-DXGI, Present_Start</span>
+                <span class="source__name">Кадры игры</span>
+                <span class="source__detail">События Windows, без внедрения в игру</span>
                 <span class="source__state source__state--ok">работает</span>
               </li>
               <li class="source">
-                <span class="source__name">PDH · процессор, диски, сеть</span>
-                <span class="source__detail">те же счётчики, что у диспетчера задач</span>
+                <span class="source__name">Процессор, диски и сеть</span>
+                <span class="source__detail">Системные счётчики Windows</span>
                 <span class="source__state source__state--ok">работает</span>
               </li>
               <li class="source">
-                <span class="source__name">PDH · загрузка GPU</span>
-                <span class="source__detail">GPU Engine, движок 3D активного адаптера</span>
+                <span class="source__name">Загрузка видеокарты</span>
+                <span class="source__detail">Выбранная видеокарта</span>
                 <span class="source__state source__state--ok">работает</span>
               </li>
               <li class="source">
-                <span class="source__name">DXGI · адаптеры и видеопамять</span>
-                <span class="source__detail">LUID, объём, QueryVideoMemoryInfo</span>
+                <span class="source__name">Видеопамять</span>
+                <span class="source__detail">Объём и занятость выбранной видеокарты</span>
                 <span class="source__state source__state--ok">работает</span>
               </li>
               <li class="source">
-                <span class="source__name">NVML · температура и питание GPU</span>
-                <span class="source__detail">nvml.dll из драйвера NVIDIA</span>
+                <span class="source__name">Температура видеокарты</span>
+                <span class="source__detail">Если доступна в установленном драйвере</span>
                 <span class="source__state source__state--ok">работает</span>
               </li>
               <li class="source">
-                <span class="source__name">Датчики CPU и чипсета</span>
-                <span class="source__detail">ACPI-термозона и PDH, без MSR-драйвера</span>
+                <span class="source__name">Температура процессора</span>
+                <span class="source__detail">Может требовать доступ к датчикам</span>
                 <span class="source__state source__state--off">нет данных</span>
               </li>
             </ul>
+            <button class="btn btn--ghost" id="sourceHelp" type="button">Где журнал</button>
           </article>
 
           <article class="card span-5">
@@ -1344,7 +1416,7 @@
               <li><span>Собственное потребление</span><b><span data-metric="procCpu">0,4</span>% CPU · <span data-metric="procRamFull">0,5</span></b></li>
               <li><span>Потоков</span><b data-metric="procThreads">10</b></li>
               <li><span>Активный адаптер</span><b id="activeGpuName">GeForce RTX 4080</b></li>
-              <li><span>ETW-сессия</span><b>работает</b></li>
+              <li><span>Сбор кадров</span><b id="aboutFramesState">работает</b></li>
             </ul>
           </article>
 
@@ -1357,7 +1429,7 @@
     <footer class="statusbar">
       <span class="statusbar__group">
         <i class="statusbar__dot"></i>
-        <span id="statusSource">ETW-сессия активна · кадры DX12</span>
+        <span id="statusSource">Кадры доступны · сбор идёт</span>
       </span>
       <span class="statusbar__group statusbar__group--metrics">
         <span>CPU процесса <b data-metric="procCpu">0,3%</b></span>

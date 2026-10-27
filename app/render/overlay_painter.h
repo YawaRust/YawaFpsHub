@@ -17,6 +17,8 @@ struct OverlayText {
     std::vector<std::wstring> values;
     std::vector<bool> visible;
     std::vector<MetricId> ids;
+    // Только показатели с определённой шкалой 0–100%; -1 означает «нет шкалы».
+    std::vector<float> gaugeFill;
 };
 
 struct OverlayFormats {

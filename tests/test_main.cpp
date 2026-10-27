@@ -13,6 +13,10 @@ void runFrameTrackerTests();
 void runSettingsTests();
 void runBottleneckTests();
 void runHardwareTelemetryTests();
+void runMemoryTimingsTests();
+void runSpdTests();
+void runDiagnosisTests();
+void runReportTests();
 
 } // namespace yawa::test
 
@@ -27,6 +31,10 @@ int main()
     yawa::test::runSettingsTests();
     yawa::test::runBottleneckTests();
     yawa::test::runHardwareTelemetryTests();
+    yawa::test::runMemoryTimingsTests();
+    yawa::test::runSpdTests();
+    yawa::test::runDiagnosisTests();
+    yawa::test::runReportTests();
 
     if (yawa::test::failureCount() == 0) {
         std::printf("все тесты пройдены\n");

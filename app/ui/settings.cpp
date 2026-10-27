@@ -10,94 +10,115 @@
 namespace yawa {
 namespace {
 
-constexpr int kMinIntervalMs = 250;
-constexpr int kMaxIntervalMs = 5000;
-constexpr int kMinScale = 70;
-constexpr int kMaxScale = 160;
-constexpr std::size_t kMaxLabelLength = 10;
+    constexpr int kMinIntervalMs = 250;
+    constexpr int kMaxIntervalMs = 5000;
+    constexpr int kMinScale = 70;
+    constexpr int kMaxScale = 160;
+    constexpr std::size_t kMaxLabelLength = 10;
 
-struct StyleKey {
-    OverlayStyle style;
-    std::string_view key;
-};
+    struct StyleKey
+    {
+        OverlayStyle style;
+        std::string_view key;
+    };
 
-constexpr StyleKey kStyles[] = {
-    { OverlayStyle::Neon, "neon" },
-    { OverlayStyle::Rtss, "rtss" },
-    { OverlayStyle::Frosted, "frosted" },
-    { OverlayStyle::Terminal, "terminal" },
-    { OverlayStyle::Cyber, "cyber" },
-    { OverlayStyle::Mono, "mono" },
-    { OverlayStyle::Esport, "esport" },
-    { OverlayStyle::Retro, "retro" },
-};
+    constexpr StyleKey kStyles[] = {
+        { OverlayStyle::Neon, "neon" },
+        { OverlayStyle::Rtss, "rtss" },
+        { OverlayStyle::Frosted, "frosted" },
+        { OverlayStyle::Terminal, "terminal" },
+        { OverlayStyle::Cyber, "cyber" },
+        { OverlayStyle::Mono, "mono" },
+        { OverlayStyle::Esport, "esport" },
+        { OverlayStyle::Retro, "retro" },
+    };
 
-// Ключи прошлых версий остаются читаемыми: файл настроек лежит рядом с exe и не должен
-// ломать выбор стиля после обновления.
-constexpr StyleKey kLegacyStyles[] = {
-    { OverlayStyle::Frosted, "glass" },
-    { OverlayStyle::Mono, "minimal" },
-    { OverlayStyle::Esport, "capsule" },
-};
+    // Ключи прошлых версий остаются читаемыми: файл настроек лежит рядом с exe и не должен
+    // ломать выбор стиля после обновления.
+    constexpr StyleKey kLegacyStyles[] = {
+        { OverlayStyle::Frosted, "glass" },
+        { OverlayStyle::Mono, "minimal" },
+        { OverlayStyle::Esport, "capsule" },
+    };
 
-std::string_view trim(std::string_view text)
-{
-    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())) != 0) {
-        text.remove_prefix(1);
+    constexpr std::array<OverlayRecipeSpec, kOverlayRecipeCount> kRecipes { {
+        { "neon", OverlayStyle::Neon, OverlayLayout::Plates, OverlaySurface::Glass, 0, 100, false },
+        { "rtss", OverlayStyle::Rtss, OverlayLayout::Plates, OverlaySurface::None, 0, 100, false },
+        { "frosted", OverlayStyle::Frosted, OverlayLayout::Plates, OverlaySurface::Glass, 0, 100, false },
+        { "terminal", OverlayStyle::Terminal, OverlayLayout::Plates, OverlaySurface::Plate, 0, 100, false },
+        { "cyber", OverlayStyle::Cyber, OverlayLayout::Plates, OverlaySurface::Glass, 0, 100, false },
+        { "mono", OverlayStyle::Mono, OverlayLayout::Plates, OverlaySurface::Plate, 0, 100, false },
+        { "esport", OverlayStyle::Esport, OverlayLayout::Plates, OverlaySurface::Plate, 0, 100, false },
+        { "retro", OverlayStyle::Retro, OverlayLayout::Plates, OverlaySurface::Plate, 0, 100, false },
+        { "fps_large", OverlayStyle::Neon, OverlayLayout::Line, OverlaySurface::None, 0, 130, true },
+        { "stream", OverlayStyle::Frosted, OverlayLayout::Line, OverlaySurface::Plate, 0, 110, false },
+        { "laptop", OverlayStyle::Mono, OverlayLayout::Line, OverlaySurface::None, 2, 85, false },
+        { "hdr", OverlayStyle::Esport, OverlayLayout::Line, OverlaySurface::Outline, 0, 120, false },
+        { "recording", OverlayStyle::Terminal, OverlayLayout::Plates, OverlaySurface::Plate, 1, 105, false },
+        { "quiet", OverlayStyle::Frosted, OverlayLayout::Plates, OverlaySurface::Glass, 0, 85, false },
+        { "focus", OverlayStyle::Cyber, OverlayLayout::Gauge, OverlaySurface::Outline, 2, 110, false },
+        { "clean", OverlayStyle::Mono, OverlayLayout::Gauge, OverlaySurface::Plate, 1, 100, false },
+    } };
+
+    std::string_view trim(std::string_view text)
+    {
+        while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())) != 0) {
+            text.remove_prefix(1);
+        }
+        while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back())) != 0) {
+            text.remove_suffix(1);
+        }
+        return text;
     }
-    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back())) != 0) {
-        text.remove_suffix(1);
+
+    int parseInt(std::string_view text, int fallback)
+    {
+        int value = 0;
+        const auto result = std::from_chars(text.data(), text.data() + text.size(), value);
+        return result.ec == std::errc { } ? value : fallback;
     }
-    return text;
-}
 
-int parseInt(std::string_view text, int fallback)
-{
-    int value = 0;
-    const auto result = std::from_chars(text.data(), text.data() + text.size(), value);
-    return result.ec == std::errc{} ? value : fallback;
-}
-
-bool parseBool(std::string_view text, bool fallback)
-{
-    if (text == "1" || text == "true" || text == "on") {
-        return true;
+    bool parseBool(std::string_view text, bool fallback)
+    {
+        if (text == "1" || text == "true" || text == "on") {
+            return true;
+        }
+        if (text == "0" || text == "false" || text == "off") {
+            return false;
+        }
+        return fallback;
     }
-    if (text == "0" || text == "false" || text == "off") {
-        return false;
+
+    std::uint32_t parseUint32(std::string_view text, std::uint32_t fallback)
+    {
+        std::uint32_t value = 0;
+        const auto result = std::from_chars(text.data(), text.data() + text.size(), value);
+        return result.ec == std::errc { } ? value : fallback;
     }
-    return fallback;
-}
 
-std::uint32_t parseUint32(std::string_view text, std::uint32_t fallback)
-{
-    std::uint32_t value = 0;
-    const auto result = std::from_chars(text.data(), text.data() + text.size(), value);
-    return result.ec == std::errc{} ? value : fallback;
-}
-
-std::int32_t parseInt32(std::string_view text, std::int32_t fallback)
-{
-    std::int32_t value = 0;
-    const auto result = std::from_chars(text.data(), text.data() + text.size(), value);
-    return result.ec == std::errc{} ? value : fallback;
-}
-
-std::string sanitizeLabel(std::string_view text)
-{
-    std::string result(trim(text));
-    // Лимит считается по символам UTF-8, иначе кириллица обрезалась бы вдвое раньше:
-    // «КАДРЫ» — это 10 байт, но всего 5 символов.
-    std::size_t characters = 0;
-    std::size_t cut = 0;
-    while (cut < result.size() && characters < kMaxLabelLength) {
-        const auto byte = static_cast<unsigned char>(result[cut]);
-        cut += (byte & 0xC0) == 0x80 ? 1 : (byte >= 0xF0 ? 4 : (byte >= 0xE0 ? 3 : (byte >= 0xC0 ? 2 : 1)));
-        ++characters;
+    std::int32_t parseInt32(std::string_view text, std::int32_t fallback)
+    {
+        std::int32_t value = 0;
+        const auto result = std::from_chars(text.data(), text.data() + text.size(), value);
+        return result.ec == std::errc { } ? value : fallback;
     }
-    result.resize(std::min(cut, result.size()));
-    return result;
-}
+
+    std::string sanitizeLabel(std::string_view text)
+    {
+        std::string result(trim(text));
+        // Лимит считается по символам UTF-8, иначе кириллица обрезалась бы вдвое раньше:
+        // «КАДРЫ» — это 10 байт, но всего 5 символов.
+        std::size_t characters = 0;
+        std::size_t cut = 0;
+        while (cut < result.size() && characters < kMaxLabelLength) {
+            const auto byte = static_cast<unsigned char>(result[cut]);
+            cut += (byte & 0xC0) == 0x80 ? 1
+                                         : (byte >= 0xF0 ? 4 : (byte >= 0xE0 ? 3 : (byte >= 0xC0 ? 2 : 1)));
+            ++characters;
+        }
+        result.resize(std::min(cut, result.size()));
+        return result;
+    }
 
 } // namespace
 
@@ -127,17 +148,37 @@ std::array<int, kMetricCount> defaultOverlayMetricColors()
     return colors;
 }
 
+std::optional<std::size_t> overlayColorGroup(MetricId id)
+{
+    if (id <= MetricId::DroppedFrames)
+        return 0;
+    if ((id >= MetricId::CpuLoad && id <= MetricId::CpuPeakLoad)
+        || (id >= MetricId::Core0Load && id <= MetricId::Core15Load))
+        return 1;
+    if (id >= MetricId::GpuLoad && id <= MetricId::PcieLoad)
+        return 2;
+    if (id >= MetricId::VramUsed && id <= MetricId::VramTotal)
+        return 4;
+    if (id >= MetricId::RamUsed && id <= MetricId::PageFileLoad)
+        return 3;
+    return std::nullopt;
+}
+
 void setOverlayMetricLabel(OverlaySettings& settings, MetricId id, std::string label)
 {
     const std::size_t index = static_cast<std::size_t>(id);
-    if (index >= kMetricCount) { return; }
+    if (index >= kMetricCount) {
+        return;
+    }
     // Не обрезаем UTF-8 посередине символа; переводы строк не должны ломать INI.
     std::string clean;
     std::size_t characters = 0;
     for (std::size_t i = 0; i < label.size() && characters < 32;) {
         const unsigned char byte = static_cast<unsigned char>(label[i]);
         const std::size_t length = byte < 0x80 ? 1 : byte < 0xe0 ? 2 : byte < 0xf0 ? 3 : 4;
-        if (i + length > label.size()) { break; }
+        if (i + length > label.size()) {
+            break;
+        }
         if (byte != '\n' && byte != '\r' && byte != '=' && byte != '[' && byte != ']') {
             clean.append(label, i, length);
             ++characters;
@@ -199,9 +240,34 @@ int scaledOverlayOffset(int offset, double sourceExtent, double targetExtent)
         8192);
 }
 
+bool parseOverlayRgba(std::string_view text, std::uint32_t& rgba)
+{
+    if (text.size() != 9 || text.front() != '#') {
+        return false;
+    }
+    std::uint32_t parsed = 0;
+    const auto result = std::from_chars(text.data() + 1, text.data() + text.size(), parsed, 16);
+    if (result.ec != std::errc { } || result.ptr != text.data() + text.size()) {
+        return false;
+    }
+    rgba = parsed;
+    return true;
+}
+
+std::string overlayRgbaHex(std::uint32_t rgba)
+{
+    constexpr char digits[] = "0123456789ABCDEF";
+    std::string result = "#00000000";
+    for (int index = 8; index >= 1; --index) {
+        result[static_cast<std::size_t>(index)] = digits[rgba & 0xF];
+        rgba >>= 4;
+    }
+    return result;
+}
+
 Settings defaultSettings()
 {
-    return Settings{};
+    return Settings { };
 }
 
 std::string_view labelKey(LabelField field)
@@ -266,6 +332,11 @@ void applyStyleDefaults(OverlaySettings& overlay, OverlayStyle style)
     overlay.valueColor = -1;
     overlay.labelColor = -1;
     overlay.accentColor = -1;
+    overlay.valueRgba.reset();
+    overlay.labelRgba.reset();
+    overlay.accentRgba.reset();
+    overlay.rowRgba.fill(std::nullopt);
+    overlay.metricRgba.fill(std::nullopt);
     overlay.rowColors = { -1, -1, -1, -1, -1 };
     overlay.borderWidth = -1;
     overlay.shadowStrength = 100;
@@ -274,6 +345,121 @@ void applyStyleDefaults(OverlaySettings& overlay, OverlayStyle style)
     overlay.separatorsMode = -1;
     overlay.fpsDecimals = -1;
     overlay.textScalePercent = 100;
+}
+
+const std::array<OverlayRecipeSpec, kOverlayRecipeCount>& overlayRecipes()
+{
+    return kRecipes;
+}
+
+std::string_view overlayRecipeKey(OverlayRecipe recipe)
+{
+    const auto index = static_cast<std::size_t>(recipe);
+    return index < kRecipes.size() ? kRecipes[index].key : kRecipes[2].key;
+}
+
+bool parseOverlayRecipe(std::string_view key, OverlayRecipe& recipe)
+{
+    for (std::size_t index = 0; index < kRecipes.size(); ++index) {
+        if (key == kRecipes[index].key) {
+            recipe = static_cast<OverlayRecipe>(index);
+            return true;
+        }
+    }
+    return false;
+}
+
+std::string_view overlaySurfaceKey(OverlaySurface surface)
+{
+    switch (surface) {
+    case OverlaySurface::Glass:
+        return "glass";
+    case OverlaySurface::Plate:
+        return "plate";
+    case OverlaySurface::Outline:
+        return "outline";
+    case OverlaySurface::None:
+        return "none";
+    }
+    return "glass";
+}
+
+bool parseOverlaySurface(std::string_view key, OverlaySurface& surface)
+{
+    for (OverlaySurface candidate :
+        { OverlaySurface::Glass, OverlaySurface::Plate, OverlaySurface::Outline, OverlaySurface::None }) {
+        if (key == overlaySurfaceKey(candidate)) {
+            surface = candidate;
+            return true;
+        }
+    }
+    return false;
+}
+
+void setOverlaySurface(OverlaySettings& overlay, OverlaySurface surface)
+{
+    overlay.surface = surface;
+    overlay.surfaceActive = true;
+    overlay.showBackground = surface == OverlaySurface::Glass || surface == OverlaySurface::Plate;
+    overlay.showBorder = surface == OverlaySurface::Glass || surface == OverlaySurface::Outline;
+    overlay.showShadow = surface == OverlaySurface::Glass;
+}
+
+void applyOverlayRecipe(OverlaySettings& overlay, OverlayRecipe recipe)
+{
+    const auto index = static_cast<std::size_t>(recipe);
+    if (index >= kRecipes.size()) {
+        return;
+    }
+    const OverlayRecipeSpec& spec = kRecipes[index];
+    applyStyleDefaults(overlay, spec.palette);
+    overlay.recipe = recipe;
+    overlay.layout = spec.shape;
+    overlay.fontFamily = spec.fontFamily;
+    overlay.scalePercent = spec.scalePercent;
+    if (index >= 8) {
+        setOverlaySurface(overlay, spec.surface);
+    } else {
+        overlay.surface = spec.surface;
+        overlay.surfaceActive = false; // старые восемь рецептов сохраняют прежнюю палитру и подложку
+    }
+    // Рецепт осознанно сбрасывает состав, но не порядок/глазики вне применения рецепта.
+    overlay.metrics = defaultOverlayMetrics();
+    if (spec.onlyFps) {
+        overlay.metrics.fill(false);
+        overlay.metrics[static_cast<std::size_t>(MetricId::Fps)] = true;
+    }
+}
+
+std::string serializeOverlayRecipeJson(const OverlaySettings& overlay)
+{
+    const std::string_view font = overlay.fontFamily == 1 ? "mono"
+        : overlay.fontFamily == 2                         ? "condensed"
+        : overlay.fontFamily == 3                         ? "dense"
+                                                          : "sans";
+    std::string json = "{\n  \"schema\": 1,\n  \"recipe\": \"" + std::string(overlayRecipeKey(overlay.recipe))
+        + "\",\n  \"palette\": \"" + std::string(overlayStyleKey(overlay.style)) + "\",\n  \"shape\": \""
+        + std::string(overlayLayoutKey(overlay.layout)) + "\",\n  \"surface\": ";
+    json += overlay.surfaceActive ? "\"" + std::string(overlaySurfaceKey(overlay.surface)) + "\"" : "null";
+    json += ",\n  \"typeface\": \"" + std::string(font)
+        + "\",\n  \"scale\": " + std::to_string(std::clamp(overlay.scalePercent, 70, 160));
+    std::string colors;
+    const auto addColor = [&colors](std::string_view key, std::optional<std::uint32_t> rgba) {
+        if (rgba) {
+            if (!colors.empty())
+                colors += ",\n";
+            colors += "    \"" + std::string(key) + "\": \"" + overlayRgbaHex(*rgba) + "\"";
+        }
+    };
+    addColor("value", overlay.valueRgba);
+    addColor("label", overlay.labelRgba);
+    addColor("accent", overlay.accentRgba);
+    for (std::size_t index = 0; index < kLabelCount; ++index) {
+        addColor(labelKey(static_cast<LabelField>(index)), overlay.rowRgba[index]);
+    }
+    if (!colors.empty())
+        json += ",\n  \"colors\": {\n" + colors + "\n  }";
+    return json + "\n}\n";
 }
 
 std::string_view overlayStyleKey(OverlayStyle style)
@@ -303,7 +489,15 @@ std::string_view overlayPositionKey(OverlayPosition position)
 
 std::string_view overlayLayoutKey(OverlayLayout layout)
 {
-    return layout == OverlayLayout::Line ? "line" : "plates";
+    switch (layout) {
+    case OverlayLayout::Plates:
+        return "plates";
+    case OverlayLayout::Line:
+        return "line";
+    case OverlayLayout::Gauge:
+        return "gauge";
+    }
+    return "plates";
 }
 
 std::string_view accentKey(Accent accent)
@@ -368,6 +562,10 @@ bool parseOverlayLayout(std::string_view text, OverlayLayout& layout)
         layout = OverlayLayout::Plates;
         return true;
     }
+    if (text == "gauge") {
+        layout = OverlayLayout::Gauge;
+        return true;
+    }
     return false;
 }
 
@@ -395,6 +593,43 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
     target = defaultSettings();
     error.clear();
 
+    // Рецепт применяется до любых явных полей независимо от порядка строк INI:
+    // старые ключи layout/font/background и глазики должны иметь приоритет.
+    bool hasRecipe = false;
+    bool hasSurface = false;
+    bool customSurface = false;
+    OverlayRecipe chosenRecipe = target.overlay.recipe;
+    OverlaySurface chosenSurface = target.overlay.surface;
+    std::string_view scan = text;
+    std::string_view scanSection;
+    while (!scan.empty()) {
+        const std::size_t end = scan.find('\n');
+        std::string_view line = trim(end == std::string_view::npos ? scan : scan.substr(0, end));
+        scan = end == std::string_view::npos ? std::string_view { } : scan.substr(end + 1);
+        if (!line.empty() && line.front() == '[') {
+            const std::size_t close = line.find(']');
+            scanSection
+                = close == std::string_view::npos ? std::string_view { } : trim(line.substr(1, close - 1));
+        } else if (scanSection == "overlay") {
+            const std::size_t equals = line.find('=');
+            if (equals != std::string_view::npos && trim(line.substr(0, equals)) == "recipe") {
+                hasRecipe = parseOverlayRecipe(trim(line.substr(equals + 1)), chosenRecipe);
+            } else if (equals != std::string_view::npos && trim(line.substr(0, equals)) == "surface") {
+                const std::string_view requested = trim(line.substr(equals + 1));
+                customSurface = requested == "custom";
+                hasSurface = !customSurface && parseOverlaySurface(requested, chosenSurface);
+            }
+        }
+    }
+    if (hasRecipe) {
+        applyOverlayRecipe(target.overlay, chosenRecipe);
+    }
+    if (hasSurface) {
+        setOverlaySurface(target.overlay, chosenSurface);
+    } else if (customSurface) {
+        target.overlay.surfaceActive = false;
+    }
+
     std::string section;
     std::size_t lineNumber = 0;
     bool hasMetricSelection = false;
@@ -402,7 +637,7 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
     while (!text.empty()) {
         const std::size_t lineEnd = text.find('\n');
         std::string_view line = lineEnd == std::string_view::npos ? text : text.substr(0, lineEnd);
-        text = lineEnd == std::string_view::npos ? std::string_view{} : text.substr(lineEnd + 1);
+        text = lineEnd == std::string_view::npos ? std::string_view { } : text.substr(lineEnd + 1);
         ++lineNumber;
 
         if (!line.empty() && line.back() == '\r') {
@@ -438,10 +673,11 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
 
         if (section == "capture") {
             if (key == "interval_ms") {
-                target.capture.intervalMs = std::clamp(parseInt(value, target.capture.intervalMs),
-                    kMinIntervalMs, kMaxIntervalMs);
+                target.capture.intervalMs
+                    = std::clamp(parseInt(value, target.capture.intervalMs), kMinIntervalMs, kMaxIntervalMs);
             } else if (key == "smoothing") {
-                target.capture.smoothingPercent = std::clamp(parseInt(value, target.capture.smoothingPercent), 0, 90);
+                target.capture.smoothingPercent
+                    = std::clamp(parseInt(value, target.capture.smoothingPercent), 0, 90);
             } else if (key == "etw_enabled") {
                 target.capture.etwEnabled = parseBool(value, target.capture.etwEnabled);
             } else if (key == "pause_when_idle") {
@@ -456,15 +692,42 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
         } else if (section == "overlay") {
             if (key == "position") {
                 parseOverlayPosition(value, target.overlay.position);
+            } else if (key == "anchor_mode") {
+                if (value == "corner") {
+                    target.overlay.anchorMode = OverlayAnchorMode::Corner;
+                } else if (value == "free") {
+                    target.overlay.anchorMode = OverlayAnchorMode::Free;
+                }
+            } else if (key == "origin_x") {
+                target.overlay.originX = std::clamp(parseInt(value, target.overlay.originX), 0, 32768);
+            } else if (key == "origin_y") {
+                target.overlay.originY = std::clamp(parseInt(value, target.overlay.originY), 0, 32768);
+            } else if (key == "saved_monitor_id") {
+                if (value.size() <= 256 && value.find_first_of("\r\n") == std::string_view::npos) {
+                    target.overlay.savedMonitorId = std::string(value);
+                }
+            } else if (key == "monitor_origin_x") {
+                target.overlay.monitorOriginX
+                    = std::clamp(parseInt(value, target.overlay.monitorOriginX), 0, 32768);
+            } else if (key == "monitor_origin_y") {
+                target.overlay.monitorOriginY
+                    = std::clamp(parseInt(value, target.overlay.monitorOriginY), 0, 32768);
+            } else if (key == "follow_game_monitor") {
+                target.overlay.followGameMonitor = parseBool(value, target.overlay.followGameMonitor);
+            } else if (key == "recipe") {
+                // Уже применён до чтения всех ручных параметров.
             } else if (key == "layout") {
                 parseOverlayLayout(value, target.overlay.layout);
             } else if (key == "style") {
                 parseOverlayStyle(value, target.overlay.style);
+            } else if (key == "surface") {
+                // Уже применено до явных переключателей background/border/shadow.
             } else if (key == "scale") {
-                target.overlay.scalePercent = std::clamp(parseInt(value, target.overlay.scalePercent),
-                    kMinScale, kMaxScale);
+                target.overlay.scalePercent
+                    = std::clamp(parseInt(value, target.overlay.scalePercent), kMinScale, kMaxScale);
             } else if (key == "opacity") {
-                target.overlay.opacityPercent = std::clamp(parseInt(value, target.overlay.opacityPercent), 0, 100);
+                target.overlay.opacityPercent
+                    = std::clamp(parseInt(value, target.overlay.opacityPercent), 0, 100);
             } else if (key == "offset_x") {
                 target.overlay.offsetX = std::clamp(parseInt(value, target.overlay.offsetX), -8192, 8192);
             } else if (key == "pixel_layout") {
@@ -486,13 +749,14 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
             } else if (key == "text_outline") {
                 target.overlay.textOutline = std::clamp(parseInt(value, target.overlay.textOutline), 0, 3);
             } else if (key == "corner") {
-                target.overlay.cornerRadius = std::clamp(parseInt(value, target.overlay.cornerRadius), -1, 24);
+                target.overlay.cornerRadius
+                    = std::clamp(parseInt(value, target.overlay.cornerRadius), -1, 24);
             } else if (key == "text_scale") {
-                target.overlay.textScalePercent = std::clamp(
-                    parseInt(value, target.overlay.textScalePercent), 85, 130);
+                target.overlay.textScalePercent
+                    = std::clamp(parseInt(value, target.overlay.textScalePercent), 85, 130);
             } else if (key == "bg_opacity") {
-                target.overlay.backgroundOpacityPercent = std::clamp(
-                    parseInt(value, target.overlay.backgroundOpacityPercent), -1, 100);
+                target.overlay.backgroundOpacityPercent
+                    = std::clamp(parseInt(value, target.overlay.backgroundOpacityPercent), -1, 100);
             } else if (key == "padding") {
                 target.overlay.paddingPx = std::clamp(parseInt(value, target.overlay.paddingPx), -1, 28);
             } else if (key == "row_gap") {
@@ -503,24 +767,48 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                 target.overlay.labelColor = std::clamp(parseInt(value, target.overlay.labelColor), -1, 5);
             } else if (key == "accent_color") {
                 target.overlay.accentColor = std::clamp(parseInt(value, target.overlay.accentColor), -1, 5);
+            } else if (key == "value_rgba") {
+                std::uint32_t rgba = 0;
+                if (parseOverlayRgba(value, rgba))
+                    target.overlay.valueRgba = rgba;
+            } else if (key == "label_rgba") {
+                std::uint32_t rgba = 0;
+                if (parseOverlayRgba(value, rgba))
+                    target.overlay.labelRgba = rgba;
+            } else if (key == "accent_rgba") {
+                std::uint32_t rgba = 0;
+                if (parseOverlayRgba(value, rgba))
+                    target.overlay.accentRgba = rgba;
+            } else if (key.size() > 9 && key.substr(0, 9) == "row_rgba_") {
+                for (std::size_t index = 0; index < kLabelCount; ++index) {
+                    if (key.substr(9) == labelKey(static_cast<LabelField>(index))) {
+                        std::uint32_t rgba = 0;
+                        if (parseOverlayRgba(value, rgba))
+                            target.overlay.rowRgba[index] = rgba;
+                    }
+                }
             } else if (key == "border_width") {
                 target.overlay.borderWidth = std::clamp(parseInt(value, target.overlay.borderWidth), -1, 3);
             } else if (key == "shadow_strength") {
-                target.overlay.shadowStrength = std::clamp(parseInt(value, target.overlay.shadowStrength), 0, 100);
+                target.overlay.shadowStrength
+                    = std::clamp(parseInt(value, target.overlay.shadowStrength), 0, 100);
             } else if (key == "letter_spacing") {
-                target.overlay.letterSpacing = std::clamp(parseInt(value, target.overlay.letterSpacing), 0, 200);
+                target.overlay.letterSpacing
+                    = std::clamp(parseInt(value, target.overlay.letterSpacing), 0, 200);
             } else if (key == "uppercase") {
-                target.overlay.uppercaseMode = std::clamp(parseInt(value, target.overlay.uppercaseMode), -1, 1);
+                target.overlay.uppercaseMode
+                    = std::clamp(parseInt(value, target.overlay.uppercaseMode), -1, 1);
             } else if (key == "separators") {
-                target.overlay.separatorsMode = std::clamp(parseInt(value, target.overlay.separatorsMode), -1, 1);
+                target.overlay.separatorsMode
+                    = std::clamp(parseInt(value, target.overlay.separatorsMode), -1, 1);
             } else if (key == "fps_decimals") {
                 target.overlay.fpsDecimals = std::clamp(parseInt(value, target.overlay.fpsDecimals), -1, 2);
             } else if (key.size() > 10 && key.substr(0, 10) == "row_color_") {
                 for (std::size_t index = 0; index < kLabelCount; ++index) {
                     const auto field = static_cast<LabelField>(index);
                     if (key.substr(10) == labelKey(field)) {
-                        target.overlay.rowColors[index] = std::clamp(
-                            parseInt(value, target.overlay.rowColors[index]), -1, 5);
+                        target.overlay.rowColors[index]
+                            = std::clamp(parseInt(value, target.overlay.rowColors[index]), -1, 5);
                     }
                 }
             } else if (key == "click_through") {
@@ -589,12 +877,18 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                     }
                 }
             }
-        } else if (section == "overlay_metric_colors") {
+        } else if (section == "overlay_metric_colors" || section == "overlay_metric_rgba") {
             const auto entry = std::find_if(kMetricTable.begin(), kMetricTable.end(),
                 [&key](const MetricInfo& info) { return info.key == key; });
             if (entry != kMetricTable.end()) {
-                target.overlay.metricColors[static_cast<std::size_t>(entry->id)]
-                    = std::clamp(parseInt(value, -1), -1, 5);
+                const auto index = static_cast<std::size_t>(entry->id);
+                if (section == "overlay_metric_colors") {
+                    target.overlay.metricColors[index] = std::clamp(parseInt(value, -1), -1, 5);
+                } else {
+                    std::uint32_t rgba = 0;
+                    if (parseOverlayRgba(value, rgba))
+                        target.overlay.metricRgba[index] = rgba;
+                }
             }
         } else if (section == "overlay_labels") {
             const auto entry = std::find_if(kMetricTable.begin(), kMetricTable.end(),
@@ -610,7 +904,8 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
             } else if (key == "window") {
                 target.hotkeys.window = static_cast<unsigned int>(std::clamp(parseInt(value, 0), 0, 254));
             } else if (key == "click_through") {
-                target.hotkeys.clickThrough = static_cast<unsigned int>(std::clamp(parseInt(value, 0), 0, 254));
+                target.hotkeys.clickThrough
+                    = static_cast<unsigned int>(std::clamp(parseInt(value, 0), 0, 254));
             }
         } else if (section == "labels") {
             for (std::size_t index = 0; index < kLabelCount; ++index) {
@@ -649,6 +944,11 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
         target.overlay.metrics[static_cast<std::size_t>(MetricId::CpuTemp)] = target.overlay.visible[1];
         target.overlay.metrics[static_cast<std::size_t>(MetricId::GpuTemp)] = target.overlay.visible[2];
     }
+    if (!hasRecipe) {
+        // Старая палитра становится одноимённым рецептом; явно заданные layout,
+        // font, состав и chrome не трогаем — старый файл визуально не мигрирует сам.
+        target.overlay.recipe = static_cast<OverlayRecipe>(target.overlay.style);
+    }
     return true;
 }
 
@@ -672,8 +972,25 @@ std::string serializeSettings(const Settings& settings)
 
     text += "[overlay]\n";
     text += "position = " + std::string(overlayPositionKey(settings.overlay.position)) + "\n";
+    text += std::string("anchor_mode = ")
+        + (settings.overlay.anchorMode == OverlayAnchorMode::Free ? "free\n" : "corner\n");
+    text += "origin_x = " + std::to_string(settings.overlay.originX) + "\n";
+    text += "origin_y = " + std::to_string(settings.overlay.originY) + "\n";
+    if (!settings.overlay.savedMonitorId.empty() && settings.overlay.savedMonitorId.size() <= 256
+        && settings.overlay.savedMonitorId.find_first_of("\r\n") == std::string::npos) {
+        text += "saved_monitor_id = " + settings.overlay.savedMonitorId + "\n";
+        text += "monitor_origin_x = " + std::to_string(settings.overlay.monitorOriginX) + "\n";
+        text += "monitor_origin_y = " + std::to_string(settings.overlay.monitorOriginY) + "\n";
+    }
+    text += std::string("follow_game_monitor = ") + (settings.overlay.followGameMonitor ? "1\n" : "0\n");
+    text += "recipe = " + std::string(overlayRecipeKey(settings.overlay.recipe)) + "\n";
     text += "layout = " + std::string(overlayLayoutKey(settings.overlay.layout)) + "\n";
     text += "style = " + std::string(overlayStyleKey(settings.overlay.style)) + "\n";
+    if (settings.overlay.surfaceActive) {
+        text += "surface = " + std::string(overlaySurfaceKey(settings.overlay.surface)) + "\n";
+    } else if (static_cast<std::size_t>(settings.overlay.recipe) >= 8) {
+        text += "surface = custom\n";
+    }
     text += "scale = " + std::to_string(settings.overlay.scalePercent) + "\n";
     text += "opacity = " + std::to_string(settings.overlay.opacityPercent) + "\n";
     text += "offset_x = " + std::to_string(settings.overlay.offsetX) + "\n";
@@ -694,6 +1011,12 @@ std::string serializeSettings(const Settings& settings)
     text += "value_color = " + std::to_string(settings.overlay.valueColor) + "\n";
     text += "label_color = " + std::to_string(settings.overlay.labelColor) + "\n";
     text += "accent_color = " + std::to_string(settings.overlay.accentColor) + "\n";
+    if (settings.overlay.valueRgba)
+        text += "value_rgba = " + overlayRgbaHex(*settings.overlay.valueRgba) + "\n";
+    if (settings.overlay.labelRgba)
+        text += "label_rgba = " + overlayRgbaHex(*settings.overlay.labelRgba) + "\n";
+    if (settings.overlay.accentRgba)
+        text += "accent_rgba = " + overlayRgbaHex(*settings.overlay.accentRgba) + "\n";
     text += "border_width = " + std::to_string(settings.overlay.borderWidth) + "\n";
     text += "shadow_strength = " + std::to_string(settings.overlay.shadowStrength) + "\n";
     text += "letter_spacing = " + std::to_string(settings.overlay.letterSpacing) + "\n";
@@ -704,6 +1027,10 @@ std::string serializeSettings(const Settings& settings)
         const auto field = static_cast<LabelField>(index);
         text += std::string("row_color_") + std::string(labelKey(field)) + " = "
             + std::to_string(settings.overlay.rowColors[index]) + "\n";
+        if (settings.overlay.rowRgba[index]) {
+            text += "row_rgba_" + std::string(labelKey(field)) + " = "
+                + overlayRgbaHex(*settings.overlay.rowRgba[index]) + "\n";
+        }
     }
     text += std::string("click_through = ") + (settings.overlay.clickThrough ? "1" : "0") + "\n";
     for (std::size_t index = 0; index < kLabelCount; ++index) {
@@ -737,7 +1064,15 @@ std::string serializeSettings(const Settings& settings)
     text += "\n[overlay_metric_colors]\n";
     for (const MetricInfo& metric : kMetricTable) {
         const int color = settings.overlay.metricColors[static_cast<std::size_t>(metric.id)];
-        if (color >= 0) { text += std::string(metric.key) + " = " + std::to_string(color) + "\n"; }
+        if (color >= 0) {
+            text += std::string(metric.key) + " = " + std::to_string(color) + "\n";
+        }
+    }
+    text += "\n[overlay_metric_rgba]\n";
+    for (const MetricInfo& metric : kMetricTable) {
+        const auto& rgba = settings.overlay.metricRgba[static_cast<std::size_t>(metric.id)];
+        if (rgba)
+            text += std::string(metric.key) + " = " + overlayRgbaHex(*rgba) + "\n";
     }
     text += "\n[overlay_labels]\n";
     for (const MetricInfo& metric : kMetricTable) {
