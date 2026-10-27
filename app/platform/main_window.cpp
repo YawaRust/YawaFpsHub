@@ -731,12 +731,12 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             auto& overlay = m_model.settings.overlay;
             if (overlay.anchorMode == OverlayAnchorMode::Free) {
                 overlay.originX = std::clamp(m_dragOffsetX
-                        + scaledOverlayOffset(
-                            x - m_dragStartX, m_dragRect.width(), GetSystemMetrics(SM_CXVIRTUALSCREEN)),
+                        + scaledOverlayOffset(static_cast<int>(std::lround(x - m_dragStartX)),
+                            m_dragRect.width(), GetSystemMetrics(SM_CXVIRTUALSCREEN)),
                     0, 32768);
                 overlay.originY = std::clamp(m_dragOffsetY
-                        + scaledOverlayOffset(
-                            y - m_dragStartY, m_dragRect.height(), GetSystemMetrics(SM_CYVIRTUALSCREEN)),
+                        + scaledOverlayOffset(static_cast<int>(std::lround(y - m_dragStartY)),
+                            m_dragRect.height(), GetSystemMetrics(SM_CYVIRTUALSCREEN)),
                     0, 32768);
             } else {
                 overlay.offsetX = std::clamp(

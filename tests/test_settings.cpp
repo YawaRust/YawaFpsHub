@@ -630,11 +630,11 @@ namespace {
 
     void testRecipeMigrationAndAxes()
     {
-        CHECK(overlayColorGroup(MetricId::Low1Fps) == 0);
-        CHECK(overlayColorGroup(MetricId::Core15Load) == 1);
-        CHECK(overlayColorGroup(MetricId::GpuEncode) == 2);
-        CHECK(overlayColorGroup(MetricId::RamUsed) == 3);
-        CHECK(overlayColorGroup(MetricId::VramUsed) == 4);
+        CHECK(overlayColorGroup(MetricId::Low1Fps) == std::size_t { 0 });
+        CHECK(overlayColorGroup(MetricId::Core15Load) == std::size_t { 1 });
+        CHECK(overlayColorGroup(MetricId::GpuEncode) == std::size_t { 2 });
+        CHECK(overlayColorGroup(MetricId::RamUsed) == std::size_t { 3 });
+        CHECK(overlayColorGroup(MetricId::VramUsed) == std::size_t { 4 });
         CHECK(!overlayColorGroup(MetricId::DiskRead));
         const auto& recipes = overlayRecipes();
         CHECK(recipes.size() == 16);
