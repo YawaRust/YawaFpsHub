@@ -5,12 +5,14 @@
 #include "platform/pawnio_sensors.h"
 #include "platform/spd_probe_win.h"
 #include "platform/win_util.h"
+#include "report/package.h"
 
 #include <objbase.h>
 #include <shellapi.h>
 #include <windows.h>
 
 #include <initializer_list>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -59,12 +61,95 @@ DumpRequest probeCommand()
     return request;
 }
 
+// Пустой путь отличает ошибочный --report от обычного запуска приложения.
+std::optional<std::wstring> reportCommand()
+{
+    int count = 0;
+    wchar_t** arguments = CommandLineToArgvW(GetCommandLineW(), &count);
+    if (arguments == nullptr)
+        return std::nullopt;
+    std::optional<std::wstring> path;
+    for (int index = 1; index < count; ++index) {
+        const std::wstring_view arg = arguments[index];
+        if (arg.starts_with(L"--report")) {
+            path = count == 2 && arg.starts_with(L"--report=") ? std::wstring(arg.substr(9)) : L"";
+            break;
+        }
+    }
+    LocalFree(arguments);
+    return path;
+}
+
 HANDLE probeOutput()
 {
     HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
     if ((output == nullptr || output == INVALID_HANDLE_VALUE) && AttachConsole(ATTACH_PARENT_PROCESS))
         output = GetStdHandle(STD_OUTPUT_HANDLE);
     return output;
+}
+
+bool readLocalReport(std::wstring_view path, std::string& archive, std::string& error)
+{
+    if (path.starts_with(L"\\\\") || path.starts_with(L"//")) {
+        error = "network paths are not accepted";
+        return false;
+    }
+    const HANDLE file = CreateFileW(std::wstring(path).c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        error = "cannot open " + yawa::narrow(path);
+        return false;
+    }
+    LARGE_INTEGER length { };
+    constexpr LONGLONG kMaxArchiveBytes = 33LL * 1024 * 1024;
+    const bool sized
+        = GetFileSizeEx(file, &length) && length.QuadPart > 0 && length.QuadPart <= kMaxArchiveBytes;
+    DWORD received = 0;
+    if (sized) {
+        archive.resize(static_cast<std::size_t>(length.QuadPart));
+        if (!ReadFile(file, archive.data(), static_cast<DWORD>(archive.size()), &received, nullptr)
+            || received != archive.size()) {
+            error = "file could not be read completely";
+        }
+    } else {
+        error = "file is empty, unreadable or larger than 33 MiB";
+    }
+    CloseHandle(file);
+    return error.empty();
+}
+
+int reportCommandOutput(std::wstring_view path)
+{
+    HANDLE output = probeOutput();
+    if (output == nullptr || output == INVALID_HANDLE_VALUE)
+        return 2;
+    std::string message;
+    int status = 1;
+    std::string archive;
+    std::string error;
+    if (path.empty()) {
+        message = "Usage: YawaFpsHub.exe --report=<local-file.yawa>\n";
+        status = 2;
+    } else if (!readLocalReport(path, archive, error)) {
+        message = "Report: " + error + "\n";
+    } else {
+        yawa::ReportPackageContents contents;
+        if (yawa::readReportPackage(archive, contents, error)) {
+            message = std::string(".yawa schema 1: valid\nGame frame: ")
+                + (contents.gameFrameIncluded ? "included" : "omitted")
+                + "\nSession: " + contents.sessionJson;
+            if (message.back() != '\n')
+                message += '\n';
+            status = 0;
+        } else {
+            message = "Report: " + error + "\n";
+        }
+    }
+    DWORD written = 0;
+    return WriteFile(output, message.data(), static_cast<DWORD>(message.size()), &written, nullptr)
+            && written == message.size()
+        ? status
+        : 2;
 }
 
 int memoryDumpCommandOutput()
@@ -157,6 +242,9 @@ void showExistingWindow()
 
 int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
 {
+    const auto report = reportCommand();
+    if (report)
+        return reportCommandOutput(*report);
     const DumpRequest probe = probeCommand();
     if (probe.command != DumpCommand::None) {
         if (probe.command == DumpCommand::Memory)

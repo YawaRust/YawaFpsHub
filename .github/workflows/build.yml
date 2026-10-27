@@ -89,6 +89,13 @@ jobs:
             }
           }
 
+      - name: Просмотр локального пакета через CLI
+        shell: pwsh
+        run: |
+          $exe = (Get-ChildItem -Path .\build -Recurse -Filter YawaFpsHub.exe | Select-Object -First 1).FullName
+          if (-not $exe) { throw "Собранный YawaFpsHub.exe не найден" }
+          python tests/test_report_cli.py --exe $exe
+
       - name: Самопроверка приложения
         shell: pwsh
         run: |
