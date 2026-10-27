@@ -168,7 +168,7 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
         }
     }
 
-    const double tck = memory.cycleTimeNs();
+    const std::wstring type = memory.type.empty() ? L"нет данных" : wideText(memory.type);
     const std::wstring profile = L"нет данных о профиле";
 
     std::wstring slots = L"—";
@@ -185,9 +185,8 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
 
     // Четыре характеристики в сетке 2×2: в демо карточка памяти именно такая,
     // и в одну колонку они не влезали в узком окне.
-    const std::array<std::pair<std::wstring, std::wstring>, 4> specs{ std::make_pair(L"Частота", speed),
-        { L"Такт tCK", tck > 0.0 ? wideText(formatValue(tck, 3) + " нс") : std::wstring(L"—") },
-        { L"XMP/EXPO", profile }, { L"Слоты", slots } };
+    const std::array<std::pair<std::wstring, std::wstring>, 4> specs { std::make_pair(L"Скорость", speed),
+        { L"Тип памяти", type }, { L"XMP/EXPO", profile }, { L"Слоты", slots } };
     const float half = inner.width() * 0.5f;
     for (std::size_t index = 0; index < specs.size(); ++index) {
         const Rect cell{ inner.left + static_cast<float>(index % 2) * half, top + static_cast<float>(index / 2) * 26.0f,
