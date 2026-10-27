@@ -409,6 +409,10 @@ bool readReportPackage(std::string_view archive, ReportPackageContents& contents
         error = "Пакет .yawa: неподдерживаемая схема или повреждённая PNG-карточка";
         return false;
     }
+    if (!entries[3].starts_with("metric,value,unit\n")) {
+        error = "Пакет .yawa: неверный заголовок sensors.csv";
+        return false;
+    }
     for (const std::size_t index : std::array<std::size_t, 4> { 1, 2, 4, 5 }) {
         if (!JsonReader(entries[index]).valid()) {
             error = "Пакет .yawa: некорректный JSON в " + std::string(kNames[index]);

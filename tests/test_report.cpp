@@ -185,6 +185,10 @@ void runReportTests()
     CHECK(!readReportPackage(broken, read, error)); // Оба CRC верны, но площадь кадра чрезмерна.
     CHECK(read.cardPng == original);
     CHECK(!readReportPackage("not a zip", read, error));
+    broken = output;
+    replaceEntryByte(broken, "sensors.csv", 0, 'x');
+    CHECK(!readReportPackage(broken, read, error)); // Корректный ZIP CRC не оправдывает чужой формат CSV.
+    CHECK(read.cardPng == original);
 
     for (std::string_view name : { "system.json", "session.json", "audit.json", "diagnosis.json" }) {
         broken = output;
