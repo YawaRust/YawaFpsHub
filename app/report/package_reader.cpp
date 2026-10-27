@@ -2,6 +2,8 @@
 #include "report/package_internal.h"
 
 #include <array>
+#include <charconv>
+#include <cmath>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -127,7 +129,73 @@ namespace {
 
         bool valid() { return object(0) && ended(); }
 
+        bool notCollected()
+        {
+            std::string_view key;
+            std::string_view status;
+            return take('{') && quoted(&key) && key == "status" && take(':') && quoted(&status)
+                && status == "not_collected" && take('}') && ended();
+        }
+
+        bool validSession()
+        {
+            if (!take('{'))
+                return false;
+            unsigned seen = 0;
+            std::string_view status;
+            while (!take('}')) {
+                if (seen != 0 && !take(','))
+                    return false;
+                std::string_view key;
+                if (!quoted(&key) || !take(':'))
+                    return false;
+                unsigned field = 0;
+                if (key == "sample_age_ms")
+                    field = 1;
+                else if (key == "fps")
+                    field = 2;
+                else if (key == "game_cpu_pct")
+                    field = 3;
+                else if (key == "game_thread_pct")
+                    field = 4;
+                else if (key == "game_gpu_3d_pct")
+                    field = 5;
+                else if (key != "status")
+                    return false;
+                if ((seen & (1u << field)) != 0)
+                    return false;
+                seen |= 1u << field;
+                if (field == 0) {
+                    if (!quoted(&status))
+                        return false;
+                } else {
+                    space();
+                    const std::size_t start = m_pos;
+                    if (m_pos == m_text.size() || !number()
+                        || !sessionNumber(field, m_text.substr(start, m_pos - start)))
+                        return false;
+                }
+            }
+            return ended()
+                && ((status == "no_game_sample" && seen == 1)
+                    || (status == "instantaneous_only" && (seen & 3u) == 3u));
+        }
+
     private:
+        bool sessionNumber(unsigned field, std::string_view text)
+        {
+            if (field == 1) {
+                unsigned age = 0;
+                const auto parsed = std::from_chars(text.data(), text.data() + text.size(), age);
+                return parsed.ec == std::errc { } && parsed.ptr == text.data() + text.size() && age <= 2000;
+            }
+            double value = 0;
+            const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
+            const double limit = field == 2 ? 100000.0 : 100.0;
+            return parsed.ec == std::errc { } && parsed.ptr == text.data() + text.size()
+                && std::isfinite(value) && (field != 2 || value > 0) && value >= 0 && value <= limit;
+        }
+
         void space()
         {
             while (m_pos < m_text.size()
@@ -200,20 +268,29 @@ namespace {
                 && (codepoint < 0xd800u || codepoint > 0xdfffu);
         }
 
-        bool quoted()
+        bool quoted(std::string_view* result = nullptr)
         {
             if (!take('"'))
                 return false;
+            const std::size_t start = m_pos;
+            bool escapedValue = false;
             while (m_pos < m_text.size()) {
                 const auto symbol = static_cast<unsigned char>(m_text[m_pos++]);
-                if (symbol == '"')
+                if (symbol == '"') {
+                    if (result != nullptr) {
+                        if (escapedValue)
+                            return false;
+                        *result = m_text.substr(start, m_pos - start - 1);
+                    }
                     return true;
+                }
                 if (symbol < 0x20u)
                     return false;
                 if (symbol >= 0x80u) {
                     if (!utf8(symbol))
                         return false;
                 } else if (symbol == '\\') {
+                    escapedValue = true;
                     if (m_pos == m_text.size())
                         return false;
                     const char escaped = m_text[m_pos++];
@@ -409,8 +486,9 @@ bool readReportPackage(std::string_view archive, ReportPackageContents& contents
         error = "Пакет .yawa: неподдерживаемая схема или повреждённая PNG-карточка";
         return false;
     }
-    if (!entries[3].starts_with("metric,value,unit\n")) {
-        error = "Пакет .yawa: неверный заголовок sensors.csv";
+    // Schema 1's producer writes no sensor rows. Do not pass invented CSV rows to a future viewer.
+    if (entries[3] != "metric,value,unit\n") {
+        error = "Пакет .yawa: неподдерживаемые данные sensors.csv";
         return false;
     }
     for (const std::size_t index : std::array<std::size_t, 4> { 1, 2, 4, 5 }) {
@@ -418,6 +496,11 @@ bool readReportPackage(std::string_view archive, ReportPackageContents& contents
             error = "Пакет .yawa: некорректный JSON в " + std::string(kNames[index]);
             return false;
         }
+    }
+    if (!JsonReader(entries[1]).notCollected() || !JsonReader(entries[4]).notCollected()
+        || !JsonReader(entries[2]).validSession()) {
+        error = "Пакет .yawa: неподдерживаемые поля system, audit или session";
+        return false;
     }
     ReportPackageContents parsed;
     parsed.manifestJson = entries[0];

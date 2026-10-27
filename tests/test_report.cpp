@@ -51,6 +51,33 @@ namespace {
         write32(archive, centralName - 46 + 16, crc);
     }
 
+    void appendSensorRow(std::string& archive, std::string_view row)
+    {
+        constexpr std::string_view name = "sensors.csv";
+        const std::size_t localName = archive.find(name);
+        const std::size_t body = localName + name.size();
+        const unsigned size = read32(archive, localName - 30 + 18) + static_cast<unsigned>(row.size());
+        const std::size_t oldDirectory = read32(archive, archive.size() - 22 + 16);
+        archive.insert(body + size - row.size(), row);
+        const std::size_t footer = archive.size() - 22;
+        write32(archive, footer + 16, static_cast<std::uint32_t>(oldDirectory + row.size()));
+        write32(archive, localName - 30 + 18, size);
+        write32(archive, localName - 30 + 22, size);
+        const auto crc = report_internal::crc32(std::string_view(archive).substr(body, size));
+        write32(archive, localName - 30 + 14, crc);
+        const std::size_t centralName = archive.rfind(name);
+        write32(archive, centralName - 46 + 16, crc);
+        write32(archive, centralName - 46 + 20, size);
+        write32(archive, centralName - 46 + 24, size);
+        std::size_t entry = oldDirectory + row.size();
+        for (unsigned index = 0; index < 7; ++index) {
+            if (index > 3)
+                write32(archive, entry + 42,
+                    read32(archive, entry + 42) + static_cast<std::uint32_t>(row.size()));
+            entry += 46 + read16(archive, entry + 28);
+        }
+    }
+
 } // namespace
 
 void runReportTests()
@@ -189,6 +216,11 @@ void runReportTests()
     replaceEntryByte(broken, "sensors.csv", 0, 'x');
     CHECK(!readReportPackage(broken, read, error)); // Корректный ZIP CRC не оправдывает чужой формат CSV.
     CHECK(read.cardPng == original);
+    broken = output;
+    appendSensorRow(broken, "fps,120,Hz\n");
+    CHECK(!readReportPackage(broken, read, error)); // Header alone does not authorize arbitrary rows.
+    CHECK(error.find("sensors.csv") != std::string::npos);
+    CHECK(read.cardPng == original);
 
     for (std::string_view name : { "system.json", "session.json", "audit.json", "diagnosis.json" }) {
         broken = output;
@@ -196,6 +228,22 @@ void runReportTests()
         CHECK(!readReportPackage(broken, read, error));
         CHECK(read.cardPng == original);
     }
+    for (std::string_view name : { "system.json", "audit.json", "session.json" }) {
+        broken = output;
+        replaceEntryByte(broken, name, 11, 'x'); // Correct JSON with a false schema status.
+        CHECK(!readReportPackage(broken, read, error));
+        CHECK(read.cardPng == original);
+    }
+    GameDiagnosisInput older = sample;
+    older.sampledAtMs = 9000;
+    CHECK(buildReportPackage({ older, png, false }, broken, error));
+    const std::size_t sessionBody = broken.find("session.json") + std::string_view("session.json").size();
+    const std::size_t ageValue
+        = broken.find("\"sample_age_ms\":", sessionBody) + std::string_view("\"sample_age_ms\":").size();
+    replaceEntryByte(
+        broken, "session.json", ageValue - sessionBody, '3'); // 3000 ms is valid JSON, stale data.
+    CHECK(!readReportPackage(broken, read, error));
+    CHECK(read.cardPng == original);
     broken = output;
     replaceEntryByte(broken, "session.json", 11, static_cast<char>(0x80));
     CHECK(!readReportPackage(broken, read, error)); // Корректный ZIP CRC не оправдывает сломанный UTF-8.
