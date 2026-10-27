@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -101,6 +102,9 @@ inline std::optional<std::vector<Ddr4XmpProfile>> decodeDdr4Xmp(std::span<const 
         || spdCrc16(bytes.subspan(128, 126)) != static_cast<unsigned>(bytes[254] | (bytes[255] << 8))) {
         return std::nullopt;
     }
+    // A page of 0xff is a common failed bus read, not proof of absent XMP.
+    if (std::all_of(bytes.begin() + 256, bytes.end(), [](std::uint8_t value) { return value == 0xff; }))
+        return std::nullopt;
     if (bytes[384] != 0x0c || bytes[385] != 0x4a)
         return std::vector<Ddr4XmpProfile> { };
     if (bytes[387] != 0x20) // Only Intel XMP 2.0 for DDR4.
