@@ -75,9 +75,9 @@ void runSpdTests()
     CHECK(noXmp.has_value());
     if (noXmp)
         CHECK(noXmp->empty());
-    std::fill(full.begin() + 256, full.end(), 0xff);
+    std::fill(full.begin() + 256, full.end(), std::uint8_t { 0xff });
     CHECK(!decodeDdr4Xmp(full)); // Unreadable second page must not mean 'no XMP'.
-    std::fill(full.begin() + 256, full.end(), 0);
+    std::fill(full.begin() + 256, full.end(), std::uint8_t { 0 });
     full[384] = 0x0c;
     full[385] = 0x4a;
     full[386] = 0x03; // Two advertised profiles.

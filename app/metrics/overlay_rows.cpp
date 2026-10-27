@@ -58,11 +58,12 @@ std::vector<OverlayMetricRow> overlayMetricRows(const OverlaySettings& settings,
         }
         const bool paired = std::any_of(kPairedMetricDetails.begin(), kPairedMetricDetails.end(),
             [id](MetricId detail) { return displayMetric(detail) == id; });
-        rows.push_back({ metric.id, label,
-            metricKnown(store, metric)
-                ? (paired ? displayMetricValue(id, store)
-                          : formatWithUnit(store.value(metric.id), metric.unit, decimals))
-                                       : "нет данных" });
+        std::string value = metricKnown(store, metric)
+            ? (paired ? displayMetricValue(id, store)
+                      : formatWithUnit(store.value(metric.id), metric.unit, decimals))
+            : "нет данных";
+        std::replace(value.begin(), value.end(), ',', '.');
+        rows.push_back({ metric.id, label, value });
     }
     return rows;
 }

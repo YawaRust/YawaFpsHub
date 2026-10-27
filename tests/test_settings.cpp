@@ -9,6 +9,7 @@
 #include <algorithm>
 
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace yawa::test {
@@ -93,6 +94,35 @@ namespace {
         CHECK(overlayMetricRows(settings, store)[0].label.empty());
     }
 
+    void testOverlayDecimalPoint()
+    {
+        OverlaySettings settings;
+        settings.metrics.fill(false);
+        settings.fpsDecimals = 1;
+        MetricStore store;
+        const auto select = [&](MetricId id, double value) {
+            settings.metrics[static_cast<std::size_t>(id)] = true;
+            store.set(id, value);
+        };
+        select(MetricId::Fps, 123.4);
+        select(MetricId::FrameTime, 12.34);
+        select(MetricId::NetDown, 2.44);
+        select(MetricId::RamUsed, 4.5);
+        select(MetricId::RamFree, 1.2);
+        settings.customLabelSet[static_cast<std::size_t>(MetricId::FrameTime)] = true;
+        settings.customLabels[static_cast<std::size_t>(MetricId::FrameTime)] = "Время, кадра";
+        const auto rows = overlayMetricRows(settings, store);
+        const auto hasRow = [&](MetricId id, std::string_view value, std::string_view label = { }) {
+            return std::any_of(rows.begin(), rows.end(), [&](const auto& row) {
+                return row.id == id && row.value == value && (label.empty() || row.label == label);
+            });
+        };
+        CHECK(hasRow(MetricId::Fps, "123.4"));
+        CHECK(hasRow(MetricId::FrameTime, "12.34 мс", "Время, кадра"));
+        CHECK(hasRow(MetricId::NetDown, "2.4 Мбит/с"));
+        CHECK(hasRow(MetricId::RamUsed, "4.5 / 5.7 ГБ"));
+    }
+
     void testLegacyOverlaySelection()
     {
         Settings settings;
@@ -140,7 +170,7 @@ namespace {
             rows.begin(), rows.end(), [](const auto& row) { return row.id == MetricId::VramUsed; });
         CHECK(vram != rows.end());
         if (vram != rows.end()) {
-            CHECK(vram->value.find("2,0 / 8,0") != std::string::npos);
+            CHECK(vram->value.find("2.0 / 8.0") != std::string::npos);
         }
         moveOverlayMetric(settings, MetricId::VramTotal, MetricId::CpuLoad);
         rows = overlayMetricRows(settings, store);
@@ -778,6 +808,7 @@ void runSettingsTests()
     testIndependentOverlaySensors();
     testEverySelectedSensorReachesOverlay();
     testUnavailableAndZeroOverlaySensors();
+    testOverlayDecimalPoint();
     testLegacyOverlaySelection();
     testPairedMetricsAndOrder();
     testSmbiosModuleSizes();

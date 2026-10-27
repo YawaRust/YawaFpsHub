@@ -576,7 +576,7 @@ namespace {
             L"Разделители строк", overlay.separatorsMode, ActionKind::SetSeparators, hits);
         top += 28.0f;
 
-        // Знаки после запятой у кадров: «Стиль» — как в пресете, 0…2 — жёстко.
+        // Знаки после точки у кадров: «Стиль» — как в пресете, 0…2 — жёстко.
         renderer.text(L"Знаки у FPS", Rect { inner.left, top, inner.right - 200.0f, top + 22.0f },
             TextRole::Small, theme.textDim);
         const std::array<std::wstring_view, 4> decimalNames { L"Стиль", L"0", L"1", L"2" };
