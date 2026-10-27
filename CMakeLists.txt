@@ -42,6 +42,7 @@ add_library(yawa_metrics STATIC
     app/metrics/bottleneck.cpp
     app/metrics/diagnosis.cpp
     app/report/package.cpp
+    app/report/package_reader.cpp
     app/ui/settings.cpp
     app/ui/overlay_recipe_json.cpp
 )

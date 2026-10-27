@@ -20,4 +20,20 @@ struct ReportPackageInput
 // On failure, package is unchanged and error contains the reason.
 bool buildReportPackage(const ReportPackageInput& input, std::string& package, std::string& error);
 
+struct ReportPackageContents
+{
+    std::string manifestJson;
+    std::string systemJson;
+    std::string sessionJson;
+    std::string sensorsCsv;
+    std::string auditJson;
+    std::string diagnosisJson;
+    std::string cardPng;
+    bool gameFrameIncluded = false;
+};
+
+// Accepts only the seven known, uncompressed schema-1 entries. Never extracts paths.
+// Invalid archives leave contents unchanged.
+bool readReportPackage(std::string_view archive, ReportPackageContents& contents, std::string& error);
+
 } // namespace yawa

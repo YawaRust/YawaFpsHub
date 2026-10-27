@@ -1,4 +1,5 @@
 #include "report/package.h"
+#include "report/package_internal.h"
 
 #include <algorithm>
 #include <array>
@@ -10,22 +11,9 @@
 #include <vector>
 
 namespace yawa {
-namespace {
+namespace report_internal {
 
-    constexpr std::size_t kMaxCardBytes = 32u * 1024u * 1024u;
     constexpr std::string_view kPngSignature = "\x89PNG\r\n\x1a\n";
-
-    void word(std::string& output, std::uint16_t value)
-    {
-        output.push_back(static_cast<char>(value));
-        output.push_back(static_cast<char>(value >> 8));
-    }
-
-    void dword(std::string& output, std::uint32_t value)
-    {
-        word(output, static_cast<std::uint16_t>(value));
-        word(output, static_cast<std::uint16_t>(value >> 16));
-    }
 
     std::uint32_t crc32(std::string_view data)
     {
@@ -77,6 +65,25 @@ namespace {
                 return length == 0 && hasPixels && offset == png.size();
         }
         return false;
+    }
+
+} // namespace report_internal
+namespace {
+
+    using report_internal::crc32;
+    using report_internal::validPng;
+
+    constexpr std::size_t kMaxCardBytes = 32u * 1024u * 1024u;
+    void word(std::string& output, std::uint16_t value)
+    {
+        output.push_back(static_cast<char>(value));
+        output.push_back(static_cast<char>(value >> 8));
+    }
+
+    void dword(std::string& output, std::uint32_t value)
+    {
+        word(output, static_cast<std::uint16_t>(value));
+        word(output, static_cast<std::uint16_t>(value >> 16));
     }
 
     void jsonString(std::string& output, std::string_view text)

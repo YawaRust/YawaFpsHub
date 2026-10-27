@@ -1,4 +1,5 @@
 #include "report/package.h"
+#include "report/package_internal.h"
 #include "test_support.h"
 
 #include <array>
@@ -18,6 +19,12 @@ namespace {
     std::uint32_t read32(std::string_view data, std::size_t offset)
     {
         return read16(data, offset) | static_cast<std::uint32_t>(read16(data, offset + 2)) << 16;
+    }
+
+    void write32(std::string& data, std::size_t offset, std::uint32_t value)
+    {
+        for (int index = 0; index < 4; ++index)
+            data[offset + static_cast<std::size_t>(index)] = static_cast<char>(value >> (index * 8));
     }
 
 } // namespace
@@ -96,6 +103,39 @@ void runReportTests()
     CHECK(read16(output, end + 10) == names.size());
     CHECK(read32(output, end + 16) == offset);
     CHECK(output.find("PRIVATE_USER") == std::string::npos);
+
+    ReportPackageContents read;
+    CHECK(readReportPackage(output, read, error));
+    CHECK(error.empty());
+    CHECK(read.cardPng == png);
+    CHECK(read.sessionJson.find("\"fps\":120") != std::string::npos);
+    CHECK(!read.gameFrameIncluded);
+    const std::string original = read.cardPng;
+    std::string broken = output;
+    broken[30] = 'x'; // имя первой записи нельзя переименовать даже внутри ZIP.
+    CHECK(!readReportPackage(broken, read, error));
+    CHECK(read.cardPng == original);
+    broken = output;
+    broken[broken.find("screen.png") + 30] ^= 1; // ошибка CRC содержимого.
+    CHECK(!readReportPackage(broken, read, error));
+    CHECK(read.cardPng == original);
+    broken = output;
+    broken[8] = 8; // сжатый ZIP не поддерживается.
+    CHECK(!readReportPackage(broken, read, error));
+    broken = output;
+    broken.back() = 1; // комментарий/данные после каталога запрещены.
+    CHECK(!readReportPackage(broken, read, error));
+    broken = output;
+    const auto schemaValue = broken.find("\"schema\":1") + sizeof("\"schema\":") - 1;
+    broken[schemaValue] = '2';
+    const std::size_t manifestStart = 30 + std::string_view("manifest.json").size();
+    const auto manifestCrc
+        = report_internal::crc32(std::string_view(broken).substr(manifestStart, read32(broken, 18)));
+    write32(broken, 14, manifestCrc);
+    write32(broken, read32(broken, end + 16) + 16, manifestCrc);
+    CHECK(!readReportPackage(broken, read, error)); // CRC верен, версия всё равно неизвестна.
+    CHECK(read.cardPng == original);
+    CHECK(!readReportPackage("not a zip", read, error));
 
     sample.gpuMatchesGame = false;
     sample.sampledAtMs = 100;

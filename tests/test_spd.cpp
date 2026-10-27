@@ -39,7 +39,7 @@ void runSpdTests()
     if (ddr4Identity) {
         CHECK(ddr4Identity->type == SpdType::Ddr4);
         CHECK(ddr4Identity->minimumCyclePs == 750);
-        CHECK(ddr4Identity->moduleCapacityMiB == 4096);
+        CHECK(ddr4Identity->moduleCapacityMiB == 4096u);
         CHECK(ddr4Identity->jedecTimings.has_value());
         if (ddr4Identity->jedecTimings) {
             CHECK(ddr4Identity->jedecTimings->tAaPs == 13750);
