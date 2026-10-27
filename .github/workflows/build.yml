@@ -411,7 +411,7 @@ jobs:
           Write-Output "::notice title=UI stage::проверка реальных снимков"
           $env:PYTHONIOENCODING = 'utf-8'
           $python = (Get-Command python).Source
-          $compare = Start-Process -FilePath $python -ArgumentList "-B", "tools/compare_ui.py", "--demo", ".", "--app", ".", "--out", "shots", "--check" -Wait -PassThru -RedirectStandardOutput "ui-stdout.txt" -RedirectStandardError "ui-stderr.txt"
+          $compare = Start-Process -FilePath $python -ArgumentList "-B", "tools/compare_ui.py", "--demo", ".", "--app", ".", "--out", "shots", "--check", "--max-score", "60" -Wait -PassThru -RedirectStandardOutput "ui-stdout.txt" -RedirectStandardError "ui-stderr.txt"
           Get-Content ui-stdout.txt | ForEach-Object { Write-Output $_ }
           Get-Content ui-stderr.txt | ForEach-Object { Write-Output $_ }
           if ($compare.ExitCode -ne 0) {
