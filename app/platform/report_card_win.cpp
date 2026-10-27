@@ -55,7 +55,7 @@ namespace {
     }
 
     void paint(ID2D1RenderTarget* canvas, ID2D1SolidColorBrush* brush, IDWriteTextFormat* title,
-        IDWriteTextFormat* body, IDWriteTextFormat* small, const GameDiagnosisInput& input)
+        IDWriteTextFormat* body, IDWriteTextFormat* caption, const GameDiagnosisInput& input)
     {
         const auto white = D2D1::ColorF(0.92f, 0.97f, 0.97f);
         const auto dim = D2D1::ColorF(0.70f, 0.80f, 0.84f);
@@ -64,7 +64,8 @@ namespace {
         canvas->Clear(D2D1::ColorF(0.05f, 0.09f, 0.12f));
         text(canvas, brush, title, L"YawaFpsHub · диагностический снимок", D2D1::RectF(48, 30, 1850, 94),
             white);
-        text(canvas, brush, small, L"ОФЛАЙН · КАДР ИГРЫ НЕ ВКЛЮЧЁН", D2D1::RectF(48, 100, 1100, 138), accent);
+        text(canvas, brush, caption, L"ОФЛАЙН · КАДР ИГРЫ НЕ ВКЛЮЧЁН", D2D1::RectF(48, 100, 1100, 138),
+            accent);
         fill(canvas, brush, D2D1::RectF(48, 155, 1108, 840), D2D1::ColorF(0.09f, 0.15f, 0.18f));
         text(canvas, brush, body, L"Кадр не захвачен. Карточка не копирует рабочий стол и другие окна.",
             D2D1::RectF(120, 432, 1030, 544), dim);
@@ -72,7 +73,7 @@ namespace {
 
         const auto findings = diagnoseGame(input);
         const Finding* finding = findings.empty() ? nullptr : &findings.front();
-        text(canvas, brush, small, finding ? L"НАХОДКА · ЗАМЕР ИГРЫ" : L"НЕТ ДОСТАТОЧНЫХ ДАННЫХ",
+        text(canvas, brush, caption, finding ? L"НАХОДКА · ЗАМЕР ИГРЫ" : L"НЕТ ДОСТАТОЧНЫХ ДАННЫХ",
             D2D1::RectF(1170, 186, 1820, 223), finding ? accent : dim);
         const std::wstring headline = finding ? widen(finding->title) : L"Недостаточно данных для вывода";
         text(canvas, brush, title, headline, D2D1::RectF(1170, 237, 1830, 350), white);
@@ -87,19 +88,19 @@ namespace {
 
         const bool fresh = input.gameProcessId != 0 && input.capture == GameCaptureState::Running
             && input.nowMs >= input.sampledAtMs && input.nowMs - input.sampledAtMs <= 2000;
-        text(canvas, brush, small,
+        text(canvas, brush, caption,
             L"FPS: "
                 + (fresh && input.fps && std::isfinite(*input.fps) && *input.fps > 0.0
                             && *input.fps <= 100000.0
                         ? std::to_wstring(static_cast<int>(std::lround(*input.fps)))
                         : L"нет данных"),
             D2D1::RectF(48, 878, 470, 921), white);
-        text(canvas, brush, small, L"CPU игры: " + (fresh ? percent(input.gameCpuLoad) : L"нет данных"),
+        text(canvas, brush, caption, L"CPU игры: " + (fresh ? percent(input.gameCpuLoad) : L"нет данных"),
             D2D1::RectF(480, 878, 900, 921), white);
-        text(canvas, brush, small,
+        text(canvas, brush, caption,
             L"GPU 3D игры: " + (fresh && input.gpuMatchesGame ? percent(input.gpuLoad) : L"нет данных"),
             D2D1::RectF(950, 878, 1650, 921), white);
-        text(canvas, brush, small,
+        text(canvas, brush, caption,
             L"Только проверенные показания активной игры · без серийных номеров, путей и журналов",
             D2D1::RectF(48, 977, 1840, 1030), dim);
     }
@@ -144,7 +145,7 @@ bool renderReportCard(const GameDiagnosisInput& input, ReportCardBitmap& result,
     if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&wic)))
         || FAILED(
             wic->CreateBitmap(kWidth, kHeight, GUID_WICPixelFormat32bppPBGRA, WICBitmapCacheOnLoad, &bitmap))
-        || FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &d2d))
+        || FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, d2d.GetAddressOf()))
         || FAILED(d2d->CreateWicBitmapRenderTarget(bitmap.Get(), D2D1::RenderTargetProperties(), &canvas))
         || FAILED(canvas->CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f), &brush))
         || FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
@@ -154,14 +155,14 @@ bool renderReportCard(const GameDiagnosisInput& input, ReportCardBitmap& result,
     }
     ComPtr<IDWriteTextFormat> heading;
     ComPtr<IDWriteTextFormat> body;
-    ComPtr<IDWriteTextFormat> small;
+    ComPtr<IDWriteTextFormat> caption;
     if (!format(dwrite.Get(), 45.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, heading)
         || !format(dwrite.Get(), 30.0f, DWRITE_FONT_WEIGHT_NORMAL, body)
-        || !format(dwrite.Get(), 25.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, small)) {
+        || !format(dwrite.Get(), 25.0f, DWRITE_FONT_WEIGHT_SEMI_BOLD, caption)) {
         error = "Карточка: не удалось создать шрифты";
         return false;
     }
-    paint(canvas.Get(), brush.Get(), heading.Get(), body.Get(), small.Get(), input);
+    paint(canvas.Get(), brush.Get(), heading.Get(), body.Get(), caption.Get(), input);
     if (FAILED(canvas->EndDraw())) {
         error = "Карточка: не удалось завершить отрисовку";
         return false;
