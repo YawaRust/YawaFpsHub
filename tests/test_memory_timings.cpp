@@ -17,14 +17,15 @@ void runMemoryTimingsTests()
         CHECK(timings->ras == 42);
         CHECK(timings->rc == 60);
     }
-    CHECK(isMatisseDdr4Channel(0x17, 0x71, 0, 0, 1, 0));
-    CHECK(!isMatisseDdr4Channel(0x17, 0x70, 0, 0, 1, 0));
-    CHECK(!isMatisseDdr4Channel(0x19, 0x71, 0, 0, 1, 0));
-    CHECK(!isMatisseDdr4Channel(0x17, 0x71, 1, 0, 1, 0)); // DDR5
-    CHECK(!isMatisseDdr4Channel(0x17, 0x71, 0xffffffffu, 0, 1, 0));
-    CHECK(!isMatisseDdr4Channel(0x17, 0x71, 0, 1u << 19, 1, 0));
-    CHECK(!isMatisseDdr4Channel(0x17, 0x71, 0, 0, 0, 0));
-    CHECK(!isMatisseDdr4Channel(0x17, 0x71, 0, 0, 0xffffffffu, 0));
+    CHECK(isSupportedAmdDdr4Channel(0x17, 0x71, 0, 0, 1, 0));
+    CHECK(isSupportedAmdDdr4Channel(0x19, 0x50, 0, 0, 1, 0)); // Ryzen 7 5800H (Cezanne).
+    CHECK(!isSupportedAmdDdr4Channel(0x17, 0x70, 0, 0, 1, 0));
+    CHECK(!isSupportedAmdDdr4Channel(0x19, 0x21, 0, 0, 1, 0));
+    CHECK(!isSupportedAmdDdr4Channel(0x19, 0x50, 1, 0, 1, 0)); // Not DDR4.
+    CHECK(!isSupportedAmdDdr4Channel(0x19, 0x50, 0xffffffffu, 0, 1, 0));
+    CHECK(!isSupportedAmdDdr4Channel(0x19, 0x50, 0, 1u << 19, 1, 0));
+    CHECK(!isSupportedAmdDdr4Channel(0x19, 0x50, 0, 0, 0, 0));
+    CHECK(!isSupportedAmdDdr4Channel(0x19, 0x50, 0, 0, 0xffffffffu, 0));
     CHECK(!decodeAmdDdr4Timings(0, timing1));
     CHECK(!decodeAmdDdr4Timings(timing0, 0));
     CHECK(!decodeAmdDdr4Timings(0xffffffffu, timing1));
@@ -42,7 +43,9 @@ void runMemoryTimingsTests()
     AmdDdr4MemoryDump dump {};
     dump[0] = { 0, 0, 1, 0, timing0, timing1, true };
     dump[1] = { 0, 0, 0, 0, 0, 0, false };
-    CHECK(decodeAmdDdr4MemoryDump(dump) == timings);
+    CHECK(decodeAmdDdr4MemoryDump(dump, 0x17, 0x71) == timings);
+    CHECK(decodeAmdDdr4MemoryDump(dump, 0x19, 0x50) == timings);
+    CHECK(!decodeAmdDdr4MemoryDump(dump, 0x19, 0x21));
     const auto text = formatAmdDdr4MemoryDump(dump);
     CHECK(text.find("0x00050204=0x12122A1E") != std::string::npos);
     CHECK(text.find("0x00050208=0x0012003C") != std::string::npos);
@@ -50,12 +53,12 @@ void runMemoryTimingsTests()
     CHECK(text.find("not_read") != std::string::npos);
     CHECK(text.find("0x00150204=0x") == std::string::npos);
     dump[1] = { 0, 0, 1, 0, timing0, timing1, true };
-    CHECK(decodeAmdDdr4MemoryDump(dump) == timings);
+    CHECK(decodeAmdDdr4MemoryDump(dump, 0x17, 0x71) == timings);
     dump[1].timing1 = (18u << 16) | 64u;
-    CHECK(!decodeAmdDdr4MemoryDump(dump));
+    CHECK(!decodeAmdDdr4MemoryDump(dump, 0x17, 0x71));
     dump[1].config = 1;
-    CHECK(!decodeAmdDdr4MemoryDump(dump));
+    CHECK(!decodeAmdDdr4MemoryDump(dump, 0x17, 0x71));
     dump[0].hasTimings = false;
-    CHECK(!decodeAmdDdr4MemoryDump(dump));
+    CHECK(!decodeAmdDdr4MemoryDump(dump, 0x17, 0x71));
 }
 } // namespace yawa::test

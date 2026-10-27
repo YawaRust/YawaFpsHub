@@ -58,7 +58,7 @@ int memoryDumpCommandOutput()
     yawa::PawnioSensors sensors;
     const auto dump = sensors.initialize(unopenedLog) ? sensors.readMemoryDump() : std::nullopt;
     const std::string text = dump ? yawa::formatAmdDdr4MemoryDump(*dump)
-                                  : "UMC dump unavailable (requires AMD Family 17h Model 71h, accessible "
+                                  : "UMC dump unavailable (requires AMD 17h/71h or 19h/50h, accessible "
                                     "PawnIO and readable DDR4 channels).\n";
     DWORD written = 0;
     return WriteFile(output, text.data(), static_cast<DWORD>(text.size()), &written, nullptr)

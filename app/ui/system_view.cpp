@@ -253,7 +253,7 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
         Rect { inner.left, inner.bottom - 43.0f, inner.right, inner.bottom - 25.0f }, TextRole::Small,
         model.memoryTimings ? theme.accent : theme.textFaint);
     renderer.text(model.memoryTimings
-            ? L"AMD DDR4 Matisse · tRCDWR / tRC: "
+            ? L"AMD DDR4 Matisse/Cezanne · tRCDWR / tRC: "
                 + wideText(std::to_string(model.memoryTimings->rcdWrite) + " / "
                     + std::to_string(model.memoryTimings->rc))
                 + L" · показания не проверены на железе"

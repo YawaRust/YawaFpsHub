@@ -239,8 +239,8 @@ bool SystemSensors::initialize(Log& log, std::string& error)
     m_availability.cpuHardware = m_pawnio.failure();
     m_memoryTimings = m_pawnio.readMemoryTimings();
     if (m_memoryTimings) {
-        log.info("UMC: AMD DDR4 (Matisse), два канала согласованы или заселён один; аппаратная проверка "
-                 "требуется");
+        log.info("UMC: AMD DDR4 (Matisse/Cezanne), два канала согласованы или заселён один; "
+                 "аппаратная проверка требуется");
     }
     m_storage.initialize(log);
     initializeCpu(log);

@@ -8,12 +8,17 @@
 
 namespace yawa {
 
-// Family 17h model 71h (Matisse), UMC 0x50100/0x50DF0/0x50000/0x50008.
-// Нулевой код типа означает DDR4; all-ones не считаем установленным модулем.
-inline bool isMatisseDdr4Channel(unsigned family, unsigned model, std::uint32_t config, std::uint32_t maxRate,
-    std::uint32_t dimm0, std::uint32_t dimm1)
+// Matisse 17h/71h и Cezanne 19h/50h: UMC 0x50100/0x50DF0/0x50000/0x50008.
+inline bool isSupportedAmdDdr4Cpu(unsigned family, unsigned model)
 {
-    if (family != 0x17 || model != 0x71 || config == 0xffffffffu || maxRate == 0xffffffffu
+    return (family == 0x17 && model == 0x71) || (family == 0x19 && model == 0x50);
+}
+
+// Нулевой код типа означает DDR4; all-ones не считаем установленным модулем.
+inline bool isSupportedAmdDdr4Channel(unsigned family, unsigned model, std::uint32_t config,
+    std::uint32_t maxRate, std::uint32_t dimm0, std::uint32_t dimm1)
+{
+    if (!isSupportedAmdDdr4Cpu(family, model) || config == 0xffffffffu || maxRate == 0xffffffffu
         || dimm0 == 0xffffffffu || dimm1 == 0xffffffffu) {
         return false;
     }
@@ -61,12 +66,13 @@ struct AmdDdr4ChannelRegisters
 
 using AmdDdr4MemoryDump = std::array<AmdDdr4ChannelRegisters, 2>;
 
-inline std::optional<AmdDdr4Timings> decodeAmdDdr4MemoryDump(const AmdDdr4MemoryDump& dump)
+inline std::optional<AmdDdr4Timings> decodeAmdDdr4MemoryDump(
+    const AmdDdr4MemoryDump& dump, unsigned family, unsigned model)
 {
     std::optional<AmdDdr4Timings> result;
     for (const auto& channel : dump) {
-        if (!isMatisseDdr4Channel(
-                0x17, 0x71, channel.config, channel.maxRate, channel.dimm0, channel.dimm1)) {
+        if (!isSupportedAmdDdr4Channel(
+                family, model, channel.config, channel.maxRate, channel.dimm0, channel.dimm1)) {
             if (((channel.dimm0 | channel.dimm1) & 1u) != 0) {
                 return std::nullopt;
             }
@@ -87,7 +93,7 @@ inline std::optional<AmdDdr4Timings> decodeAmdDdr4MemoryDump(const AmdDdr4Memory
 inline std::string formatAmdDdr4MemoryDump(const AmdDdr4MemoryDump& dump)
 {
     std::string text
-        = "YawaFpsHub UMC dump v1; AMD Family 17h Model 71h; read-only.\n"
+        = "YawaFpsHub UMC dump v1; AMD DDR4 (17h/71h or 19h/50h); read-only.\n"
           "Review before sharing: memory configuration may be sensitive. No SPD, serials or paths.\n";
     for (std::size_t channel = 0; channel < dump.size(); ++channel) {
         const auto& data = dump[channel];

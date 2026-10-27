@@ -195,7 +195,7 @@ std::optional<AmdDdr4MemoryDump> PawnioSensors::readMemoryDump()
         ? ((signature >> 8) & 0xf) + ((signature >> 20) & 0xff)
         : (signature >> 8) & 0xf;
     const unsigned model = ((signature >> 4) & 0xf) | ((signature >> 12) & 0xf0);
-    if (family != 0x17 || model != 0x71 || WaitForSingleObject(m_pciMutex, 20) != WAIT_OBJECT_0) {
+    if (!isSupportedAmdDdr4Cpu(family, model) || WaitForSingleObject(m_pciMutex, 20) != WAIT_OBJECT_0) {
         return std::nullopt;
     }
     const auto readDword = [this](std::uint32_t address, std::uint32_t& result) {
@@ -216,7 +216,7 @@ std::optional<AmdDdr4MemoryDump> PawnioSensors::readMemoryDump()
             valid = false;
             break;
         }
-        if (!isMatisseDdr4Channel(family, model, data.config, data.maxRate, data.dimm0, data.dimm1)) {
+        if (!isSupportedAmdDdr4Channel(family, model, data.config, data.maxRate, data.dimm0, data.dimm1)) {
             continue;
         }
         if (!readDword(offset | 0x50204, data.timing0) || !readDword(offset | 0x50208, data.timing1)) {
@@ -232,7 +232,13 @@ std::optional<AmdDdr4MemoryDump> PawnioSensors::readMemoryDump()
 std::optional<AmdDdr4Timings> PawnioSensors::readMemoryTimings()
 {
     const auto dump = readMemoryDump();
-    return dump ? decodeAmdDdr4MemoryDump(*dump) : std::nullopt;
+    if (!dump)
+        return std::nullopt;
+    const unsigned signature = cpuid(1)[0];
+    const unsigned baseFamily = (signature >> 8) & 0xf;
+    const unsigned family = baseFamily == 0xf ? baseFamily + ((signature >> 20) & 0xff) : baseFamily;
+    const unsigned model = ((signature >> 4) & 0xf) | ((signature >> 12) & 0xf0);
+    return decodeAmdDdr4MemoryDump(*dump, family, model);
 }
 
 CpuHardwareReading PawnioSensors::read()
