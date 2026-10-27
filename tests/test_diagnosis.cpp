@@ -28,6 +28,11 @@ void runDiagnosisTests()
     }
     game.fps = 30.0; // Bottleneck is about the active process, not display refresh.
     CHECK(diagnoseGame(game).size() == 1);
+    game.gameThreadLoad = 95.0;
+    CHECK(diagnoseGame(game).empty()); // Both GPU and the game's thread are busy: no single culprit.
+    game.gameThreadLoad = std::numeric_limits<double>::quiet_NaN();
+    CHECK(diagnoseGame(game).empty());
+    game.gameThreadLoad.reset();
     game.sampledAtMs = 7900;
     CHECK(diagnoseGame(game).empty());
     game.sampledAtMs = 9500;

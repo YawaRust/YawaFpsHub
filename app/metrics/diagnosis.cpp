@@ -35,7 +35,10 @@ std::vector<Finding> diagnoseGame(const GameDiagnosisInput& input)
         return { };
     }
 
-    if (percent(input.gameCpuLoad) && *input.gpuLoad >= 95.0 && *input.gameCpuLoad <= 70.0) {
+    const bool threadAllowsGpu
+        = !input.gameThreadLoad || (percent(input.gameThreadLoad) && *input.gameThreadLoad < 90.0);
+    if (percent(input.gameCpuLoad) && *input.gpuLoad >= 95.0 && *input.gameCpuLoad <= 70.0
+        && threadAllowsGpu) {
         return { { FindingSeverity::Advice, "gpu_bound", "Возможен упор в видеокарту",
             "GPU 3D процесса игры: " + percentText(*input.gpuLoad)
                 + "; CPU процесса: " + percentText(*input.gameCpuLoad) + ".",
