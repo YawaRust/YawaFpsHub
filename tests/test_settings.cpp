@@ -469,6 +469,13 @@ namespace {
         CHECK(roundTrip.overlay.followGameMonitor);
         CHECK(parseSettings("[overlay]\nfollow_game_monitor = no\n", roundTrip, error));
         CHECK(!roundTrip.overlay.followGameMonitor);
+        CHECK(!roundTrip.overlay.showSparkline);
+        CHECK(parseSettings("[overlay]\nfps_sparkline = 1\n", settings, error));
+        CHECK(settings.overlay.showSparkline);
+        CHECK(parseSettings(serializeSettings(settings), roundTrip, error));
+        CHECK(roundTrip.overlay.showSparkline);
+        CHECK(parseSettings("[overlay]\nfps_sparkline = 0\n", roundTrip, error));
+        CHECK(!roundTrip.overlay.showSparkline);
         CHECK(parseSettings(
             "[overlay]\nanchor_mode = other\norigin_x = -20\norigin_y = 99999\n", roundTrip, error));
         CHECK(roundTrip.overlay.anchorMode == OverlayAnchorMode::Corner);

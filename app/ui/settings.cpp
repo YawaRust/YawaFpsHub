@@ -714,6 +714,8 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                     = std::clamp(parseInt(value, target.overlay.monitorOriginY), 0, 32768);
             } else if (key == "follow_game_monitor") {
                 target.overlay.followGameMonitor = parseBool(value, target.overlay.followGameMonitor);
+            } else if (key == "fps_sparkline") {
+                target.overlay.showSparkline = parseBool(value, target.overlay.showSparkline);
             } else if (key == "recipe") {
                 // Уже применён до чтения всех ручных параметров.
             } else if (key == "layout") {
@@ -983,6 +985,7 @@ std::string serializeSettings(const Settings& settings)
         text += "monitor_origin_y = " + std::to_string(settings.overlay.monitorOriginY) + "\n";
     }
     text += std::string("follow_game_monitor = ") + (settings.overlay.followGameMonitor ? "1\n" : "0\n");
+    text += std::string("fps_sparkline = ") + (settings.overlay.showSparkline ? "1\n" : "0\n");
     text += "recipe = " + std::string(overlayRecipeKey(settings.overlay.recipe)) + "\n";
     text += "layout = " + std::string(overlayLayoutKey(settings.overlay.layout)) + "\n";
     text += "style = " + std::string(overlayStyleKey(settings.overlay.style)) + "\n";

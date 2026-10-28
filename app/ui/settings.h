@@ -83,6 +83,7 @@ struct OverlaySettings
     int monitorOriginX = 0;
     int monitorOriginY = 0;
     bool followGameMonitor = false;
+    bool showSparkline = false;
     OverlayLayout layout = OverlayLayout::Plates;
     OverlayStyle style = OverlayStyle::Frosted; // базовая палитра старых стилей
     OverlayRecipe recipe = OverlayRecipe::Frosted;

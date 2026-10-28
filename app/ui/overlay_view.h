@@ -9,13 +9,11 @@
 namespace yawa {
 
 float overlayOrderCardHeight(const OverlaySettings& settings);
-float overlayEditorControlsHeight(const OverlaySettings& settings);
+float overlayEditorSectionHeight(const OverlaySettings& settings, int section);
 void drawOverlayEditorPreview(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card,
     int screenWidth, int screenHeight);
-void drawOverlayEditorControls(Renderer& renderer, const AppModel& model, const Theme& theme,
-    const Rect& area, std::vector<UiHit>& hits);
-void drawOverlayEditorQuickControls(Renderer& renderer, const AppModel& model, const Theme& theme,
-    const Rect& area, std::vector<UiHit>& hits);
+void drawOverlayEditorSection(Renderer& renderer, const AppModel& model, const Theme& theme,
+    const Rect& area, int section, std::vector<UiHit>& hits);
 
 void drawOverlayView(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area,
     std::vector<UiHit>& hits);

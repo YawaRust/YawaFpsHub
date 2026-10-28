@@ -851,12 +851,17 @@ body.is-compact .chart-wrap--frames canvas { height: 96px; }
 .game__guide--y { top: var(--guide-y); left: 0; right: 0; height: 1px; }
 .canvas-help { margin-top: 9px; }
 .overlay-workshop { grid-column: 1 / -1; display: grid; grid-template-columns: 210px minmax(0, 1fr) minmax(290px, .85fr); gap: 14px; align-items: start; }
-.overlay-workshop { order: 1; }
-.workshop-recipes { order: 0; }
+.workshop-nav { display: flex; gap: 6px; margin-bottom: 14px; }
+.workshop-nav button { flex: 1; border: 1px solid var(--line); background: var(--panel-flat); color: var(--text-dim); padding: 10px; border-radius: 8px; cursor: pointer; }
+.workshop-nav button.is-active { color: var(--accent); border-color: var(--accent); }
+.workshop-recipes { order: -1; }
+.overlay-grid:not([data-section="assemble"]) > .workshop-recipes { display: none; }
 .overlay-workshop > .card { min-width: 0; }
-.workshop-inspector:not(.is-advanced) > .field:not(.quick-field) { display: none; }
+.workshop-inspector > .field:not(.is-visible) { display: none; }
 .workshop-quick-hint { color: var(--text-dim); font-size: 12px; line-height: 1.5; margin: 0 0 12px; }
-.workshop-inspector.is-advanced .workshop-quick-hint { display: none; }
+.overlay-grid:not([data-section="assemble"]) .workshop-quick-hint { display: none; }
+.osd-sparkline { display: none; width: 100%; height: 24px; margin-top: 6px; color: var(--accent); }
+.osd.is-sparkline .osd-sparkline { display: block; }
 .workshop-layers__list { display: grid; gap: 5px; }
 .workshop-layer { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .workshop-layer__name, .workshop-layer__eye { border: 1px solid var(--line); background: var(--panel-flat); color: var(--text-dim); border-radius: 7px; padding: 6px; cursor: pointer; }

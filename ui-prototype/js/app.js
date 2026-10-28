@@ -103,6 +103,7 @@
     originX: 0,
     originY: 0,
     followGameMonitor: false,
+    sparkline: false,
     layout: "plates",
     style: "frosted",
     recipe: "frosted",
@@ -1088,8 +1089,18 @@
   let lastSnapshot = null;
   let systemRendered = false;
 
+  const fpsSparklineHistory = [];
   function onData(snap) {
     lastSnapshot = snap;
+    const fps = snap.sensors.get("fps")?.value;
+    if (Number.isFinite(fps) && fps >= 0) {
+      fpsSparklineHistory.push(fps);
+      if (fpsSparklineHistory.length > 32) fpsSparklineHistory.shift();
+      const low = Math.min(...fpsSparklineHistory);
+      const span = Math.max(1, Math.max(...fpsSparklineHistory) - low);
+      $("#osdSparklinePoints").setAttribute("points", fpsSparklineHistory.map((value, index) =>
+        `${index * 160 / Math.max(1, fpsSparklineHistory.length - 1)},${22 - 16 * (value - low) / span}`).join(" "));
+    }
     updateMetrics(snap);
     updateBars(snap);
     updateCores(snap);
@@ -1279,6 +1290,8 @@
     osd.style.setProperty("--osd-origin-x", `${overlayState.originX}px`);
     osd.style.setProperty("--osd-origin-y", `${overlayState.originY}px`);
     osd.dataset.layout = overlayState.layout;
+    osd.classList.toggle("is-sparkline", Boolean(overlayState.sparkline));
+    $("#osdSparkline").checked = Boolean(overlayState.sparkline);
     osd.dataset.style = overlayState.style;
     osd.dataset.surface = overlayState.surface || "";
     osd.style.setProperty("--osd-scale", (overlayState.scale / 100).toFixed(2));
@@ -1388,6 +1401,7 @@
   // нужны после сброса пресета и после любой внешней правки состояния.
   function syncOsdControls() {
     $("#osdFollowGame").checked = overlayState.followGameMonitor;
+    $("#osdSparkline").checked = Boolean(overlayState.sparkline);
     $$("#osdSurface button").forEach((button) => button.classList.toggle("is-active",
       button.dataset.surface === overlayState.surface));
     $$("#osdStyles .style-tile").forEach((tile) => tile.classList.toggle("is-active",
@@ -2026,6 +2040,10 @@
       overlayState.followGameMonitor = event.target.checked;
       recordOverlayHistory();
     });
+    $("#osdSparkline").addEventListener("change", (event) => {
+      overlayState.sparkline = event.target.checked;
+      applyOverlay();
+    });
 
     $("#osdLayout").addEventListener("click", (event) => {
       const button = event.target.closest("[data-layout]");
@@ -2395,12 +2413,28 @@
     document.body.classList.add("no-fx");
   }
 
-  $("#osdAdvanced").addEventListener("click", (event) => {
-    const inspector = $(".workshop-inspector");
-    const expanded = inspector.classList.toggle("is-advanced");
-    event.currentTarget.setAttribute("aria-expanded", String(expanded));
-    event.currentTarget.textContent = expanded ? "← Просто" : "Подробнее →";
+  const workshopFields = $$(".workshop-inspector > .field");
+  let textFields = false;
+  workshopFields.forEach((field) => {
+    if (field.querySelector("#osdFont")) textFields = true;
+    if (field.querySelector("#osdOffsetValue")) textFields = false;
+    field.dataset.editorPanel = textFields ? "text" : "appearance";
   });
+  const showWorkshopSection = (section) => {
+    $("#overlayGrid").dataset.section = section;
+    $$(".workshop-nav button").forEach((button) => {
+      button.classList.toggle("is-active", button.dataset.editorSection === section);
+    });
+    workshopFields.forEach((field) => {
+      field.classList.toggle("is-visible", section === "assemble" ? field.classList.contains("quick-field")
+        : section !== "rows" && field.dataset.editorPanel === section);
+    });
+  };
+  $(".workshop-nav").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-editor-section]");
+    if (button) showWorkshopSection(button.dataset.editorSection);
+  });
+  showWorkshopSection("assemble");
 
   bindPause();
   bindAccents();

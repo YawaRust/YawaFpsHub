@@ -666,9 +666,18 @@ float overlayOrderCardHeight(const OverlaySettings& settings)
     return 52.0f + 27.0f * static_cast<float>(count);
 }
 
-float overlayEditorControlsHeight(const OverlaySettings& settings)
+float overlayEditorSectionHeight(const OverlaySettings& settings, int section)
 {
-    return 268.0f + 1458.0f + overlayOrderCardHeight(settings) + 2.0f * kGap;
+    switch (section) {
+    case 0:
+        return 268.0f + kGap + 258.0f;
+    case 1:
+        return 574.0f;
+    case 2:
+        return 1458.0f - 574.0f;
+    default:
+        return overlayOrderCardHeight(settings);
+    }
 }
 
 void drawOverlayEditorPreview(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card,
@@ -722,34 +731,45 @@ void drawOverlayEditorQuickControls(
     drawChip(renderer, follow, L"На мониторе игры", overlay.followGameMonitor, theme, TextRole::Tiny,
         isHovered(model, follow));
     hits.push_back(UiHit { follow, ActionKind::ToggleFollowGameMonitor, 0 });
-    renderer.text(L"Точные цвета, позиции и датчики — в инспекторе и подробном режиме.",
+    const Rect spark { inner.left + 196.0f, inner.top + 172.0f, inner.right, inner.top + 196.0f };
+    drawChip(renderer, spark, L"График FPS", overlay.showSparkline, theme, TextRole::Tiny,
+        isHovered(model, spark));
+    hits.push_back(UiHit { spark, ActionKind::ToggleFpsSparkline, 0 });
+    renderer.text(L"Точные цвета и параметры — в соседних разделах и инспекторе.",
         Rect { inner.left, inner.top + 200.0f, inner.right, inner.top + 216.0f }, TextRole::Tiny,
         theme.textFaint);
     renderer.popClip();
 }
 
-void drawOverlayEditorControls(
-    Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area, std::vector<UiHit>& hits)
+void drawOverlayEditorSection(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area,
+    int section, std::vector<UiHit>& hits)
 {
-    float top = area.top;
-    const auto place = [&](float height) {
-        const Rect card { area.left, top, area.right, top + height };
-        top += height + kGap;
-        return card;
-    };
-    const Rect gallery = place(268.0f);
-    renderer.pushClip(gallery);
-    drawCard(renderer, gallery, theme);
-    drawStyleGallery(renderer, model, theme, gallery.inset(kCardPadding), hits);
+    if (section == 0) {
+        drawOverlayEditorQuickControls(renderer, model, theme, area, hits);
+        return;
+    }
+    if (section == 3) {
+        const Rect card { area.left, area.top, area.right,
+            area.top + overlayOrderCardHeight(model.settings.overlay) };
+        drawOrderCard(renderer, model, theme, card, hits);
+        return;
+    }
+
+    // Одна и та же карточка рисуется в двух окнах просмотра: параметры не дублируются.
+    constexpr float kTextOffset = 574.0f;
+    const float offset = section == 2 ? kTextOffset : 0.0f;
+    const Rect card { area.left, area.top - offset, area.right, area.top - offset + 1458.0f };
+    const Rect visible { area.left, area.top, area.right,
+        area.top + overlayEditorSectionHeight(model.settings.overlay, section) };
+    std::vector<UiHit> pageHits;
+    renderer.pushClip(visible);
+    drawControlsCard(renderer, model, theme, card, pageHits);
     renderer.popClip();
-    const Rect controls = place(1458.0f);
-    renderer.pushClip(controls);
-    drawControlsCard(renderer, model, theme, controls, hits);
-    renderer.popClip();
-    const Rect order = place(overlayOrderCardHeight(model.settings.overlay));
-    renderer.pushClip(order);
-    drawOrderCard(renderer, model, theme, order, hits);
-    renderer.popClip();
+    for (const UiHit& hit : pageHits) {
+        if (hit.rect.top >= visible.top && hit.rect.top < visible.bottom) {
+            hits.push_back(hit);
+        }
+    }
 }
 
 void drawOverlayView(

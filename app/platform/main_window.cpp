@@ -1358,6 +1358,12 @@ void MainWindow::applyAction(const UiHit& hit)
         saveSettings();
         break;
 
+    case ActionKind::ToggleFpsSparkline:
+        m_model.settings.overlay.showSparkline = !m_model.settings.overlay.showSparkline;
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        break;
+
     case ActionKind::SetLayout:
         m_model.settings.overlay.layout = static_cast<OverlayLayout>(hit.value);
         m_overlay.setSettings(m_model.settings.overlay);

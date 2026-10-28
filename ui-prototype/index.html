@@ -665,7 +665,13 @@
       </section>
 
       <section class="view" data-view="overlay">
-        <div class="grid">
+        <nav class="workshop-nav" aria-label="Разделы редактора">
+          <button type="button" data-editor-section="assemble" class="is-active">Собрать</button>
+          <button type="button" data-editor-section="appearance">Оформить</button>
+          <button type="button" data-editor-section="text">Текст</button>
+          <button type="button" data-editor-section="rows">Строки</button>
+        </nav>
+        <div class="grid overlay-grid" id="overlayGrid" data-section="assemble">
           <div class="overlay-workshop">
             <article class="card workshop-layers">
               <header class="card__head"><div>
@@ -753,6 +759,7 @@
                     <b class="osd__val osd__val--sm" data-metric="vramUsed">9,6</b>
                     <span class="osd__unit">ГБ</span>
                   </div>
+                  <svg class="osd-sparkline" viewBox="0 0 160 24" preserveAspectRatio="none" aria-label="История FPS" role="img"><polyline id="osdSparklinePoints" fill="none" stroke="currentColor" stroke-width="1.5" points=""></polyline></svg>
                 </div>
               </div>
             </div>
@@ -762,17 +769,16 @@
           <article class="card workshop-inspector">
             <header class="card__head">
               <div>
-                <h2 class="card__title">Инспектор · всё оформление</h2>
+                <h2 class="card__title">Оверлей · настройка</h2>
                 <p class="card__sub">Изменения видны сразу в предпросмотре</p>
               </div>
-              <button id="osdAdvanced" class="btn btn--ghost" type="button" aria-expanded="false">Подробнее →</button>
               <div class="segmented segmented--icons" id="osdHistory">
                 <button type="button" data-history="undo" title="Отменить · Ctrl+Z" aria-label="Отменить" disabled>↶</button>
                 <button type="button" data-history="redo" title="Повторить · Ctrl+Shift+Z" aria-label="Повторить" disabled>↷</button>
               </div>
             </header>
 
-            <p class="workshop-quick-hint">Выберите рецепт, включите строки слева и двигайте плашку на холсте.</p>
+            <p class="workshop-quick-hint">Рецепт выше · слои слева · плашку двигайте на холсте.</p>
             <div class="field quick-field">
               <span class="field__label">Положение</span>
               <div class="segmented segmented--icons" id="osdPosition">
@@ -782,6 +788,14 @@
                 <button data-pos="br" aria-label="Справа снизу">↘</button>
                 <button data-pos="free" aria-label="Свободное положение">Свободно</button>
               </div>
+            </div>
+
+            <div class="field quick-field">
+              <label class="switch" for="osdSparkline">
+                <input type="checkbox" id="osdSparkline">
+                <span class="switch__track"><span class="switch__knob"></span></span>
+                <span>График FPS</span>
+              </label>
             </div>
 
             <div class="field field--monitor quick-field">
