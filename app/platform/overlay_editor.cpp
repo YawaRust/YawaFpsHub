@@ -253,6 +253,9 @@ bool OverlayEditor::open(HWND owner, HINSTANCE instance, AppModel& model, const 
     m_rtssLayerRects.clear();
     m_canvasRowBounds.clear();
     m_rtssSelected = -1;
+    m_canvasZoom = 1.0f;
+    m_panX = m_panY = 0.0f;
+    m_fitPending = true;
     m_rtssDragging = false;
     m_styledRowDragging = false;
     m_samplingColor = false;
@@ -537,6 +540,39 @@ float OverlayEditor::canvasScale() const
 {
     return m_canvas.width() * m_canvasZoom
         / static_cast<float>(std::max(1, GetSystemMetrics(SM_CXVIRTUALSCREEN)));
+}
+
+void OverlayEditor::fitCanvasToContent()
+{
+    Rect content = m_screenPlate;
+    if (rtssLayerCount() > 0) {
+        bool found = false;
+        for (const Rect& layer : m_rtssLayerRects) {
+            if (layer.right <= layer.left || layer.bottom <= layer.top) {
+                continue;
+            }
+            if (!found) {
+                content = layer;
+                found = true;
+            } else {
+                content.left = std::min(content.left, layer.left);
+                content.top = std::min(content.top, layer.top);
+                content.right = std::max(content.right, layer.right);
+                content.bottom = std::max(content.bottom, layer.bottom);
+            }
+        }
+    }
+    if (content.width() <= 0.0f || content.height() <= 0.0f) {
+        return;
+    }
+    const ScreenBox bounds { static_cast<int>(std::floor(content.left)),
+        static_cast<int>(std::floor(content.top)), static_cast<int>(std::ceil(content.right)),
+        static_cast<int>(std::ceil(content.bottom)) };
+    const CanvasFit fit = fitCanvasContent(bounds, m_canvas.width(), m_canvas.height(),
+        static_cast<float>(GetSystemMetrics(SM_CXVIRTUALSCREEN)));
+    m_canvasZoom = fit.zoom;
+    m_panX = fit.panX;
+    m_panY = fit.panY;
 }
 
 std::size_t OverlayEditor::rtssLayerCount() const
@@ -935,7 +971,7 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
                 m_catalogScroll - delta / 28, 0, std::max(0, static_cast<int>(catalogRows().size()) - 12));
         } else if (m_canvas.contains(static_cast<float>(cursor.x), static_cast<float>(cursor.y))) {
             const float previous = canvasScale();
-            m_canvasZoom = std::clamp(m_canvasZoom * (delta > 0 ? 1.15f : 1.0f / 1.15f), 0.75f, 6.0f);
+            m_canvasZoom = std::clamp(m_canvasZoom * (delta > 0 ? 1.15f : 1.0f / 1.15f), 0.15f, 20.0f);
             m_panX = CanvasAxis { m_canvas.left, m_panX, previous }.panAtZoom(
                 static_cast<float>(cursor.x), canvasScale());
             m_panY = CanvasAxis { m_canvas.top, m_panY, previous }.panAtZoom(
@@ -1060,6 +1096,12 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
     case WM_LBUTTONDOWN: {
         const int x = logicalCoordinate(GET_X_LPARAM(lParam));
         const int y = logicalCoordinate(GET_Y_LPARAM(lParam));
+        if (y >= 283 && y < 307 && x >= 210 && x < 303) {
+            m_samplingColor = false;
+            m_fitPending = true;
+            refresh();
+            return 0;
+        }
         if (y >= 283 && y < 307 && x >= 309 && x < 399) {
             m_samplingColor = !m_samplingColor;
             refresh();
@@ -1707,8 +1749,12 @@ void OverlayEditor::paint()
         : rtss.layout != OverlayLayout::Plates
         ? L"Строка: двигайте весь блок; порядок — в разделе «Строки»"
         : L"Колесо — зум · Ctrl — выбор · Alt — плашка · Shift — сетка";
-    m_renderer.text(canvasHint, Rect { 20.0f, 284.0f, 303.0f, 304.0f }, TextRole::Tiny,
+    m_renderer.text(clipText(m_renderer, canvasHint, TextRole::Tiny, 180.0f),
+        Rect { 20.0f, 284.0f, 206.0f, 304.0f }, TextRole::Tiny,
         rtss.rtssOmittedLayers > 0 ? theme.accent : theme.textDim);
+    const Rect fitButton { 210.0f, 283.0f, 303.0f, 307.0f };
+    m_renderer.fillRoundRect(fitButton, 6.0f, theme.panelSoft);
+    m_renderer.text(L"Вписать", fitButton, TextRole::Tiny, theme.accent, TextAlign::Center);
     const Rect eyedropper { 309.0f, 283.0f, 399.0f, 307.0f };
     m_renderer.fillRoundRect(eyedropper, 6.0f, m_samplingColor ? theme.accentSoft : theme.panelSoft);
     m_renderer.text(L"Пипетка", eyedropper, TextRole::Tiny, theme.accent, TextAlign::Center);
@@ -2008,6 +2054,11 @@ void OverlayEditor::paint()
     m_renderer.text(L"Ctrl+клик: несколько строк · Shift+тяга: сетка 8 px · Shift+стрелки: 10 px",
         Rect { 20.0f, height - 19.0f, width - 20.0f, height }, TextRole::Tiny, theme.textFaint);
     m_renderer.end();
+    if (m_fitPending) {
+        m_fitPending = false;
+        fitCanvasToContent();
+        refresh();
+    }
 }
 
 } // namespace yawa

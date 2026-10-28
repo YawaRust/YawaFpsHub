@@ -402,6 +402,23 @@ namespace {
         const CanvasAxis zoomed { horizontal.origin, horizontal.panAtZoom(focus, 0.75f), 0.75f };
         CHECK(zoomed.toScreen(focus) == screenPosition);
         CHECK(zoomed.toCanvas(0.0f) == zoomed.origin + zoomed.pan);
+        // Строка у нижнего края рабочего стола должна стать читаемой в центре холста,
+        // при этом обратное преобразование обязано сохранить координаты экрана.
+        const ScreenBox line { 100, 980, 550, 1020 };
+        const CanvasFit fitted = fitCanvasContent(line, 356.0f, 200.0f, 1920.0f);
+        CHECK(fitted.zoom > 3.0f && fitted.zoom < 6.0f);
+        const CanvasAxis fittedX { 20.0f, fitted.panX, fitted.zoom * 356.0f / 1920.0f };
+        const CanvasAxis fittedY { 320.0f, fitted.panY, fitted.zoom * 356.0f / 1920.0f };
+        CHECK(std::abs(fittedX.toCanvas(325.0f) - 198.0f) < 0.01f);
+        CHECK(std::abs(fittedY.toCanvas(1000.0f) - 420.0f) < 0.01f);
+        CHECK(std::abs(fittedX.toScreen(fittedX.toCanvas(100.0f)) - 100.0f) < 0.01f);
+        CHECK(fittedX.toCanvas(550.0f) <= 20.0f + 356.0f - 14.0f + 0.01f);
+        // RTSS со смещёнными абсолютными координатами: вписываем слои, не пустоту от (0,0).
+        const CanvasFit rtss = fitCanvasContent({ 1420, 680, 1720, 880 }, 356.0f, 200.0f, 1920.0f);
+        const CanvasAxis rtssX { 20.0f, rtss.panX, rtss.zoom * 356.0f / 1920.0f };
+        CHECK(std::abs(rtssX.toCanvas(1570.0f) - 198.0f) < 0.01f);
+        CHECK(fitCanvasContent({ 0, 0, 4096, 100 }, 356.0f, 200.0f, 1920.0f).zoom < 0.75f);
+        CHECK(fitCanvasContent({ }, 356.0f, 200.0f, 1920.0f).zoom == 1.0f);
         // Виртуальный экран начинается на x=-1920: начало сохранённого монитора — x=1920.
         CHECK(originOnMonitor(2040, 1920) == 120);
         CHECK(originOnMonitor(110, 0) == 110);

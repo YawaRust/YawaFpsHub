@@ -1676,8 +1676,24 @@
     applyOverlay();
   }
 
+  function fitCanvasToOverlay() {
+    const scene = $("#gameScene");
+    const rect = $("#osdPreview").getBoundingClientRect();
+    const sceneRect = scene.getBoundingClientRect();
+    if (!scene.clientWidth || !scene.clientHeight || !rect.width || !rect.height) return;
+    const zoom = Math.max(0.75, Math.min(4, canvasView.zoom * Math.min(
+      (scene.clientWidth - 28) / rect.width, (scene.clientHeight - 28) / rect.height)));
+    const centerX = (rect.left + rect.right) / 2 - sceneRect.left;
+    const centerY = (rect.top + rect.bottom) / 2 - sceneRect.top;
+    canvasView.panX = scene.clientWidth / 2 - (centerX - canvasView.panX) / canvasView.zoom * zoom;
+    canvasView.panY = scene.clientHeight / 2 - (centerY - canvasView.panY) / canvasView.zoom * zoom;
+    canvasView.zoom = zoom;
+    updateCanvasView();
+  }
+
   function bindCanvasView() {
     const scene = $("#gameScene");
+    $("#fitOsdCanvas").addEventListener("click", fitCanvasToOverlay);
     let pan = null;
     scene.addEventListener("wheel", (event) => {
       event.preventDefault();
@@ -3144,6 +3160,7 @@
   bindPerfLegend();
   bindDiagnosisPreview();
   restorePreferences();
+  requestAnimationFrame(fitCanvasToOverlay);
   overlayHistory.undo = [];
   overlayHistory.redo = [];
   overlayHistory.committed = JSON.stringify(overlayState);

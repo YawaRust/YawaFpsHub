@@ -823,6 +823,9 @@ body.is-compact .chart-wrap--frames canvas { height: 96px; }
 
 .footnote { margin: 14px 2px 0; font-size: 11px; line-height: 1.55; color: var(--text-faint); max-width: 820px; }
 
+.canvas-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.canvas-actions .btn { font-size: 11px; padding: 7px 10px; white-space: nowrap; }
+
 .game {
   position: relative;
   aspect-ratio: 16 / 9;

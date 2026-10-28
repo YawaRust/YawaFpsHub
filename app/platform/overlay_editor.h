@@ -33,6 +33,7 @@ private:
     void select(MetricId id, bool value);
     void move(int x, int y);
     float canvasScale() const;
+    void fitCanvasToContent();
     std::size_t rtssLayerCount() const;
     void moveRtssLayer(int x, int y);
     void moveStyledRow(int x, int y);
@@ -82,6 +83,7 @@ private:
     float m_canvasZoom = 1.0f;
     float m_panX = 0.0f;
     float m_panY = 0.0f;
+    bool m_fitPending = true;
     float m_rowDragScale = 1.0f;
     bool m_panning = false;
     bool m_samplingColor = false;

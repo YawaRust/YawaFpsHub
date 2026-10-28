@@ -70,6 +70,29 @@ inline int originOnMonitor(int origin, int monitorStart)
     return std::max(0, origin - monitorStart);
 }
 
+struct CanvasFit
+{
+    float zoom = 1.0f;
+    float panX = 0.0f;
+    float panY = 0.0f;
+};
+
+// Масштабируется только вид холста; экранные координаты и настройки оверлея не меняются.
+inline CanvasFit fitCanvasContent(
+    ScreenBox content, float viewportWidth, float viewportHeight, float desktopWidth)
+{
+    if (content.right <= content.left || content.bottom <= content.top || viewportWidth <= 32.0f
+        || viewportHeight <= 32.0f || desktopWidth <= 0.0f) {
+        return { };
+    }
+    const float baseScale = viewportWidth / desktopWidth;
+    const float fitScale = std::min((viewportWidth - 28.0f) / (content.right - content.left),
+        (viewportHeight - 28.0f) / (content.bottom - content.top));
+    const float zoom = std::clamp(fitScale / baseScale, 0.15f, 20.0f);
+    return { zoom, viewportWidth * 0.5f - (content.left + content.right) * 0.5f * baseScale * zoom,
+        viewportHeight * 0.5f - (content.top + content.bottom) * 0.5f * baseScale * zoom };
+}
+
 // Ось холста в пикселях окна; screenCoord — пиксели виртуального экрана.
 struct CanvasAxis
 {
