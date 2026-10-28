@@ -477,6 +477,12 @@ namespace {
         CHECK(parseSettings("[overlay]\nfps_sparkline = 0\n", roundTrip, error));
         CHECK(!roundTrip.overlay.showSparkline);
         CHECK(roundTrip.overlay.sparklineMetric == MetricId::Fps);
+        CHECK(roundTrip.overlay.menuOpacityPercent == 0);
+        settings.overlay.menuOpacityPercent = 38;
+        CHECK(parseSettings(serializeSettings(settings), roundTrip, error));
+        CHECK(roundTrip.overlay.menuOpacityPercent == 38);
+        CHECK(parseSettings("[overlay]\nmenu_opacity = 900\n", roundTrip, error));
+        CHECK(roundTrip.overlay.menuOpacityPercent == 100);
         for (MetricId metric : { MetricId::CpuLoad, MetricId::GpuLoad, MetricId::FrameTime }) {
             settings.overlay.sparklineMetric = metric;
             CHECK(parseSettings(serializeSettings(settings), roundTrip, error));
@@ -835,6 +841,40 @@ namespace {
         CHECK(!importRtssOverlay(std::string(65537, 'x'), settings, error));
     }
 
+    void testRtssExportKeepsSupportedOrderAndColor()
+    {
+        OverlaySettings source;
+        source.metrics.fill(false);
+        source.metrics[static_cast<std::size_t>(MetricId::Fps)] = true;
+        source.metrics[static_cast<std::size_t>(MetricId::CpuLoad)] = true;
+        source.metrics[static_cast<std::size_t>(MetricId::GpuLoad)] = true;
+        source.metrics[static_cast<std::size_t>(MetricId::CpuPeakLoad)] = true; // нет RTSS HAL-аналога
+        source.metricRgba[static_cast<std::size_t>(MetricId::GpuLoad)] = 0xED1C24AAu;
+        auto cpu = std::find(source.order.begin(), source.order.end(), MetricId::CpuLoad);
+        auto gpu = std::find(source.order.begin(), source.order.end(), MetricId::GpuLoad);
+        std::iter_swap(cpu, gpu);
+        const std::string text = serializeRtssOverlay(source);
+        CHECK(text.find("Implementation=2\r\n") != std::string::npos);
+        CHECK(text.find("Sources=2\r\n") != std::string::npos);
+        CHECK(text.find("Layers=3\r\n") != std::string::npos);
+        CHECK(text.find("TextColor=AAED1C24\r\n") != std::string::npos);
+        CHECK(text.find("Text=%GPU1 usage%") < text.find("Text=%CPU usage%"));
+        CHECK(text.find("CPU usage max") == std::string::npos);
+        OverlaySettings imported;
+        std::string error;
+        CHECK(importRtssOverlay(text, imported, error));
+        CHECK(imported.metrics[static_cast<std::size_t>(MetricId::Fps)]);
+        CHECK(imported.metrics[static_cast<std::size_t>(MetricId::GpuLoad)]);
+        CHECK(imported.metrics[static_cast<std::size_t>(MetricId::CpuLoad)]);
+        CHECK(imported.metricRgba[static_cast<std::size_t>(MetricId::GpuLoad)] == 0xED1C24AAu);
+        CHECK(imported.order[0] == MetricId::Fps && imported.order[1] == MetricId::GpuLoad
+            && imported.order[2] == MetricId::CpuLoad);
+        CHECK(!imported.metrics[static_cast<std::size_t>(MetricId::CpuPeakLoad)]);
+        source.metrics.fill(false);
+        source.metrics[static_cast<std::size_t>(MetricId::CpuPeakLoad)] = true;
+        CHECK(serializeRtssOverlay(source).empty());
+    }
+
     void testGameProfileKeepsPersonalPlacement()
     {
         OverlaySettings base;
@@ -900,6 +940,7 @@ void runSettingsTests()
     testKeysAreStable();
     testRecipeMigrationAndAxes();
     testRtssImportRecognizesOnlyKnownSources();
+    testRtssExportKeepsSupportedOrderAndColor();
     testGameProfileKeepsPersonalPlacement();
     testCrlfFile();
 }

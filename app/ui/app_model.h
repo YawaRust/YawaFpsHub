@@ -49,6 +49,7 @@ enum class ActionKind : std::uint8_t {
     ResetSettings,
     SetScale,
     SetOpacity,
+    SetMenuOpacity,
     ToggleMetric,
     ToggleSensor,
     EnableCpuSensors,
@@ -196,6 +197,7 @@ inline bool isSliderAction(ActionKind action)
     switch (action) {
     case ActionKind::SetScale:
     case ActionKind::SetOpacity:
+    case ActionKind::SetMenuOpacity:
     case ActionKind::SetOverlayRadius:
     case ActionKind::SetOverlayTextScale:
     case ActionKind::SetOverlayBgOpacity:

@@ -797,6 +797,8 @@
             <div class="field quick-field">
               <button class="btn btn--ghost" type="button" disabled title="В демо нет проверенного игрового процесса">Профиль игры: нет активной игры</button>
               <button id="osdMenuScene" class="btn btn--ghost" type="button">Меню: скрыть оверлей · Ctrl+F11</button>
+              <label for="osdMenuOpacity">В меню (0 — скрыть) <output id="osdMenuOpacityValue">0%</output></label>
+              <input id="osdMenuOpacity" type="range" min="0" max="100" value="0">
             </div>
 
             <div class="field field--monitor quick-field">
@@ -1052,6 +1054,7 @@
                 <button class="btn btn--ghost" id="importOsdRecipe" type="button">Импорт JSON / .ovl</button>
                 <input id="importOsdRecipeFile" type="file" accept=".json,.ovl,application/json" hidden>
                 <button class="btn btn--ghost" id="exportOsdRecipe" type="button">Экспорт JSON</button>
+                <button class="btn btn--ghost" id="exportOsdRtss" type="button">Экспорт .ovl</button>
               </div>
             </header>
 

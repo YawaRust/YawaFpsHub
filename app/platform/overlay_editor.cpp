@@ -10,7 +10,9 @@
 #include "ui/overlay_view.h"
 
 #include <commdlg.h>
+#include <dxgi1_6.h>
 #include <windowsx.h>
+#include <wrl/client.h>
 
 #include <algorithm>
 #include <array>
@@ -30,6 +32,37 @@ namespace {
     constexpr int kControlIdY = 2004;
     constexpr std::array<std::wstring_view, 4> kSections { L"Собрать", L"Оформить", L"Текст", L"Строки" };
 
+    bool hdrAtWindow(HWND window)
+    {
+        Microsoft::WRL::ComPtr<IDXGIFactory1> factory;
+        if (window == nullptr || FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))) {
+            return false;
+        }
+        const HMONITOR monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONULL);
+        for (UINT adapterIndex = 0;; ++adapterIndex) {
+            Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter;
+            if (factory->EnumAdapters1(adapterIndex, &adapter) != S_OK) {
+                break;
+            }
+            for (UINT outputIndex = 0;; ++outputIndex) {
+                Microsoft::WRL::ComPtr<IDXGIOutput> output;
+                if (adapter->EnumOutputs(outputIndex, &output) != S_OK) {
+                    break;
+                }
+                DXGI_OUTPUT_DESC details { };
+                if (FAILED(output->GetDesc(&details)) || details.Monitor != monitor) {
+                    continue;
+                }
+                Microsoft::WRL::ComPtr<IDXGIOutput6> advanced;
+                DXGI_OUTPUT_DESC1 color { };
+                return SUCCEEDED(output.As(&advanced)) && SUCCEEDED(advanced->GetDesc1(&color))
+                    && (color.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020
+                        || color.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709);
+            }
+        }
+        return false;
+    }
+
     struct NumericSlider
     {
         int minimum;
@@ -44,6 +77,8 @@ namespace {
             return { 70, 160, settings.scalePercent };
         case ActionKind::SetOpacity:
             return { 0, 100, settings.opacityPercent };
+        case ActionKind::SetMenuOpacity:
+            return { 0, 100, settings.menuOpacityPercent };
         case ActionKind::SetOverlayRadius:
             return { 0, 24, settings.cornerRadius < 0 ? 8 : settings.cornerRadius };
         case ActionKind::SetOverlayTextScale:
@@ -74,6 +109,9 @@ namespace {
             break;
         case ActionKind::SetOpacity:
             settings.opacityPercent = value;
+            break;
+        case ActionKind::SetMenuOpacity:
+            settings.menuOpacityPercent = value;
             break;
         case ActionKind::SetOverlayRadius:
             settings.cornerRadius = value;
@@ -203,6 +241,7 @@ bool OverlayEditor::open(HWND owner, HINSTANCE instance, AppModel& model, const 
         return false;
     }
     m_dpiScale = static_cast<float>(GetDpiForWindow(m_window)) / 96.0f;
+    m_hdrDisplay = hdrAtWindow(m_window);
     const auto createEdit = [this, instance](int id, DWORD style) {
         return CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | style, 0,
             0, 10, 24, m_window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), instance, nullptr);
@@ -645,10 +684,18 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
         const RECT* suggested = reinterpret_cast<const RECT*>(lParam);
         SetWindowPos(m_window, nullptr, suggested->left, suggested->top, suggested->right - suggested->left,
             suggested->bottom - suggested->top, SWP_NOZORDER | SWP_NOACTIVATE);
+        m_hdrDisplay = hdrAtWindow(m_window);
         layout();
         refresh();
         return 0;
     }
+    case WM_MOVE:
+    case WM_DISPLAYCHANGE:
+        if (m_window != nullptr) {
+            m_hdrDisplay = hdrAtWindow(m_window);
+            refresh();
+        }
+        break;
     case WM_GETMINMAXINFO: {
         auto* info = reinterpret_cast<MINMAXINFO*>(lParam);
         info->ptMinTrackSize
@@ -1260,7 +1307,8 @@ void OverlayEditor::paint()
         m_undo.empty() ? theme.textFaint : theme.accent, TextAlign::Center);
     m_renderer.text(L"↷", Rect { 485.0f, 12.0f, 525.0f, 44.0f }, TextRole::Heading,
         m_redo.empty() ? theme.textFaint : theme.accent, TextAlign::Center);
-    m_renderer.text(L"Слева — слои и холст. Справа — настройки выбранного вида.",
+    m_renderer.text(m_hdrDisplay ? L"HDR-экран: цвет SDR-оверлея и предпросмотра корректирует Windows"
+                                 : L"Слева — слои и холст. Справа — настройки выбранного вида.",
         Rect { 20.0f, 37.0f, 540.0f, 61.0f }, TextRole::Small, theme.textDim);
 
     drawOverlayEditorPreview(m_renderer, *m_model, theme, Rect { 20.0f, 70.0f, 540.0f, 282.0f },

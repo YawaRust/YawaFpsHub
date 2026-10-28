@@ -92,6 +92,7 @@ struct OverlaySettings
     bool surfaceActive = false; // старый INI не должен менять вид до явного выбора оси
     int scalePercent = 100;
     int opacityPercent = 72;
+    int menuOpacityPercent = 0; // 0 скрывает в меню; в игре действует opacityPercent
     // Ручной сдвиг от выбранного угла: даёт поставить оверлей точно по месту
     // независимо от разрешения и рамок экрана.
     int offsetX = 0;
@@ -237,6 +238,8 @@ std::string serializeOverlayRecipeJson(const OverlaySettings& overlay);
 bool importOverlayRecipeJson(std::string_view json, OverlaySettings& overlay, std::string& error);
 // Поддерживает только однозначно сопоставимые текстовые датчики RTSS OverlayEditor v2.
 bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::string& error);
+// Экспортирует только известные RTSS/ HAL показатели: внешние провайдеры и изображения не создаёт.
+std::string serializeRtssOverlay(const OverlaySettings& overlay);
 void copyOverlayPlacement(OverlaySettings& target, const OverlaySettings& source);
 OverlaySettings overlayForGame(const OverlaySettings& base, const OverlaySettings& profile);
 std::string gameProfileKey(std::wstring_view processName);

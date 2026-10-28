@@ -258,6 +258,12 @@ void OverlayWindow::setGameMonitor(const RECT* monitor)
     }
 }
 
+void OverlayWindow::setMenuSceneOpacity(std::optional<int> opacity)
+{
+    m_menuSceneOpacity = opacity;
+    repaint();
+}
+
 void OverlayWindow::setSettings(const OverlaySettings& settings)
 {
     // Плавный переход считаем от текущего видимого состояния, а не от нового:
@@ -506,8 +512,11 @@ bool OverlayWindow::ensureRenderTarget(UINT width, UINT height)
             return false;
         }
 
-        const D2D1_RENDER_TARGET_PROPERTIES properties = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT,
-            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+        // 8-битная SDR-поверхность: Windows DWM выполняет SDRBoost сам для HDR-монитора.
+        // FP16 без ручной поправки уровня белого сделал бы те же цвета темнее.
+        const D2D1_RENDER_TARGET_PROPERTIES properties
+            = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT,
+                D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
 
         HRESULT result = factory->CreateDCRenderTarget(&properties, &m_target);
         if (FAILED(result) || m_target == nullptr) {
@@ -575,7 +584,7 @@ void OverlayWindow::drawScene(float scale)
     const OverlayText text = makeOverlayText(m_settings, m_store);
     Rect bounds { 0.0f, 0.0f, static_cast<float>(m_bitmapWidth), static_cast<float>(m_bitmapHeight) };
     OverlaySettings painted = m_settings;
-    RECT savedMonitor {};
+    RECT savedMonitor { };
     const bool savedAvailable = painted.anchorMode == OverlayAnchorMode::Free
         && findOverlayMonitor(painted.savedMonitorId, savedMonitor);
     if (savedAvailable) {
@@ -643,7 +652,8 @@ bool OverlayWindow::render()
 
     OverlaySettings animated = animatedSettings();
     // Прозрачность при появлении и смене стиля: всё содержимое проявляется целиком.
-    animated.opacityPercent = static_cast<int>(std::lround(static_cast<double>(animated.opacityPercent) * m_fade));
+    animated.opacityPercent = static_cast<int>(std::lround(
+        static_cast<double>(m_menuSceneOpacity.value_or(animated.opacityPercent)) * m_fade));
     const OverlaySettings saved = m_settings;
     m_settings = animated;
     drawScene(static_cast<float>(std::clamp(animated.scalePercent, 70, 160)) / 100.0f);

@@ -85,6 +85,7 @@ private:
     // Единая точка включения/выключения оверлея: логирует причину, если показать не удалось.
     void toggleOverlay();
     void toggleMenuScene();
+    void refreshMenuScene();
     void selectGpu(std::size_t index);
     // Служебный ли процесс (dwm.exe, explorer.exe и т.п.). Результат кэшируется:
     // опрос идёт из потока сборщика, а открывать процесс на каждый кадр дорого.

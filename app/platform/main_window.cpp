@@ -346,6 +346,7 @@ void MainWindow::toggleOverlay()
 {
     m_model.menuScene = false;
     m_sceneWasVisible = false;
+    m_overlay.setMenuSceneOpacity(std::nullopt);
     std::string error;
     m_overlay.toggle(&error);
     m_model.overlayVisible = m_overlay.isVisible();
@@ -367,27 +368,34 @@ void MainWindow::toggleOverlay()
     }
 }
 
-void MainWindow::toggleMenuScene()
+void MainWindow::refreshMenuScene()
 {
-    if (!m_model.menuScene) {
-        m_sceneWasVisible = m_overlay.isVisible();
-        m_model.menuScene = true;
-        if (m_sceneWasVisible) {
-            m_overlay.hide();
+    const bool menu = m_model.menuScene;
+    const int opacity = m_model.settings.overlay.menuOpacityPercent;
+    m_overlay.setMenuSceneOpacity(menu ? std::optional<int>(opacity) : std::nullopt);
+    if (menu && opacity == 0 && m_overlay.isVisible()) {
+        m_overlay.hide();
+    } else if (m_sceneWasVisible && (!menu || opacity > 0) && !m_overlay.isVisible()) {
+        std::string error;
+        if (!m_overlay.show(&error) && m_log != nullptr) {
+            m_log->warning("смена сцены оверлея: " + error);
         }
-    } else {
-        m_model.menuScene = false;
-        if (m_sceneWasVisible) {
-            std::string error;
-            if (!m_overlay.show(&error) && m_log != nullptr) {
-                m_log->warning("возврат оверлея из меню: " + error);
-            }
-        }
-        m_sceneWasVisible = false;
     }
     m_model.overlayVisible = m_overlay.isVisible();
     InvalidateRect(m_window, nullptr, FALSE);
     m_overlayEditor.refresh();
+}
+
+void MainWindow::toggleMenuScene()
+{
+    if (!m_model.menuScene) {
+        m_sceneWasVisible = m_overlay.isVisible();
+    }
+    m_model.menuScene = !m_model.menuScene;
+    refreshMenuScene();
+    if (!m_model.menuScene) {
+        m_sceneWasVisible = false;
+    }
 }
 
 void MainWindow::setInitialSize(int width, int height)
@@ -1503,6 +1511,9 @@ void MainWindow::applyAction(const UiHit& hit)
             m_model.hasGameProfile = true;
         }
         m_overlay.setSettings(m_model.settings.overlay);
+        if (m_model.menuScene) {
+            refreshMenuScene();
+        }
         saveSettings();
         m_overlayEditor.refresh();
         break;
@@ -1651,6 +1662,13 @@ void MainWindow::applyAction(const UiHit& hit)
     case ActionKind::SetOpacity:
         m_model.settings.overlay.opacityPercent = std::clamp(hit.value, 0, 100);
         m_overlay.setSettings(m_model.settings.overlay);
+        break;
+
+    case ActionKind::SetMenuOpacity:
+        m_model.settings.overlay.menuOpacityPercent = std::clamp(hit.value, 0, 100);
+        if (m_model.menuScene) {
+            refreshMenuScene();
+        }
         break;
 
     case ActionKind::SetOverlayTextScale:
@@ -1970,8 +1988,9 @@ void MainWindow::applyAction(const UiHit& hit)
         }
         if (rtss) {
             MessageBoxW(dialog.hwndOwner,
-                L"Перенесены только распознанные показатели и стиль RTSS. Слои, картинки, цвета и внешние "
-                L"источники не копируются. Недоступные датчики покажут «нет данных».",
+                L"Перенесены распознанные показатели, их порядок, текстовые цвета и стиль RTSS. "
+                L"Положение слоёв, картинки и внешние источники не копируются. "
+                L"Недоступные датчики покажут «нет данных».",
                 L"Импорт RTSS", MB_OK | MB_ICONINFORMATION);
         }
         m_model.settings.overlay = std::move(imported);
@@ -1983,37 +2002,55 @@ void MainWindow::applyAction(const UiHit& hit)
     }
 
     case ActionKind::ExportOverlayRecipe: {
-        wchar_t filename[MAX_PATH] = L"yawa-overlay-recipe.json";
+        wchar_t filename[MAX_PATH] = L"yawa-overlay-recipe";
         OPENFILENAMEW dialog { };
         dialog.lStructSize = sizeof(dialog);
         dialog.hwndOwner = GetActiveWindow() != nullptr ? GetActiveWindow() : m_window;
-        dialog.lpstrFilter = L"Рецепт JSON (*.json)\0*.json\0\0";
+        dialog.lpstrFilter = L"Рецепт JSON (*.json)\0*.json\0RTSS OverlayEditor (*.ovl)\0*.ovl\0\0";
         dialog.lpstrFile = filename;
         dialog.nMaxFile = MAX_PATH;
-        dialog.lpstrDefExt = L"json";
         dialog.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
-        if (GetSaveFileNameW(&dialog) != FALSE) {
-            const std::string json = serializeOverlayRecipeJson(m_model.settings.overlay);
-            const HANDLE file = CreateFileW(
-                filename, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-            DWORD written = 0;
-            const bool saved = file != INVALID_HANDLE_VALUE
-                && WriteFile(file, json.data(), static_cast<DWORD>(json.size()), &written, nullptr) != FALSE
-                && written == static_cast<DWORD>(json.size());
-            const DWORD writeError = GetLastError();
-            if (file != INVALID_HANDLE_VALUE) {
-                CloseHandle(file);
-                if (!saved) {
-                    DeleteFileW(filename);
-                }
+        if (GetSaveFileNameW(&dialog) == FALSE) {
+            break;
+        }
+        std::wstring path(filename);
+        const std::size_t dot = path.find_last_of(L'.');
+        const std::size_t slash = path.find_last_of(L"\\/");
+        const bool hasExtension = dot != std::wstring::npos && (slash == std::wstring::npos || dot > slash);
+        const bool rtss
+            = hasExtension ? _wcsicmp(path.c_str() + dot, L".ovl") == 0 : dialog.nFilterIndex == 2;
+        if (hasExtension && !rtss && _wcsicmp(path.c_str() + dot, L".json") != 0) {
+            MessageBoxW(dialog.hwndOwner, L"Поддерживается только экспорт .json и .ovl.", L"YawaFpsHub",
+                MB_OK | MB_ICONWARNING);
+            break;
+        }
+        if (!hasExtension) {
+            path += rtss ? L".ovl" : L".json";
+            if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES
+                && MessageBoxW(dialog.hwndOwner, L"Файл уже существует. Заменить?", L"YawaFpsHub",
+                       MB_YESNO | MB_ICONWARNING)
+                    != IDYES) {
+                break;
             }
-            if (!saved) {
-                if (m_log) {
-                    m_log->warning("не удалось сохранить рецепт JSON: " + win32ErrorText(writeError));
-                }
-                MessageBoxW(dialog.hwndOwner, L"Не удалось сохранить рецепт JSON.", L"YawaFpsHub",
-                    MB_OK | MB_ICONERROR);
+        }
+        const std::string content = rtss ? serializeRtssOverlay(m_model.settings.overlay)
+                                         : serializeOverlayRecipeJson(m_model.settings.overlay);
+        if (content.empty()) {
+            MessageBoxW(dialog.hwndOwner, L"Нет показателей, которые можно экспортировать в RTSS.",
+                L"YawaFpsHub", MB_OK | MB_ICONWARNING);
+            break;
+        }
+        if (!writeTextFile(narrow(path), content)) {
+            if (m_log != nullptr) {
+                m_log->warning("не удалось сохранить оверлей " + narrow(path));
             }
+            MessageBoxW(
+                dialog.hwndOwner, L"Не удалось сохранить файл оверлея.", L"YawaFpsHub", MB_OK | MB_ICONERROR);
+        } else if (rtss) {
+            MessageBoxW(dialog.hwndOwner,
+                L"Экспортированы только показатели RTSS HAL и FPS. Форма, картинки, хоткеи и внешние "
+                L"датчики не экспортируются. Проверьте шаблон в RTSS OverlayEditor.",
+                L"Экспорт RTSS", MB_OK | MB_ICONINFORMATION);
         }
         break;
     }
@@ -2043,6 +2080,9 @@ void MainWindow::applyAction(const UiHit& hit)
                 },
                 [this](bool finished) {
                     m_overlay.setSettings(m_model.settings.overlay);
+                    if (m_model.menuScene) {
+                        refreshMenuScene();
+                    }
                     if (finished) {
                         saveSettings();
                     }
@@ -2445,6 +2485,9 @@ void MainWindow::onTick()
             resolved = m_model.settings.overlay;
         }
         m_overlay.setSettings(resolved);
+        if (m_model.menuScene) {
+            refreshMenuScene();
+        }
         m_overlayEditor.refresh();
     }
     static const auto started = std::chrono::steady_clock::now();

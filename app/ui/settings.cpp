@@ -6,6 +6,7 @@
 #include <charconv>
 #include <cmath>
 #include <utility>
+#include <vector>
 
 namespace yawa {
 namespace {
@@ -58,6 +59,30 @@ namespace {
         { "quiet", OverlayStyle::Frosted, OverlayLayout::Plates, OverlaySurface::Glass, 0, 85, false },
         { "focus", OverlayStyle::Cyber, OverlayLayout::Gauge, OverlaySurface::Outline, 2, 110, false },
         { "clean", OverlayStyle::Mono, OverlayLayout::Gauge, OverlaySurface::Plate, 1, 100, false },
+    } };
+
+    struct RtssMetric
+    {
+        MetricId id;
+        std::string_view tag;
+        std::string_view source;
+        std::string_view unit;
+    };
+
+    constexpr std::array<RtssMetric, 13> kRtssMetrics { {
+        { MetricId::Fps, "<FR>", "", "FPS" },
+        { MetricId::Fps, "%Framerate%", "Framerate", "FPS" },
+        { MetricId::FrameTime, "%Frametime%", "Frametime", "ms" },
+        { MetricId::CpuLoad, "%CPU usage%", "CPU usage", "%" },
+        { MetricId::CpuTemp, "%CPU temperature%", "CPU temperature", "C" },
+        { MetricId::CpuClock, "%CPU clock%", "CPU clock", "MHz" },
+        { MetricId::CpuPower, "%CPU power%", "CPU power", "W" },
+        { MetricId::GpuLoad, "%GPU1 usage%", "GPU1 usage", "%" },
+        { MetricId::GpuTemp, "%GPU1 temperature%", "GPU1 temperature", "C" },
+        { MetricId::GpuClock, "%GPU1 clock%", "GPU1 clock", "MHz" },
+        { MetricId::GpuPower, "%GPU1 power%", "GPU1 power", "W" },
+        { MetricId::VramUsed, "%GPU1 memory usage%", "GPU1 memory usage", "MB" },
+        { MetricId::RamUsed, "%Total RAM%", "Total RAM", "MB" },
     } };
 
     std::string_view trim(std::string_view text)
@@ -737,6 +762,9 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
             } else if (key == "opacity") {
                 target.overlay.opacityPercent
                     = std::clamp(parseInt(value, target.overlay.opacityPercent), 0, 100);
+            } else if (key == "menu_opacity") {
+                target.overlay.menuOpacityPercent
+                    = std::clamp(parseInt(value, target.overlay.menuOpacityPercent), 0, 100);
             } else if (key == "offset_x") {
                 target.overlay.offsetX = std::clamp(parseInt(value, target.overlay.offsetX), -8192, 8192);
             } else if (key == "pixel_layout") {
@@ -969,23 +997,11 @@ bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::str
         return false;
     }
 
-    constexpr std::array<std::pair<std::string_view, MetricId>, 13> tags { {
-        { "<fr>", MetricId::Fps },
-        { "%framerate%", MetricId::Fps },
-        { "%frametime%", MetricId::FrameTime },
-        { "%cpu usage%", MetricId::CpuLoad },
-        { "%cpu temperature%", MetricId::CpuTemp },
-        { "%cpu clock%", MetricId::CpuClock },
-        { "%cpu power%", MetricId::CpuPower },
-        { "%gpu1 usage%", MetricId::GpuLoad },
-        { "%gpu1 temperature%", MetricId::GpuTemp },
-        { "%gpu1 clock%", MetricId::GpuClock },
-        { "%gpu1 power%", MetricId::GpuPower },
-        { "%gpu1 memory usage%", MetricId::VramUsed },
-        { "%total ram%", MetricId::RamUsed },
-    } };
     std::array<bool, kMetricCount> selected { };
     std::array<std::string, 256> layerTexts { };
+    std::array<std::string, 256> layerColors { };
+    std::array<std::optional<std::uint32_t>, kMetricCount> colors { };
+    std::vector<MetricId> order;
     std::string section;
     bool version = false;
     int layers = -1;
@@ -1017,13 +1033,14 @@ bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::str
         } else if (section == "General" && key == "Layers") {
             layers = parseInt(value, -1);
             validLayers = layers >= 1 && layers <= 256 && std::to_string(layers) == value;
-        } else if (section.size() > 5 && section.substr(0, 5) == "Layer" && key == "Text") {
+        } else if (section.size() > 5 && section.substr(0, 5) == "Layer"
+            && (key == "Text" || key == "TextColor")) {
             const std::string_view layerNumber = std::string_view(section).substr(5);
             const int index = parseInt(layerNumber, -1);
             if (index < 0 || index >= 256 || std::to_string(index) != layerNumber) {
                 continue;
             }
-            layerTexts[static_cast<std::size_t>(index)] = value;
+            (key == "Text" ? layerTexts : layerColors)[static_cast<std::size_t>(index)] = value;
         }
     }
     if (!version || !validLayers) {
@@ -1034,10 +1051,26 @@ bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::str
         std::string lowered = layerTexts[static_cast<std::size_t>(index)];
         std::transform(lowered.begin(), lowered.end(), lowered.begin(),
             [](unsigned char letter) { return static_cast<char>(std::tolower(letter)); });
-        for (const auto& [tag, metric] : tags) {
+        for (const RtssMetric& source : kRtssMetrics) {
+            std::string tag(source.tag);
+            std::transform(tag.begin(), tag.end(), tag.begin(),
+                [](unsigned char letter) { return static_cast<char>(std::tolower(letter)); });
             if (lowered.find(tag) != std::string::npos) {
-                const auto slot = static_cast<std::size_t>(metric);
-                matched += selected[slot] ? 0 : 1;
+                const auto slot = static_cast<std::size_t>(source.id);
+                if (!selected[slot]) {
+                    ++matched;
+                    order.push_back(source.id);
+                    const std::string& encoded = layerColors[static_cast<std::size_t>(index)];
+                    if (encoded.size() == 6 || encoded.size() == 8) {
+                        std::uint32_t color = 0;
+                        const auto parsed
+                            = std::from_chars(encoded.data(), encoded.data() + encoded.size(), color, 16);
+                        if (parsed.ec == std::errc { } && parsed.ptr == encoded.data() + encoded.size()) {
+                            const std::uint32_t alpha = encoded.size() == 8 ? color >> 24 : 0xFFu;
+                            colors[slot] = ((color & 0xFFFFFFu) << 8) | alpha;
+                        }
+                    }
+                }
                 selected[slot] = true;
             }
         }
@@ -1049,8 +1082,73 @@ bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::str
     OverlaySettings imported = overlay;
     applyOverlayRecipe(imported, OverlayRecipe::Rtss);
     imported.metrics = selected;
+    imported.metricRgba = colors;
+    std::array<bool, kMetricCount> placed { };
+    std::size_t output = 0;
+    for (MetricId id : order) {
+        imported.order[output++] = id;
+        placed[static_cast<std::size_t>(id)] = true;
+    }
+    for (MetricId id : defaultOverlayOrder()) {
+        if (!placed[static_cast<std::size_t>(id)]) {
+            imported.order[output++] = id;
+        }
+    }
     overlay = std::move(imported);
     return true;
+}
+
+std::string serializeRtssOverlay(const OverlaySettings& overlay)
+{
+    std::vector<const RtssMetric*> rows;
+    std::array<bool, kMetricCount> seen { };
+    for (MetricId id : overlay.order) {
+        const std::size_t slot = static_cast<std::size_t>(id);
+        if (slot >= kMetricCount || seen[slot] || !overlay.metrics[slot]) {
+            continue;
+        }
+        seen[slot] = true;
+        const auto source = std::find_if(kRtssMetrics.begin(), kRtssMetrics.end(),
+            [id](const RtssMetric& metric) { return metric.id == id; });
+        if (source != kRtssMetrics.end()) {
+            rows.push_back(&*source);
+        }
+    }
+    if (rows.empty()) {
+        return { };
+    }
+    const std::size_t sources = static_cast<std::size_t>(std::count_if(
+        rows.begin(), rows.end(), [](const RtssMetric* metric) { return !metric->source.empty(); }));
+    std::string text = "[Master]\r\nImplementation=2\r\nFontFace=Consolas\r\nFontHeight=-9\r\n"
+                       "FontWeight=400\r\nZoomRatio=3\r\n[Settings]\r\nRefreshPeriod=1000\r\n"
+                       "[General]\r\nSources="
+        + std::to_string(sources) + "\r\nTables=0\r\nLayers=" + std::to_string(rows.size()) + "\r\n";
+    std::size_t sourceIndex = 0;
+    for (const RtssMetric* metric : rows) {
+        if (metric->source.empty()) {
+            continue;
+        }
+        text += "[Source" + std::to_string(sourceIndex++) + "]\r\nName=" + std::string(metric->source)
+            + "\r\nUnits=" + std::string(metric->unit)
+            + "\r\nFormat=\r\nFormula=\r\nProvider=HAL\r\nID=" + std::string(metric->source) + "\r\n";
+    }
+    for (std::size_t index = 0; index < rows.size(); ++index) {
+        const RtssMetric& metric = *rows[index];
+        text += "[Layer" + std::to_string(index)
+            + "]\r\nName=" + std::string(metric.source.empty() ? "Framerate" : metric.source)
+            + "\r\nText=" + std::string(metric.tag)
+            + "\r\nPositionX=4\r\nPositionY=" + std::to_string(5 + static_cast<int>(index) * 14)
+            + "\r\nExtentX=0\r\nExtentY=0\r\nExtentOrigin=0\r\nFixedAlignment=1\r\nTextColor=";
+        const auto color = overlay.metricRgba[static_cast<std::size_t>(metric.id)];
+        if (color) {
+            const std::string rgba = overlayRgbaHex(*color);
+            text += rgba.substr(7, 2) + rgba.substr(1, 6);
+        } else {
+            text += "FFFFFFFF";
+        }
+        text += "\r\n";
+    }
+    return text;
 }
 
 void copyOverlayPlacement(OverlaySettings& target, const OverlaySettings& source)
@@ -1140,6 +1238,7 @@ std::string serializeSettings(const Settings& settings)
     }
     text += "scale = " + std::to_string(settings.overlay.scalePercent) + "\n";
     text += "opacity = " + std::to_string(settings.overlay.opacityPercent) + "\n";
+    text += "menu_opacity = " + std::to_string(settings.overlay.menuOpacityPercent) + "\n";
     text += "offset_x = " + std::to_string(settings.overlay.offsetX) + "\n";
     text += "offset_y = " + std::to_string(settings.overlay.offsetY) + "\n";
     text += std::string("pixel_layout = ") + (settings.overlay.pixelLayout ? "1" : "0") + "\n";

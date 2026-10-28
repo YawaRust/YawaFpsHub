@@ -674,7 +674,7 @@ float overlayEditorSectionHeight(const OverlaySettings& settings, int section)
 {
     switch (section) {
     case 0:
-        return 268.0f + kGap + 258.0f;
+        return 268.0f + kGap + 306.0f;
     case 1:
         return 574.0f;
     case 2:
@@ -690,6 +690,9 @@ void drawOverlayEditorPreview(Renderer& renderer, const AppModel& model, const T
     const Rect inner = card.inset(kCardPadding);
     const Rect scene { inner.left, inner.top + 46.0f, inner.right, inner.bottom };
     OverlaySettings preview = model.settings.overlay;
+    if (model.menuScene) {
+        preview.opacityPercent = preview.menuOpacityPercent;
+    }
     preview.offsetX = scaledOverlayOffset(preview.offsetX, screenWidth, scene.width());
     preview.offsetY = scaledOverlayOffset(preview.offsetY, screenHeight, scene.height());
     preview.originX = scaledOverlayOffset(preview.originX, screenWidth, scene.width());
@@ -707,7 +710,7 @@ void drawOverlayEditorQuickControls(
     drawStyleGallery(renderer, model, theme, gallery.inset(kCardPadding), hits);
     renderer.popClip();
 
-    const Rect card { area.left, gallery.bottom + kGap, area.right, gallery.bottom + kGap + 258.0f };
+    const Rect card { area.left, gallery.bottom + kGap, area.right, gallery.bottom + kGap + 306.0f };
     renderer.pushClip(card);
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
@@ -754,6 +757,9 @@ void drawOverlayEditorQuickControls(
     drawChip(renderer, scene, model.menuScene ? L"Вернуть · Ctrl+F11" : L"Меню: скрыть · Ctrl+F11",
         model.menuScene, theme, TextRole::Tiny, isHovered(model, scene));
     hits.push_back(UiHit { scene, ActionKind::ToggleMenuScene, 0 });
+    drawSlider(renderer, Rect { inner.left, inner.top + 238.0f, inner.right, inner.top + 272.0f },
+        overlay.menuOpacityPercent, 0, 100, L"В меню (0 — скрыть)", theme, hits, ActionKind::SetMenuOpacity,
+        L"%");
     renderer.popClip();
 }
 

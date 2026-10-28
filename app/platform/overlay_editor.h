@@ -71,6 +71,7 @@ private:
     bool m_dragging = false;
     bool m_syncing = false;
     float m_dpiScale = 1.0f;
+    bool m_hdrDisplay = false;
     float m_canvasZoom = 1.0f;
     float m_panX = 0.0f;
     float m_panY = 0.0f;

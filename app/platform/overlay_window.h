@@ -31,6 +31,7 @@ public:
     void destroy();
 
     void setSettings(const OverlaySettings& settings);
+    void setMenuSceneOpacity(std::optional<int> opacity);
     void setGameMonitor(const RECT* monitor);
     void setAccent(Accent accent);
     void setContent(const MetricStore& store, const FpsSummary& fps, const std::wstring& gpuName);
@@ -91,6 +92,7 @@ private:
     UINT m_bitmapHeight = 0;
 
     OverlaySettings m_settings;
+    std::optional<int> m_menuSceneOpacity;
     Theme m_theme = makeTheme(Accent::Mint);
 
     MetricStore m_store;
