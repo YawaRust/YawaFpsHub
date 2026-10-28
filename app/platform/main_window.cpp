@@ -11,8 +11,8 @@
 #include "platform/report_preview_win.h"
 #include "platform/report_viewer_win.h"
 #include "platform/win_util.h"
-#include "report/package.h"
 #include "render/overlay_painter.h"
+#include "report/package.h"
 #include "ui/bottleneck_view.h"
 #include "ui/canvas_transform.h"
 #include "ui/chrome.h"
@@ -1642,7 +1642,8 @@ void MainWindow::applyAction(const UiHit& hit)
 
     case ActionKind::ShowChangelog:
         if (!openEmbeddedChangelog(m_window)) {
-            MessageBoxW(m_window, L"Встроенный список изменений недоступен.", L"YawaFpsHub", MB_OK | MB_ICONWARNING);
+            MessageBoxW(
+                m_window, L"Встроенный список изменений недоступен.", L"YawaFpsHub", MB_OK | MB_ICONWARNING);
         }
         break;
 
@@ -1959,7 +1960,7 @@ void MainWindow::applyAction(const UiHit& hit)
             LARGE_INTEGER length { };
             if (GetFileSizeEx(file, &length) == FALSE || length.QuadPart < 0) {
                 error = "Не удалось определить размер файла оверлея";
-            } else if (length.QuadPart > (rtss ? 65536 : 16384)) {
+            } else if (length.QuadPart > (rtss ? 1024 * 1024 : 16384)) {
                 error = "Файл оверлея слишком большой";
             } else {
                 content.resize(static_cast<std::size_t>(length.QuadPart));
@@ -1987,11 +1988,12 @@ void MainWindow::applyAction(const UiHit& hit)
             break;
         }
         if (rtss) {
-            MessageBoxW(dialog.hwndOwner,
-                L"Перенесены распознанные показатели, их порядок, текстовые цвета и стиль RTSS. "
-                L"Положение слоёв, картинки и внешние источники не копируются. "
-                L"Недоступные датчики покажут «нет данных».",
-                L"Импорт RTSS", MB_OK | MB_ICONINFORMATION);
+            const std::wstring notice = L"Распознанные датчики HAL и FPS доступны в Yawa. "
+                + std::to_wstring(imported.rtssOmittedLayers)
+                + L" слоёв не показаны; исходный .ovl сохранён без изменений для обратного экспорта. "
+                  L"Правки в мастерской влияют только на вид в Yawa. "
+                  L"Внешние файлы изображений, если они указаны в шаблоне, остаются на прежних путях.";
+            MessageBoxW(dialog.hwndOwner, notice.c_str(), L"Импорт RTSS", MB_OK | MB_ICONINFORMATION);
         }
         m_model.settings.overlay = std::move(imported);
         m_overlay.setSettings(m_model.settings.overlay);
@@ -2033,8 +2035,23 @@ void MainWindow::applyAction(const UiHit& hit)
                 break;
             }
         }
-        const std::string content = rtss ? serializeRtssOverlay(m_model.settings.overlay)
-                                         : serializeOverlayRecipeJson(m_model.settings.overlay);
+        bool exportOriginal = false;
+        if (rtss && m_model.settings.overlay.rtssTemplate) {
+            const int choice = MessageBoxW(dialog.hwndOwner,
+                L"Да — экспортировать исходный RTSS .ovl без изменений (включая незнакомые слои).\n"
+                L"Нет — создать новый .ovl только из текущих показателей Yawa.\n"
+                L"Отмена — не сохранять.\n\n"
+                L"Правки в мастерской не изменяют исходный файл. Внешние картинки остаются "
+                L"зависимыми от своих путей.",
+                L"Как экспортировать RTSS?", MB_YESNOCANCEL | MB_ICONQUESTION);
+            if (choice == IDCANCEL) {
+                break;
+            }
+            exportOriginal = choice == IDYES;
+        }
+        const std::string content = exportOriginal ? *m_model.settings.overlay.rtssTemplate
+            : rtss                                 ? serializeRtssOverlay(m_model.settings.overlay)
+                                                   : serializeOverlayRecipeJson(m_model.settings.overlay);
         if (content.empty()) {
             MessageBoxW(dialog.hwndOwner, L"Нет показателей, которые можно экспортировать в RTSS.",
                 L"YawaFpsHub", MB_OK | MB_ICONWARNING);
@@ -2048,8 +2065,11 @@ void MainWindow::applyAction(const UiHit& hit)
                 dialog.hwndOwner, L"Не удалось сохранить файл оверлея.", L"YawaFpsHub", MB_OK | MB_ICONERROR);
         } else if (rtss) {
             MessageBoxW(dialog.hwndOwner,
-                L"Экспортированы только показатели RTSS HAL и FPS. Форма, картинки, хоткеи и внешние "
-                L"датчики не экспортируются. Проверьте шаблон в RTSS OverlayEditor.",
+                exportOriginal
+                    ? L"Исходный .ovl записан без изменений. Если шаблон ссылается на внешние изображения, "
+                      L"их файлы должны оставаться доступны RTSS по тем же путям."
+                    : L"Созданы только показатели RTSS HAL и FPS. Форма, картинки и внешние датчики "
+                      L"не добавлены. Проверьте шаблон в RTSS OverlayEditor.",
                 L"Экспорт RTSS", MB_OK | MB_ICONINFORMATION);
         }
         break;
@@ -2473,7 +2493,7 @@ void MainWindow::onTick()
         std::string content;
         std::string error;
         const bool hasProfile = !gameKey.empty() && readTextFile(gameOverlayPath(gameKey), content)
-            && content.size() <= 65536 && parseSettings(content, saved, error);
+            && content.size() <= 2621440 && parseSettings(content, saved, error);
         OverlaySettings resolved;
         {
             std::lock_guard<std::mutex> guard(m_modelMutex);

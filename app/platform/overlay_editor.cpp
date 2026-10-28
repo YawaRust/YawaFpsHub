@@ -32,6 +32,19 @@ namespace {
     constexpr int kControlIdY = 2004;
     constexpr std::array<std::wstring_view, 4> kSections { L"Собрать", L"Оформить", L"Текст", L"Строки" };
 
+    float editorScale(HMONITOR monitor, float dpiScale)
+    {
+        MONITORINFO info { };
+        info.cbSize = sizeof(info);
+        if (monitor == nullptr || !GetMonitorInfoW(monitor, &info)) {
+            return dpiScale;
+        }
+        const float width = static_cast<float>(info.rcWork.right - info.rcWork.left);
+        const float height = static_cast<float>(info.rcWork.bottom - info.rcWork.top);
+        return std::min({ dpiScale, std::max(0.5f, (width - 20.0f) / 1000.0f),
+            std::max(0.5f, (height - 40.0f) / 720.0f) });
+    }
+
     bool hdrAtWindow(HWND window)
     {
         Microsoft::WRL::ComPtr<IDXGIFactory1> factory;
@@ -218,7 +231,8 @@ bool OverlayEditor::open(HWND owner, HINSTANCE instance, AppModel& model, const 
         return false;
     }
     m_model = &model;
-    m_dpiScale = static_cast<float>(GetDpiForWindow(owner)) / 96.0f;
+    const HMONITOR editorMonitor = MonitorFromWindow(owner, MONITOR_DEFAULTTONEAREST);
+    m_dpiScale = editorScale(editorMonitor, static_cast<float>(GetDpiForWindow(owner)) / 96.0f);
     m_historyCommitted = model.settings.overlay;
     m_layersScroll = 0;
     m_panelScroll = 0;
@@ -231,10 +245,17 @@ bool OverlayEditor::open(HWND owner, HINSTANCE instance, AppModel& model, const 
     m_onAction = std::move(onAction);
     m_onText = std::move(onText);
     m_onChange = std::move(onChange);
+    MONITORINFO work { };
+    work.cbSize = sizeof(work);
+    const bool hasWorkArea = GetMonitorInfoW(editorMonitor, &work) != FALSE;
+    const int workWidth = hasWorkArea ? work.rcWork.right - work.rcWork.left : 1320;
+    const int workHeight = hasWorkArea ? work.rcWork.bottom - work.rcWork.top : 920;
+    const int windowWidth = std::min(workWidth, static_cast<int>(std::lround(1320.0f * m_dpiScale)));
+    const int windowHeight = std::min(workHeight, static_cast<int>(std::lround(920.0f * m_dpiScale)));
+    const int windowX = hasWorkArea ? work.rcWork.left + (workWidth - windowWidth) / 2 : CW_USEDEFAULT;
+    const int windowY = hasWorkArea ? work.rcWork.top + (workHeight - windowHeight) / 2 : CW_USEDEFAULT;
     m_window = CreateWindowExW(WS_EX_APPWINDOW, kEditorClass, L"Мастерская оверлея · YawaFpsHub",
-        WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
-        static_cast<int>(std::lround(1320.0f * m_dpiScale)),
-        static_cast<int>(std::lround(920.0f * m_dpiScale)), owner, nullptr, instance, this);
+        WS_OVERLAPPEDWINDOW, windowX, windowY, windowWidth, windowHeight, owner, nullptr, instance, this);
     if (!m_window) {
         m_renderer.shutdown();
         m_model = nullptr;
@@ -680,10 +701,22 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
         refresh();
         return 0;
     case WM_DPICHANGED: {
-        m_dpiScale = static_cast<float>(HIWORD(wParam)) / 96.0f;
         const RECT* suggested = reinterpret_cast<const RECT*>(lParam);
-        SetWindowPos(m_window, nullptr, suggested->left, suggested->top, suggested->right - suggested->left,
-            suggested->bottom - suggested->top, SWP_NOZORDER | SWP_NOACTIVATE);
+        const HMONITOR monitor = MonitorFromRect(suggested, MONITOR_DEFAULTTONEAREST);
+        m_dpiScale = editorScale(monitor, static_cast<float>(HIWORD(wParam)) / 96.0f);
+        MONITORINFO work { };
+        work.cbSize = sizeof(work);
+        int x = suggested->left;
+        int y = suggested->top;
+        int width = suggested->right - suggested->left;
+        int height = suggested->bottom - suggested->top;
+        if (GetMonitorInfoW(monitor, &work)) {
+            width = std::min(width, work.rcWork.right - work.rcWork.left);
+            height = std::min(height, work.rcWork.bottom - work.rcWork.top);
+            x = std::clamp(x, work.rcWork.left, work.rcWork.right - width);
+            y = std::clamp(y, work.rcWork.top, work.rcWork.bottom - height);
+        }
+        SetWindowPos(m_window, nullptr, x, y, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
         m_hdrDisplay = hdrAtWindow(m_window);
         layout();
         refresh();
@@ -698,8 +731,8 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
         break;
     case WM_GETMINMAXINFO: {
         auto* info = reinterpret_cast<MINMAXINFO*>(lParam);
-        info->ptMinTrackSize
-            = POINT { static_cast<LONG>(1000.0f * m_dpiScale), static_cast<LONG>(720.0f * m_dpiScale) };
+        info->ptMinTrackSize = POINT { static_cast<LONG>(1000.0f * m_dpiScale + 20.0f),
+            static_cast<LONG>(720.0f * m_dpiScale + 40.0f) };
         return 0;
     }
     case WM_ERASEBKGND:
@@ -1313,10 +1346,14 @@ void OverlayEditor::paint()
 
     drawOverlayEditorPreview(m_renderer, *m_model, theme, Rect { 20.0f, 70.0f, 540.0f, 282.0f },
         GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN));
-    m_renderer.text(m_model->settings.overlay.layout != OverlayLayout::Plates
-            ? L"Строка: двигайте весь блок; порядок — в разделе «Строки»"
-            : L"Колесо — зум · Ctrl — выбор · Alt — плашка · Shift — сетка",
-        Rect { 20.0f, 284.0f, 303.0f, 304.0f }, TextRole::Tiny, theme.textDim);
+    const auto& rtss = m_model->settings.overlay;
+    const std::wstring canvasHint = rtss.rtssOmittedLayers > 0
+        ? L"RTSS: " + std::to_wstring(rtss.rtssOmittedLayers) + L" слоёв только в оригинале"
+        : rtss.layout != OverlayLayout::Plates
+        ? L"Строка: двигайте весь блок; порядок — в разделе «Строки»"
+        : L"Колесо — зум · Ctrl — выбор · Alt — плашка · Shift — сетка";
+    m_renderer.text(canvasHint, Rect { 20.0f, 284.0f, 303.0f, 304.0f }, TextRole::Tiny,
+        rtss.rtssOmittedLayers > 0 ? theme.accent : theme.textDim);
     const Rect eyedropper { 309.0f, 283.0f, 399.0f, 307.0f };
     m_renderer.fillRoundRect(eyedropper, 6.0f, m_samplingColor ? theme.accentSoft : theme.panelSoft);
     m_renderer.text(L"Пипетка", eyedropper, TextRole::Tiny, theme.accent, TextAlign::Center);

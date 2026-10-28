@@ -820,9 +820,10 @@ namespace {
         OverlaySettings settings;
         settings.originX = 200;
         settings.savedMonitorId = "display:PRIMARY";
-        const std::string before = "[Master]\nImplementation=2\n[General]\nLayers=3\n"
-                                   "[Layer0]\nText=<FR>\n[Layer1]\nText=%GPU1 usage%\n"
-                                   "[Layer2]\nText=%External source%\n";
+        const std::string before = "[Master]\r\nImplementation=2\r\n[General]\r\nSources=1\r\nLayers=3\r\n"
+                                   "[Source0]\r\nName=GPU1 usage\r\nProvider=HAL\r\nID=GPU1 usage\r\n"
+                                   "[Layer0]\r\nText=<FR>\r\n[Layer1]\r\nText=%GPU1 usage%\r\n"
+                                   "[Layer2]\r\nText=%External source%\r\n";
         std::string error;
         CHECK(importRtssOverlay(before, settings, error));
         CHECK(settings.style == OverlayStyle::Rtss);
@@ -830,6 +831,13 @@ namespace {
         CHECK(settings.metrics[static_cast<std::size_t>(MetricId::GpuLoad)]);
         CHECK(!settings.metrics[static_cast<std::size_t>(MetricId::CpuLoad)]);
         CHECK(settings.savedMonitorId == "display:PRIMARY" && settings.originX == 200);
+        CHECK((settings.rtssTemplate && *settings.rtssTemplate == before) && settings.rtssOmittedLayers == 1);
+        Settings persisted;
+        persisted.overlay = settings;
+        Settings restored;
+        CHECK(parseSettings(serializeSettings(persisted), restored, error));
+        CHECK((restored.overlay.rtssTemplate && *restored.overlay.rtssTemplate == before)
+            && restored.overlay.rtssOmittedLayers == 1);
         const OverlaySettings snapshot = settings;
         CHECK(!importRtssOverlay("[Master]\nImplementation=3\n[General]\nLayers=1\n"
                                  "[Layer0]\nText=<FR>\n",
@@ -838,7 +846,56 @@ namespace {
         CHECK(!importRtssOverlay("[Master]\nImplementation=2\n[General]\nLayers=1\n"
                                  "[Layer7]\nText=<FR>\n",
             settings, error));
-        CHECK(!importRtssOverlay(std::string(65537, 'x'), settings, error));
+        CHECK(!importRtssOverlay(std::string(1048577, 'x'), settings, error));
+    }
+
+    void testRtssExternalProviderCannotImpersonateHal()
+    {
+        const std::string source = "[Master]\nImplementation=2\n[General]\nSources=2\nLayers=3\n"
+                                   "[Source0]\nName=CPU temperature\nProvider=HwInfo\nID=CPU temperature\n"
+                                   "[Source1]\nName=GPU1 usage\nProvider=HAL\nID=GPU1 usage\n"
+                                   "[Layer0]\nText=%CPU temperature%\nPositionX=-5\n"
+                                   "[Layer1]\nText=%GPU1 usage%\n"
+                                   "[Layer2]\nImage=custom.png\n";
+        OverlaySettings settings;
+        std::string error;
+        CHECK(importRtssOverlay(source, settings, error));
+        CHECK(settings.metrics[static_cast<std::size_t>(MetricId::GpuLoad)]);
+        CHECK(!settings.metrics[static_cast<std::size_t>(MetricId::CpuTemp)]);
+        CHECK(settings.rtssOmittedLayers == 2 && (settings.rtssTemplate && *settings.rtssTemplate == source));
+        settings.scalePercent = 140;
+        Settings stored;
+        stored.overlay = settings;
+        Settings restored;
+        CHECK(parseSettings(serializeSettings(stored), restored, error));
+        CHECK((restored.overlay.rtssTemplate && *restored.overlay.rtssTemplate == source));
+        CHECK(restored.overlay.scalePercent == 140);
+
+        const std::string imageOnly = "[Master]\nImplementation=2\n[General]\nLayers=1\n"
+                                      "[Layer0]\nImage=picture.png\n";
+        CHECK(importRtssOverlay(imageOnly, settings, error));
+        CHECK((settings.rtssTemplate && *settings.rtssTemplate == imageOnly)
+            && settings.rtssOmittedLayers == 1);
+        CHECK(std::none_of(
+            settings.metrics.begin(), settings.metrics.end(), [](bool chosen) { return chosen; }));
+        const std::string ambiguous = "[Master]\nImplementation=2\n[General]\nSources=2\nLayers=1\n"
+                                      "[Source0]\nName=GPU1 usage\nProvider=HAL\nID=GPU1 usage\n"
+                                      "[Source1]\nName=GPU1 usage\nProvider=AIDA\nID=GPU1 usage\n"
+                                      "[Layer0]\nText=%GPU1 usage%\n";
+        CHECK(importRtssOverlay(ambiguous, settings, error));
+        CHECK(!settings.metrics[static_cast<std::size_t>(MetricId::GpuLoad)]);
+        CHECK((settings.rtssTemplate && *settings.rtssTemplate == ambiguous)
+            && settings.rtssOmittedLayers == 1);
+        CHECK(!importRtssOverlay("[Master]\nImplementation=3\n[General]\nLayers=1\n"
+                                 "[Layer0]\nText=<FR>\n",
+            settings, error));
+        CHECK((settings.rtssTemplate && *settings.rtssTemplate == ambiguous));
+        const std::string embedded = "[Master]\nImplementation=2\n[Settings]\nEmbeddedImage="
+            + std::string(70000, 'A') + "\n[General]\nLayers=1\n[Layer0]\nText=<FR>\n";
+        CHECK(importRtssOverlay(embedded, settings, error));
+        stored.overlay = settings;
+        CHECK(parseSettings(serializeSettings(stored), restored, error));
+        CHECK(restored.overlay.rtssTemplate && *restored.overlay.rtssTemplate == embedded);
     }
 
     void testRtssExportKeepsSupportedOrderAndColor()
@@ -941,6 +998,7 @@ void runSettingsTests()
     testKeysAreStable();
     testRecipeMigrationAndAxes();
     testRtssImportRecognizesOnlyKnownSources();
+    testRtssExternalProviderCannotImpersonateHal();
     testRtssExportKeepsSupportedOrderAndColor();
     testGameProfileKeepsPersonalPlacement();
     testCrlfFile();

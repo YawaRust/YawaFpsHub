@@ -147,6 +147,8 @@
     rowPositions: {}
   };
 
+  let originalRtss = store.read("rtssOriginal") || "";
+  let rtssOmittedLayers = Number(store.read("rtssOmittedLayers") || 0);
   const overlayHistory = { undo: [], redo: [], committed: null, gesture: false, restoring: false };
 
   function recordOverlayHistory() {
@@ -1920,14 +1922,17 @@
       applyOverlay();
     });
     const fileInput = $("#importOsdRecipeFile");
+    $("#rtssOmittedHint").textContent = rtssOmittedLayers
+      ? `RTSS: ${rtssOmittedLayers} слоёв только в оригинале` : "";
     $("#importOsdRecipe").addEventListener("click", () => fileInput.click());
     fileInput.addEventListener("change", async () => {
       const file = fileInput.files?.[0];
       if (!file) return;
       try {
         if (file.name.toLowerCase().endsWith(".ovl")) {
-          if (file.size > 65536) throw new Error("Файл RTSS слишком большой");
-          const text = await file.text();
+          if (file.size > 1024 * 1024) throw new Error("Файл RTSS слишком большой (предел 1 МиБ)");
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          const text = new TextDecoder("windows-1251").decode(bytes);
           if (!/^Implementation=2\s*$/mi.test(text) || !/^Layers=([1-9]\d*)\s*$/mi.test(text)) {
             throw new Error("Ожидался текстовый шаблон RTSS OverlayEditor v2");
           }
@@ -1940,16 +1945,32 @@
             ["%gpu1 temperature%", "gpuTemp"], ["%gpu1 clock%", "gpuClock"],
             ["%gpu1 power%", "gpuPower"], ["%gpu1 memory usage%", "vramUsed"],
             ["%total ram%", "ramUsed"]]);
+          const count = Number(text.match(/^Sources=(\d+)\s*$/mi)?.[1] ?? -1);
+          const sourceSections = [...text.matchAll(/^\[Source(\d+)\]\s*$([\s\S]*?)(?=^\[|$(?![\s\S]))/gmi)];
+          const sources = sourceSections.filter(([, index]) => Number(index) < count).map(([, , body]) => ({
+            name: body.match(/^Name=(.*)$/mi)?.[1]?.trim(),
+            provider: body.match(/^Provider=(.*)$/mi)?.[1]?.trim(),
+            id: body.match(/^ID=(.*)$/mi)?.[1]?.trim()
+          }));
+          const hasHal = (tag) => {
+            if (tag === "<fr>") return true;
+            const name = tag.slice(1, -1);
+            const matches = sources.filter((source) => source.name?.toLowerCase() === name);
+            return matches.length > 0 && matches.every((source) => source.provider === "HAL"
+              && source.id === source.name);
+          };
           const chosen = new Set();
           const colors = {};
+          let omitted = 0;
           const sections = [...text.matchAll(/^\[Layer(\d+)\]\s*$([\s\S]*?)(?=^\[|$(?![\s\S]))/gmi)];
           for (const [, index, body] of sections) {
             if (Number(index) >= layers) continue;
             const line = body.match(/^Text=(.*)$/mi)?.[1]?.trim().toLowerCase();
-            if (!line) continue;
             const encoded = body.match(/^TextColor=([A-Fa-f0-9]{6}(?:[A-Fa-f0-9]{2})?)\s*$/mi)?.[1];
+            let recognized = false;
             for (const [tag, metric] of known) {
-              if (!line.includes(tag)) continue;
+              if (!line?.includes(tag) || !hasHal(tag)) continue;
+              recognized = true;
               if (!chosen.has(metric) && encoded) {
                 colors[metric] = encoded.length === 8
                   ? `#${encoded.slice(2)}${encoded.slice(0, 2)}`.toUpperCase()
@@ -1957,14 +1978,27 @@
               }
               chosen.add(metric);
             }
+            if (!recognized) omitted++;
           }
-          if (!chosen.size) throw new Error("Нет поддерживаемых текстовых датчиков RTSS");
+          if (!sections.some(([, index]) => Number(index) < layers)) {
+            throw new Error("В шаблоне нет слоёв RTSS");
+          }
+          const chunks = [];
+          for (let offset = 0; offset < bytes.length; offset += 8192) {
+            chunks.push(String.fromCharCode(...bytes.slice(offset, offset + 8192)));
+          }
+          originalRtss = btoa(chunks.join(""));
+          rtssOmittedLayers = omitted;
+          store.write("rtssOriginal", originalRtss);
+          store.write("rtssOmittedLayers", String(omitted));
+          $("#rtssOmittedHint").textContent = omitted
+            ? `RTSS: ${omitted} слоёв только в оригинале` : "";
           gallery.querySelector('[data-recipe="rtss"]').click();
           for (const [id, entry] of sensorRows) entry.sensor.pinned = chosen.has(id);
           overlayState.metricOrder = [...chosen];
           overlayState.metricRgba = colors;
           saveOverlaySensors(); rebuildOverlaySensors(); applySensorFilter(); applyOverlay();
-          toast("Показатели, порядок и текстовые цвета перенесены; позиции и внешние источники нет");
+          toast(`RTSS: ${omitted} слоёв только в оригинале; файл сохранён для обратного экспорта`);
           return;
         }
         if (file.size > 16384) throw new Error("Файл рецепта слишком большой (предел 16 КБ)");
@@ -1996,6 +2030,19 @@
       }
     });
     $("#exportOsdRtss").addEventListener("click", () => {
+      if (originalRtss && window.confirm("Экспортировать исходный RTSS .ovl без изменений?\n"
+          + "ОК — оригинал; Отмена — новый .ovl только из показателей Yawa.\n"
+          + "Правки мастерской не изменяют оригинал; внешние картинки зависят от своих путей.")) {
+        const bytes = Uint8Array.from(atob(originalRtss), (symbol) => symbol.charCodeAt(0));
+        const url = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "rtss-original.ovl";
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        toast("Исходный RTSS .ovl экспортирован без изменений");
+        return;
+      }
       const sources = new Map([["fps", ["<FR>", "", "FPS"]],
         ["frameMs", ["%Frametime%", "Frametime", "ms"]],
         ["cpu", ["%CPU usage%", "CPU usage", "%"]],

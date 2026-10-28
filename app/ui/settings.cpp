@@ -16,6 +16,7 @@ namespace {
     constexpr int kMinScale = 70;
     constexpr int kMaxScale = 160;
     constexpr std::size_t kMaxLabelLength = 10;
+    constexpr std::size_t kMaxRtssBytes = 1024 * 1024;
 
     struct StyleKey
     {
@@ -94,6 +95,36 @@ namespace {
             text.remove_suffix(1);
         }
         return text;
+    }
+
+    std::string hexEncode(std::string_view bytes)
+    {
+        constexpr char digits[] = "0123456789ABCDEF";
+        std::string encoded;
+        encoded.reserve(bytes.size() * 2);
+        for (unsigned char byte : bytes) {
+            encoded.push_back(digits[byte >> 4]);
+            encoded.push_back(digits[byte & 15]);
+        }
+        return encoded;
+    }
+
+    std::string hexDecode(std::string_view encoded)
+    {
+        if (encoded.size() > 2 * kMaxRtssBytes || encoded.size() % 2 != 0) {
+            return { };
+        }
+        std::string bytes;
+        bytes.reserve(encoded.size() / 2);
+        for (std::size_t index = 0; index < encoded.size(); index += 2) {
+            unsigned int byte = 0;
+            const auto parsed = std::from_chars(encoded.data() + index, encoded.data() + index + 2, byte, 16);
+            if (parsed.ec != std::errc { } || parsed.ptr != encoded.data() + index + 2) {
+                return { };
+            }
+            bytes.push_back(static_cast<char>(byte));
+        }
+        return bytes;
     }
 
     int parseInt(std::string_view text, int fallback)
@@ -933,6 +964,15 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
             if (entry != kMetricTable.end()) {
                 setOverlayMetricLabel(target.overlay, entry->id, std::string(value));
             }
+        } else if (section == "rtss_original") {
+            if (key == "template_hex") {
+                std::string decoded = hexDecode(value);
+                if (!decoded.empty()) {
+                    target.overlay.rtssTemplate = std::make_shared<const std::string>(std::move(decoded));
+                }
+            } else if (key == "omitted_layers") {
+                target.overlay.rtssOmittedLayers = std::clamp(parseInt(value, 0), 0, 256);
+            }
         } else if (section == "hotkeys") {
             if (key == "overlay") {
                 target.hotkeys.overlay = static_cast<unsigned int>(std::clamp(parseInt(value, 0), 0, 254));
@@ -972,6 +1012,9 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
         }
     }
 
+    if (!target.overlay.rtssTemplate) {
+        target.overlay.rtssOmittedLayers = 0;
+    }
     if (!hasMetricSelection) {
         for (std::size_t index = 0; index < kLabelCount; ++index) {
             target.overlay.metrics[static_cast<std::size_t>(kOverlayPrimaryMetrics[index])]
@@ -992,34 +1035,47 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
 bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::string& error)
 {
     error.clear();
-    if (text.size() > 65536 || text.find('\0') != std::string_view::npos) {
+    if (text.size() > kMaxRtssBytes || text.find('\0') != std::string_view::npos) {
         error = "Шаблон RTSS слишком большой или содержит двоичные данные";
         return false;
     }
 
+    struct RtssSource
+    {
+        std::string name;
+        std::string provider;
+        std::string id;
+    };
+    const auto original = std::make_shared<const std::string>(text);
     std::array<bool, kMetricCount> selected { };
     std::array<std::string, 256> layerTexts { };
     std::array<std::string, 256> layerColors { };
+    std::array<RtssSource, 256> sources { };
     std::array<std::optional<std::uint32_t>, kMetricCount> colors { };
     std::vector<MetricId> order;
     std::string section;
     bool version = false;
     int layers = -1;
     bool validLayers = false;
-    int matched = 0;
+    int sourceCount = -1;
+    int omitted = 0;
+    std::array<bool, 256> layerPresent { };
     while (!text.empty()) {
         const auto end = text.find('\n');
         std::string_view line = trim(end == std::string_view::npos ? text : text.substr(0, end));
         text = end == std::string_view::npos ? std::string_view { } : text.substr(end + 1);
-        if (line.size() > 2048) {
-            error = "Слишком длинная строка шаблона RTSS";
-            return false;
-        }
         if (line.empty() || line.front() == ';' || line.front() == '#') {
             continue;
         }
         if (line.front() == '[' && line.back() == ']') {
             section.assign(line.substr(1, line.size() - 2));
+            if (section.size() > 5 && section.substr(0, 5) == "Layer") {
+                const std::string_view number = std::string_view(section).substr(5);
+                const int index = parseInt(number, -1);
+                if (index >= 0 && index < 256 && std::to_string(index) == number) {
+                    layerPresent[static_cast<std::size_t>(index)] = true;
+                }
+            }
             continue;
         }
         const auto equals = line.find('=');
@@ -1033,6 +1089,25 @@ bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::str
         } else if (section == "General" && key == "Layers") {
             layers = parseInt(value, -1);
             validLayers = layers >= 1 && layers <= 256 && std::to_string(layers) == value;
+        } else if (section == "General" && key == "Sources") {
+            sourceCount = parseInt(value, -1);
+            if (sourceCount < 0 || sourceCount > 256 || std::to_string(sourceCount) != value) {
+                sourceCount = -1;
+            }
+        } else if (section.size() > 6 && section.substr(0, 6) == "Source") {
+            const std::string_view number = std::string_view(section).substr(6);
+            const int index = parseInt(number, -1);
+            if (index < 0 || index >= 256 || std::to_string(index) != number) {
+                continue;
+            }
+            RtssSource& source = sources[static_cast<std::size_t>(index)];
+            if (key == "Name") {
+                source.name = value;
+            } else if (key == "Provider") {
+                source.provider = value;
+            } else if (key == "ID") {
+                source.id = value;
+            }
         } else if (section.size() > 5 && section.substr(0, 5) == "Layer"
             && (key == "Text" || key == "TextColor")) {
             const std::string_view layerNumber = std::string_view(section).substr(5);
@@ -1043,22 +1118,43 @@ bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::str
             (key == "Text" ? layerTexts : layerColors)[static_cast<std::size_t>(index)] = value;
         }
     }
-    if (!version || !validLayers) {
+    if (!version || !validLayers
+        || std::none_of(
+            layerPresent.begin(), layerPresent.begin() + layers, [](bool present) { return present; })) {
         error = "Неподдерживаемый шаблон RTSS OverlayEditor";
         return false;
     }
+    const auto availableSource = [&](const RtssMetric& metric) {
+        if (metric.source.empty()) {
+            return true; // <FR> выдаёт сам RTSS, не [SourceN].
+        }
+        bool found = false;
+        const int count = std::max(0, sourceCount);
+        for (int index = 0; index < count; ++index) {
+            const RtssSource& source = sources[static_cast<std::size_t>(index)];
+            if (source.name != metric.source) {
+                continue;
+            }
+            if (source.provider != "HAL" || source.id != metric.source) {
+                return false; // Дубликат у внешнего провайдера делает тег неоднозначным.
+            }
+            found = true;
+        }
+        return found;
+    };
     for (int index = 0; index < layers; ++index) {
         std::string lowered = layerTexts[static_cast<std::size_t>(index)];
         std::transform(lowered.begin(), lowered.end(), lowered.begin(),
             [](unsigned char letter) { return static_cast<char>(std::tolower(letter)); });
+        bool recognized = false;
         for (const RtssMetric& source : kRtssMetrics) {
             std::string tag(source.tag);
             std::transform(tag.begin(), tag.end(), tag.begin(),
                 [](unsigned char letter) { return static_cast<char>(std::tolower(letter)); });
-            if (lowered.find(tag) != std::string::npos) {
+            if (lowered.find(tag) != std::string::npos && availableSource(source)) {
+                recognized = true;
                 const auto slot = static_cast<std::size_t>(source.id);
                 if (!selected[slot]) {
-                    ++matched;
                     order.push_back(source.id);
                     const std::string& encoded = layerColors[static_cast<std::size_t>(index)];
                     if (encoded.size() == 6 || encoded.size() == 8) {
@@ -1074,15 +1170,14 @@ bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::str
                 selected[slot] = true;
             }
         }
-    }
-    if (matched == 0) {
-        error = "В RTSS нет текстовых датчиков, которым соответствует показатель YawaFpsHub";
-        return false;
+        omitted += layerPresent[static_cast<std::size_t>(index)] && !recognized;
     }
     OverlaySettings imported = overlay;
     applyOverlayRecipe(imported, OverlayRecipe::Rtss);
     imported.metrics = selected;
     imported.metricRgba = colors;
+    imported.rtssTemplate = original;
+    imported.rtssOmittedLayers = omitted;
     std::array<bool, kMetricCount> placed { };
     std::size_t output = 0;
     for (MetricId id : order) {
@@ -1344,6 +1439,11 @@ std::string serializeSettings(const Settings& settings)
         text += std::string(labelKey(field)) + " = " + labelValue(settings.overlay, field) + "\n";
     }
     text += "\n";
+    if (settings.overlay.rtssTemplate && settings.overlay.rtssTemplate->size() <= kMaxRtssBytes) {
+        text += "[rtss_original]\n";
+        text += "template_hex = " + hexEncode(*settings.overlay.rtssTemplate) + "\n";
+        text += "omitted_layers = " + std::to_string(settings.overlay.rtssOmittedLayers) + "\n\n";
+    }
 
     text += "[hotkeys]\n";
     text += "overlay = " + std::to_string(settings.hotkeys.overlay) + "\n";

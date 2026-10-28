@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -154,6 +155,9 @@ struct OverlaySettings
     std::array<std::string, kMetricCount> customLabels { };
     std::array<bool, kLabelCount> visible { true, true, true, true, true };
     std::array<std::string, kLabelCount> labels { "FPS", "CPU", "GPU", "RAM", "VRAM" };
+    // Исходный импортированный OVL хранится отдельно от редактируемых строк Yawa.
+    std::shared_ptr<const std::string> rtssTemplate;
+    int rtssOmittedLayers = 0;
 };
 
 struct UiSettings
