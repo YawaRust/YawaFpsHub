@@ -850,6 +850,7 @@ namespace {
         CHECK(serializeSettings(saved).find("display:PRIMARY") == std::string::npos);
         CHECK(!saved.overlay.followGameMonitor && !saved.overlay.clickThrough);
         CHECK(gameProfileKey(L"Game.EXE") == "game.exe");
+        CHECK(gameProfileKey(L"The Witcher 3.exe") == "the witcher 3.exe");
         CHECK(gameProfileKey(L"../game.exe").empty());
         CHECK(gameProfileKey(L"game:bad.exe").empty());
         CHECK(gameProfileKey(L"game.txt").empty());

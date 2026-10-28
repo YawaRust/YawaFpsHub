@@ -982,6 +982,7 @@ bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::str
     std::string section;
     bool version = false;
     int layers = -1;
+    bool validLayers = false;
     int matched = 0;
     while (!text.empty()) {
         const auto end = text.find('\n');
@@ -1008,6 +1009,7 @@ bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::str
             version = value == "2";
         } else if (section == "General" && key == "Layers") {
             layers = parseInt(value, -1);
+            validLayers = layers >= 1 && layers <= 256 && std::to_string(layers) == value;
         } else if (section.size() > 5 && section.substr(0, 5) == "Layer" && key == "Text") {
             const std::string_view layerNumber = std::string_view(section).substr(5);
             const int index = parseInt(layerNumber, -1);
@@ -1017,7 +1019,7 @@ bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::str
             layerTexts[static_cast<std::size_t>(index)] = value;
         }
     }
-    if (!version || layers < 1 || layers > 256) {
+    if (!version || !validLayers) {
         error = "Неподдерживаемый шаблон RTSS OverlayEditor";
         return false;
     }
@@ -1074,8 +1076,8 @@ std::string gameProfileKey(std::wstring_view processName)
     std::string key;
     for (wchar_t letter : processName) {
         if (!((letter >= L'a' && letter <= L'z') || (letter >= L'A' && letter <= L'Z')
-                || (letter >= L'0' && letter <= L'9') || letter == L'_' || letter == L'-'
-                || letter == L'.')) {
+                || (letter >= L'0' && letter <= L'9') || letter == L'_' || letter == L'-' || letter == L'.'
+                || letter == L' ')) {
             return { };
         }
         key.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(letter))));

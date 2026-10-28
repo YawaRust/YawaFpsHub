@@ -2393,6 +2393,9 @@ void MainWindow::onTick()
             if (!gameKey.empty()) {
                 m_recentGameKey = gameKey;
                 m_model.profileGameName = m_model.gameName;
+            } else {
+                m_recentGameKey.clear();
+                m_model.profileGameName.clear();
             }
         } else if (m_recentGameAtMs == 0 || profileNowMs < m_recentGameAtMs
             || profileNowMs - m_recentGameAtMs > 300000) {
