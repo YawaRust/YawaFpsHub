@@ -1045,6 +1045,11 @@ body.is-compact .chart-wrap--frames canvas { height: 96px; }
   max-width: none;
 }
 
+#osdPreview.is-rtss-visual { padding: 0 !important; border: 0; background: none; box-shadow: none; backdrop-filter: none; }
+#osdPreview.is-rtss-visual > :not(.rtss-visual-canvas) { display: none; }
+.rtss-visual-canvas { position: relative; flex: none; overflow: hidden; }
+.rtss-visual-layer { position: absolute; display: block; white-space: nowrap; overflow: hidden; line-height: 1; }
+
 .osd[data-pos="tl"] { left: 3%; top: 5%; }
 .osd[data-pos="tr"] { right: 3%; top: 5%; transform-origin: top right; }
 .osd[data-pos="bl"] { left: 3%; bottom: 5%; top: auto; transform-origin: bottom left; }

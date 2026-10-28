@@ -1994,19 +1994,20 @@ void MainWindow::applyAction(const UiHit& hit)
         if (rtss) {
             const bool hasRows = std::any_of(
                 imported.metrics.begin(), imported.metrics.end(), [](bool selected) { return selected; });
-            if (!hasRows) {
-                MessageBoxW(dialog.hwndOwner,
-                    L"Не найдено ни одного показателя, который Yawa может отобразить. "
-                    L"Импорт отменён, текущий оверлей не изменён. Этот шаблон нельзя "
-                    L"воспроизвести простым переименованием .ovx в .ovl.",
+            const bool hasVisual = imported.rtssVisual
+                && std::any_of(imported.rtssVisual->layers.begin(), imported.rtssVisual->layers.end(),
+                    [](const RtssVisualLayer& layer) { return !layer.text.empty() || layer.hasBackground; });
+            if (!hasRows && !hasVisual) {
+                MessageBoxW(dialog.hwndOwner, L"Нет слоёв для отображения. Текущий оверлей не изменён.",
                     L"Шаблон RTSS не перенесён", MB_OK | MB_ICONWARNING);
                 break;
             }
-            const std::wstring notice = L"Это частичный перенос, а не копия оверлея 1:1. "
+            const std::wstring notice = L"Это предварительная отрисовка, не копия RTSS 1:1. "
                 + std::to_wstring(imported.rtssOmittedLayers)
-                + L" слоёв не будут показаны. Геометрия, произвольный текст, графики, "
-                  L"шрифты и картинки RTSS также не переносятся. Исходный файл сохранится "
-                  L"для обратного экспорта.\n\nЗаменить текущий оверлей только распознанными показателями?";
+                + L" слоёв без связанной метрики. Фон, обычный текст и координаты "
+                  L"переносятся; графики, сложные теги и картинки ещё не воспроизводятся. "
+                  L"Недоступные значения помечены «нет данных». Исходный пакет остаётся "
+                  L"для обратного экспорта.\n\nОткрыть этот макет вместо текущего оверлея?";
             if (MessageBoxW(dialog.hwndOwner, notice.c_str(), L"Частичный импорт RTSS",
                     MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2)
                 != IDYES) {

@@ -933,6 +933,188 @@ namespace {
         }
     }
 
+    std::wstring rtssWide(std::string_view encoded)
+    {
+        if (encoded.empty()) {
+            return { };
+        }
+        const int length
+            = MultiByteToWideChar(1251, 0, encoded.data(), static_cast<int>(encoded.size()), nullptr, 0);
+        if (length <= 0) {
+            return { };
+        }
+        std::wstring value(static_cast<std::size_t>(length), L'\0');
+        MultiByteToWideChar(1251, 0, encoded.data(), static_cast<int>(encoded.size()), value.data(), length);
+        return value;
+    }
+
+    std::wstring rtssText(const RtssVisualLayout& layout, std::string_view source, const OverlayText& values)
+    {
+        std::wstring result;
+        for (std::size_t at = 0; at < source.size() && result.size() < 8192;) {
+            const char start = source[at];
+            if (start == '<' || start == '%') {
+                const auto end = source.find(start == '<' ? '>' : '%', at + 1);
+                if (end != std::string_view::npos) {
+                    const std::string_view token = source.substr(at, end - at + 1);
+                    auto known = std::find_if(layout.availableTags.begin(), layout.availableTags.end(),
+                        [token](const auto& entry) { return entry.first == token; });
+                    if (known != layout.availableTags.end()) {
+                        const auto id = std::find(values.ids.begin(), values.ids.end(), known->second);
+                        if (id != values.ids.end()) {
+                            std::wstring metric
+                                = values.values[static_cast<std::size_t>(id - values.ids.begin())];
+                            if (metric != L"нет данных") {
+                                const auto unit = metric.find_first_of(L" %°/");
+                                if (unit != std::wstring::npos) {
+                                    metric.resize(unit);
+                                }
+                            }
+                            result += metric;
+                        } else {
+                            result += L"нет данных";
+                        }
+                    } else {
+                        result += L"нет данных";
+                    }
+                    at = end + 1;
+                    continue;
+                }
+            }
+            if (start == '\\' && at + 1 < source.size()) {
+                result += L' ';
+                at += 2;
+                continue;
+            }
+            if (static_cast<unsigned char>(start) < 32) {
+                ++at;
+                continue;
+            }
+            std::size_t end = at + 1;
+            while (end < source.size() && source[end] != '<' && source[end] != '%' && source[end] != '\\'
+                && static_cast<unsigned char>(source[end]) >= 32) {
+                ++end;
+            }
+            result += rtssWide(source.substr(at, end - at));
+            at = end;
+        }
+        return result;
+    }
+
+    struct RtssPlacement
+    {
+        Rect rect;
+        std::wstring text;
+    };
+
+    Rect drawRtssVisual(ID2D1RenderTarget* target, const RtssVisualLayout& layout, const OverlayText& values,
+        const OverlaySettings& settings, const Rect& bounds, float scale, const OverlayFormats& formats)
+    {
+        const float zoom = static_cast<float>(layout.zoom) * scale;
+        const float cellHeight = static_cast<float>(layout.fontHeight) * zoom;
+        const float cellWidth = cellHeight * 0.61f;
+        const auto units = [zoom, cellWidth, cellHeight](int value, bool vertical) {
+            return value < 0 ? static_cast<float>(-value) * (vertical ? cellHeight : cellWidth)
+                             : static_cast<float>(value) * zoom;
+        };
+        std::vector<RtssPlacement> placed;
+        placed.reserve(layout.layers.size());
+        float right = 0.0f;
+        float bottom = 0.0f;
+        for (const RtssVisualLayer& layer : layout.layers) {
+            const std::wstring text = rtssText(layout, layer.text, values);
+            if (text.empty() && !layer.hasBackground) {
+                placed.push_back({ });
+                continue;
+            }
+            const float width = layer.width == 0
+                ? std::max(static_cast<float>(text.size()) * cellWidth, cellWidth)
+                : units(layer.width, false);
+            const float height
+                = layer.height == 0 ? cellHeight * layer.size / 100.0f : units(layer.height, true);
+            float x = units(layer.x, false);
+            float y = units(layer.y, true);
+            x -= width * static_cast<float>(layer.origin % 3) / 2.0f;
+            y -= height * static_cast<float>(layer.origin / 3) / 2.0f;
+            placed.push_back({ Rect { x, y, x + width, y + height }, text });
+            right = std::max(right, x + width);
+            bottom = std::max(bottom, y + height);
+        }
+        if (right <= 0.0f || bottom <= 0.0f || formats.factory == nullptr) {
+            return { };
+        }
+        const float fit = std::min({ 1.0f, std::max(1.0f, bounds.width() - 4.0f) / right,
+            std::max(1.0f, bounds.height() - 4.0f) / bottom });
+        const float width = right * fit;
+        const float height = bottom * fit;
+        const bool onRight = settings.position == OverlayPosition::TopRight
+            || settings.position == OverlayPosition::BottomRight;
+        const bool onBottom = settings.position == OverlayPosition::BottomLeft
+            || settings.position == OverlayPosition::BottomRight;
+        const float anchorX = settings.anchorMode == OverlayAnchorMode::Free
+            ? bounds.left + static_cast<float>(settings.originX)
+            : (onRight ? bounds.right - width - 18.0f : bounds.left + 18.0f)
+                + static_cast<float>(settings.offsetX);
+        const float anchorY = settings.anchorMode == OverlayAnchorMode::Free
+            ? bounds.top + static_cast<float>(settings.originY)
+            : (onBottom ? bounds.bottom - height - 18.0f : bounds.top + 18.0f)
+                + static_cast<float>(settings.offsetY);
+        const float left = std::clamp(anchorX, bounds.left, std::max(bounds.left, bounds.right - width));
+        const float top = std::clamp(anchorY, bounds.top, std::max(bounds.top, bounds.bottom - height));
+
+        const std::wstring family = layout.fontFace.empty() ? L"Consolas" : rtssWide(layout.fontFace);
+        std::array<IDWriteTextFormat*, 401> fonts { };
+        D2D1::Matrix3x2F oldTransform;
+        target->GetTransform(&oldTransform);
+        target->SetTransform(D2D1::Matrix3x2F::Scale(fit, fit, D2D1::Point2F(left, top)) * oldTransform);
+        const float opacity = static_cast<float>(std::clamp(settings.opacityPercent, 0, 100)) / 100.0f;
+        for (std::size_t index = 0; index < layout.layers.size(); ++index) {
+            const RtssVisualLayer& layer = layout.layers[index];
+            const RtssPlacement& placement = placed[index];
+            if (placement.rect.right <= placement.rect.left) {
+                continue;
+            }
+            const D2D1_RECT_F rect = D2D1::RectF(left + placement.rect.left, top + placement.rect.top,
+                left + placement.rect.right, top + placement.rect.bottom);
+            if (layer.hasBackground && layer.backgroundColor >> 24 != 0) {
+                ID2D1SolidColorBrush* brush = nullptr;
+                if (SUCCEEDED(target->CreateSolidColorBrush(
+                        toD2D(fromRgba(layer.backgroundColor), opacity), &brush))) {
+                    target->FillRectangle(rect, brush);
+                    brush->Release();
+                }
+            }
+            if (placement.text.empty()) {
+                continue;
+            }
+            IDWriteTextFormat*& format = fonts[static_cast<std::size_t>(layer.size)];
+            if (format == nullptr) {
+                const float size = cellHeight * static_cast<float>(layer.size) / 100.0f;
+                if (FAILED(formats.factory->CreateTextFormat(family.c_str(), nullptr,
+                        static_cast<DWRITE_FONT_WEIGHT>(layout.fontWeight), DWRITE_FONT_STYLE_NORMAL,
+                        DWRITE_FONT_STRETCH_NORMAL, size, L"ru-RU", &format))) {
+                    continue;
+                }
+                format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+            }
+            ID2D1SolidColorBrush* brush = nullptr;
+            if (SUCCEEDED(target->CreateSolidColorBrush(toD2D(fromRgba(layer.textColor), opacity), &brush))) {
+                target->DrawTextW(placement.text.data(), static_cast<UINT32>(placement.text.size()), format,
+                    D2D1::RectF(rect.left, rect.top, std::max(rect.right, rect.left + cellWidth),
+                        std::max(rect.bottom, rect.top + cellHeight)),
+                    brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                brush->Release();
+            }
+        }
+        target->SetTransform(oldTransform);
+        for (IDWriteTextFormat* format : fonts) {
+            if (format != nullptr) {
+                format->Release();
+            }
+        }
+        return Rect { left, top, left + width, top + height };
+    }
+
     void drawInline(Painter& painter, const OverlaySettings& settings, const OverlayText& text,
         const Rect& frame, const StyleLook& look)
     {
@@ -1036,7 +1218,13 @@ OverlayText makeOverlayText(const OverlaySettings& settings, const MetricStore& 
 Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, const Theme& theme,
     const OverlayText& text, const Rect& bounds, float scale, const OverlayFormats& formats)
 {
-    if (target == nullptr || visibleRows(text) == 0) {
+    if (target == nullptr) {
+        return Rect { };
+    }
+    if (settings.recipe == OverlayRecipe::Rtss && settings.rtssVisual && settings.rtssTemplate) {
+        return drawRtssVisual(target, *settings.rtssVisual, text, settings, bounds, scale, formats);
+    }
+    if (visibleRows(text) == 0) {
         return Rect { };
     }
 

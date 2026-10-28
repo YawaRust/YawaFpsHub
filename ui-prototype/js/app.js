@@ -150,6 +150,8 @@
 
   let originalRtss = store.read("rtssOriginal") || "";
   let originalOvx = store.read("rtssExchange") || "";
+  let rtssVisualSource = "";
+  let rtssVisual = null;
   let rtssOmittedLayers = Number(store.read("rtssOmittedLayers") || 0);
   const overlayHistory = { undo: [], redo: [], committed: null, gesture: false, restoring: false };
 
@@ -1403,6 +1405,7 @@
       row.style.translate = `${position.x}px ${position.y}px`;
     });
 
+    renderRtssVisual(osd);
     fitOverlay();
     const radiusValue = $("#osdRadiusValue");
     if (radiusValue) radiusValue.textContent = `${overlayState.radius === null ? 8 : overlayState.radius} px`;
@@ -1874,6 +1877,96 @@
     return btoa(chunks.join(""));
   }
 
+  function parseRtssVisual(encoded) {
+    const bytes = Uint8Array.from(atob(encoded), (letter) => letter.charCodeAt(0));
+    const text = new TextDecoder("windows-1251").decode(bytes);
+    const master = text.match(/^\[Master\]([\s\S]*?)(?=^\[|$(?![\s\S]))/mi)?.[1] || "";
+    const field = (body, name, fallback) => body.match(new RegExp(`^${name}=(.*)$`, "mi"))?.[1]?.trim() ?? fallback;
+    const zoom = Math.max(1, Math.min(8, Number(field(master, "ZoomRatio", "1")) || 1));
+    const fontHeight = Math.max(4, Math.min(64, Math.abs(Number(field(master, "FontHeight", "-13"))) || 13));
+    const cellHeight = zoom * fontHeight;
+    const cellWidth = cellHeight * 0.61;
+    const units = (value, vertical) => value < 0 ? -value * (vertical ? cellHeight : cellWidth)
+      : value * zoom;
+    const count = Math.min(256, Number(text.match(/^Layers=(\d+)\s*$/mi)?.[1] || 0));
+    const layers = [];
+    let width = 0;
+    let height = 0;
+    for (const [, index, body] of text.matchAll(/^\[Layer(\d+)\]\s*$([\s\S]*?)(?=^\[|$(?![\s\S]))/gmi)) {
+      if (Number(index) >= count) continue;
+      const number = (name, fallback = 0) => Math.max(-512, Math.min(2048,
+        Number(field(body, name, String(fallback))) || fallback));
+      const label = field(body, "Text", "").slice(0, 8192);
+      const bg = field(body, "BgndColor", "").split(",")[0];
+      if (!label && !bg) continue;
+      const layerWidth = units(number("ExtentX"), false) || Math.max(cellWidth, label.length * cellWidth);
+      const layerHeight = units(number("ExtentY"), true) || cellHeight * number("Size", 100) / 100;
+      const origin = Math.max(0, Math.min(8, number("ExtentOrigin")));
+      const x = units(number("PositionX"), false) - layerWidth * (origin % 3) / 2;
+      const y = units(number("PositionY"), true) - layerHeight * Math.floor(origin / 3) / 2;
+      layers.push({ label, bg, color: field(body, "TextColor", "").split(",")[0],
+        size: Math.max(10, Math.min(400, number("Size", 100))),
+        x, y, width: layerWidth, height: layerHeight });
+      width = Math.max(width, x + layerWidth);
+      height = Math.max(height, y + layerHeight);
+    }
+    const sources = [...text.matchAll(/^\[Source\d+\]\s*$([\s\S]*?)(?=^\[|$(?![\s\S]))/gmi)]
+      .map(([, body]) => ({ name: field(body, "Name", ""),
+        provider: field(body, "Provider", ""), id: field(body, "ID", "") }));
+    return { layers, width, height, cellHeight, sources,
+      family: field(master, "FontFace", "Consolas").slice(0, 96),
+      weight: Math.max(100, Math.min(900, Number(field(master, "FontWeight", "400")) || 400)) };
+  }
+
+  function renderRtssVisual(osd) {
+    const visualActive = overlayState.recipe === "rtss" && Boolean(originalRtss);
+    osd.classList.toggle("is-rtss-visual", visualActive);
+    osd.querySelector(".rtss-visual-canvas")?.remove();
+    if (!visualActive) return;
+    if (rtssVisualSource !== originalRtss) {
+      rtssVisualSource = originalRtss;
+      try { rtssVisual = parseRtssVisual(originalRtss); } catch { rtssVisual = null; }
+    }
+    if (!rtssVisual) return;
+    const canvas = document.createElement("div");
+    canvas.className = "rtss-visual-canvas";
+    canvas.style.width = `${rtssVisual.width}px`;
+    canvas.style.height = `${rtssVisual.height}px`;
+    canvas.style.fontFamily = `'${rtssVisual.family.replaceAll("'", "")}', Consolas, monospace`;
+    canvas.style.fontWeight = String(rtssVisual.weight);
+    const paint = (encoded, fallback) => /^[0-9a-f]{6}([0-9a-f]{2})?$/i.test(encoded)
+      ? encoded.length === 8 ? `#${encoded.slice(2)}${encoded.slice(0, 2)}` : `#${encoded}` : fallback;
+    const metrics = { "<fr>": "fps", "%framerate%": "fps", "%frametime%": "frameMs",
+      "%cpu usage%": "cpu", "%cpu temperature%": "cpuTemp", "%cpu clock%": "cpuClock",
+      "%cpu power%": "cpuPower", "%gpu1 usage%": "gpu", "%gpu1 temperature%": "gpuTemp",
+      "%gpu1 clock%": "gpuClock", "%gpu1 power%": "gpuPower",
+      "%gpu1 memory usage%": "vramUsed", "%total ram%": "ramUsed" };
+    for (const layer of rtssVisual.layers) {
+      const node = document.createElement("span");
+      node.className = "rtss-visual-layer";
+      node.style.left = `${layer.x}px`;
+      node.style.top = `${layer.y}px`;
+      node.style.width = `${layer.width}px`;
+      node.style.height = `${layer.height}px`;
+      node.style.fontSize = `${rtssVisual.cellHeight * layer.size / 100}px`;
+      node.style.color = paint(layer.color, "#fff");
+      node.style.backgroundColor = paint(layer.bg, "transparent");
+      node.textContent = layer.label.replace(/<[^>]*>|%[^%]*%/g, (tag) => {
+        const metric = metrics[tag.toLowerCase()];
+        if (!metric) return "нет данных";
+        if (tag.toLowerCase() !== "<fr>") {
+          const name = tag.slice(1, -1).toLowerCase();
+          const matching = rtssVisual.sources.filter((source) => source.name.toLowerCase() === name);
+          if (!matching.length || matching.some((source) => source.provider !== "HAL"
+            || source.id !== source.name)) return "нет данных";
+        }
+        return osd.querySelector(`[data-metric="${metric}"]`)?.textContent?.trim() || "нет данных";
+      }).replace(/\\[nrtb]/g, " ");
+      canvas.append(node);
+    }
+    osd.append(canvas);
+  }
+
   function unpackOvx(bytes) {
     const error = () => { throw new Error("Повреждённый или неподдерживаемый RTSS .ovx"); };
     const signature = (array, at) => String.fromCharCode(...array.slice(at, at + 4));
@@ -2011,7 +2104,7 @@
     const fileInput = $("#importOsdRecipeFile");
     $("#exportOsdOvx").disabled = !originalOvx;
     $("#rtssOmittedHint").textContent = rtssOmittedLayers
-      ? `RTSS: ${rtssOmittedLayers} слоёв только в оригинале` : "";
+      ? `RTSS: ${rtssOmittedLayers} слоёв без связанной метрики` : "";
     $("#importOsdRecipe").addEventListener("click", () => fileInput.click());
     fileInput.addEventListener("change", async () => {
       const file = fileInput.files?.[0];
@@ -2076,12 +2169,12 @@
           if (!sections.some(([, index]) => Number(index) < layers)) {
             throw new Error("В шаблоне нет слоёв RTSS");
           }
-          if (!chosen.size) {
-            throw new Error("Нет показателей для Yawa. Текущий оверлей не изменён");
+          if (!chosen.size && !sections.some(([, , body]) => /^Text=.+|^BgndColor=.+/mi.test(body))) {
+            throw new Error("Нет слоёв для отображения. Текущий оверлей не изменён");
           }
-          if (!window.confirm(`Это частичный импорт, не копия 1:1. ${omitted} слоёв, `
-              + "геометрия, текст, графики и картинки RTSS не переносятся. "
-              + "Заменить текущий оверлей только распознанными показателями?")) return;
+          if (!window.confirm(`Это предварительная отрисовка, не копия RTSS 1:1. ${omitted} слоёв `
+              + "без связанной метрики. Фон, текст и координаты переносятся, "
+              + "графики, сложные теги и картинки пока нет. Открыть макет?")) return;
           originalRtss = rtssBase64(bytes);
           originalOvx = isOvx ? rtssBase64(inputBytes) : "";
           rtssOmittedLayers = omitted;
@@ -2090,13 +2183,13 @@
           store.write("rtssOmittedLayers", String(omitted));
           $("#exportOsdOvx").disabled = !originalOvx;
           $("#rtssOmittedHint").textContent = omitted
-            ? `RTSS: ${omitted} слоёв только в оригинале` : "";
+            ? `RTSS: ${omitted} слоёв без связанной метрики` : "";
           gallery.querySelector('[data-recipe="rtss"]').click();
           for (const [id, entry] of sensorRows) entry.sensor.pinned = chosen.has(id);
           overlayState.metricOrder = [...chosen];
           overlayState.metricRgba = colors;
           saveOverlaySensors(); rebuildOverlaySensors(); applySensorFilter(); applyOverlay();
-          toast(`RTSS: ${omitted} слоёв только в оригинале, ${resources} ресурсов в пакете; `
+          toast(`RTSS: ${omitted} слоёв без связанной метрики, ${resources} ресурсов в пакете; `
             + (persisted ? "сохранено для обратного экспорта" : "сохранено до закрытия вкладки"));
           return;
         }

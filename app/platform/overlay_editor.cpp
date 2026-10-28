@@ -1358,7 +1358,7 @@ void OverlayEditor::paint()
         GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN));
     const auto& rtss = m_model->settings.overlay;
     const std::wstring canvasHint = rtss.rtssOmittedLayers > 0
-        ? L"RTSS: " + std::to_wstring(rtss.rtssOmittedLayers) + L" слоёв только в оригинале"
+        ? L"RTSS: " + std::to_wstring(rtss.rtssOmittedLayers) + L" слоёв без связанной метрики"
         : rtss.layout != OverlayLayout::Plates
         ? L"Строка: двигайте весь блок; порядок — в разделе «Строки»"
         : L"Колесо — зум · Ctrl — выбор · Alt — плашка · Shift — сетка";

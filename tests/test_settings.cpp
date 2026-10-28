@@ -850,6 +850,34 @@ namespace {
         CHECK(!importRtssOverlay(std::string(1048577, 'x'), settings, error));
     }
 
+    void testRtssVisualLayersPersistWithoutExternalProvider()
+    {
+        const std::string source = "[Master]\nImplementation=2\nFontFace=Unispace\nFontHeight=-7\n"
+                                   "FontWeight=700\nZoomRatio=2\n[General]\nLayers=3\nSources=1\n"
+                                   "[Source0]\nName=GPU1 usage\nProvider=Other\nID=GPU1 usage\n"
+                                   "[Layer0]\nText=GPU\nPositionX=-2\nPositionY=-4\n"
+                                   "ExtentX=-16\nExtentY=-6\nBgndColor=80000000\n"
+                                   "[Layer1]\nText=%GPU1 usage%\nPositionX=-12\nTextColor=FFFF8000\n"
+                                   "[Layer2]\nText=<FR> FPS\nExtentOrigin=2\nSize=200\n";
+        OverlaySettings imported;
+        std::string error;
+        CHECK(importRtssOverlay(source, imported, error));
+        CHECK(imported.rtssVisual && imported.rtssVisual->layers.size() == 3);
+        CHECK(imported.rtssVisual->fontFace == "Unispace" && imported.rtssVisual->zoom == 2);
+        CHECK(imported.rtssVisual->layers[0].x == -2 && imported.rtssVisual->layers[0].y == -4);
+        CHECK(imported.rtssVisual->layers[0].backgroundColor == 0x80000000u);
+        CHECK(imported.rtssVisual->layers[1].textColor == 0xFFFF8000u);
+        CHECK(imported.rtssVisual->layers[2].size == 200 && imported.rtssVisual->layers[2].origin == 2);
+        CHECK(imported.rtssVisual->availableTags.size() == 1
+            && imported.rtssVisual->availableTags[0].first == "<FR>");
+        Settings saved;
+        saved.overlay = imported;
+        Settings restored;
+        CHECK(parseSettings(serializeSettings(saved), restored, error));
+        CHECK(restored.overlay.rtssVisual && restored.overlay.rtssVisual->layers[0].x == -2);
+        CHECK(restored.overlay.rtssVisual->availableTags.size() == 1);
+    }
+
     void testRtssExternalProviderCannotImpersonateHal()
     {
         const std::string source = "[Master]\nImplementation=2\n[General]\nSources=2\nLayers=3\n"
@@ -1047,6 +1075,7 @@ void runSettingsTests()
     testKeysAreStable();
     testRecipeMigrationAndAxes();
     testRtssImportRecognizesOnlyKnownSources();
+    testRtssVisualLayersPersistWithoutExternalProvider();
     testRtssExternalProviderCannotImpersonateHal();
     testRtssExchangeKeepsOriginalAndRejectsDamage();
     testRtssExportKeepsSupportedOrderAndColor();

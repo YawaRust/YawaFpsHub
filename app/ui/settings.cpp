@@ -1022,9 +1022,19 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
         }
     }
 
+    if (target.overlay.rtssTemplate) {
+        OverlaySettings visualSettings;
+        std::string visualError;
+        if (importRtssOverlay(*target.overlay.rtssTemplate, visualSettings, visualError)) {
+            target.overlay.rtssVisual = std::move(visualSettings.rtssVisual);
+        } else {
+            target.overlay.rtssTemplate.reset();
+        }
+    }
     if (!target.overlay.rtssTemplate) {
         target.overlay.rtssOmittedLayers = 0;
         target.overlay.rtssExchange.reset();
+        target.overlay.rtssVisual.reset();
     }
     if (target.overlay.rtssExchange) {
         RtssExchange package;
@@ -1069,6 +1079,23 @@ bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::str
         std::string id;
     };
     const auto original = std::make_shared<const std::string>(text);
+    auto visual = std::make_shared<RtssVisualLayout>();
+    visual->layers.resize(256);
+    const auto coordinate = [](std::string_view value, int fallback) {
+        return std::clamp(parseInt(value, fallback), -512, 2048);
+    };
+    const auto color = [](std::string_view encoded, std::uint32_t fallback) {
+        encoded = encoded.substr(0, encoded.find(','));
+        if (encoded.size() != 6 && encoded.size() != 8) {
+            return fallback;
+        }
+        std::uint32_t parsed = 0;
+        const auto result = std::from_chars(encoded.data(), encoded.data() + encoded.size(), parsed, 16);
+        if (result.ec != std::errc { } || result.ptr != encoded.data() + encoded.size()) {
+            return fallback;
+        }
+        return encoded.size() == 6 ? parsed | 0xFF000000u : parsed;
+    };
     std::array<bool, kMetricCount> selected { };
     std::array<std::string, 256> layerTexts { };
     std::array<std::string, 256> layerColors { };
@@ -1108,6 +1135,14 @@ bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::str
         const std::string_view value = trim(line.substr(equals + 1));
         if (section == "Master" && key == "Implementation") {
             version = value == "2";
+        } else if (section == "Master" && key == "FontFace" && value.size() <= 96) {
+            visual->fontFace = value;
+        } else if (section == "Master" && key == "FontHeight") {
+            visual->fontHeight = std::clamp(std::abs(std::clamp(parseInt(value, -13), -64, 64)), 4, 64);
+        } else if (section == "Master" && key == "FontWeight") {
+            visual->fontWeight = std::clamp(parseInt(value, 400), 100, 900);
+        } else if (section == "Master" && key == "ZoomRatio") {
+            visual->zoom = std::clamp(parseInt(value, 1), 1, 8);
         } else if (section == "General" && key == "Layers") {
             layers = parseInt(value, -1);
             validLayers = layers >= 1 && layers <= 256 && std::to_string(layers) == value;
@@ -1130,14 +1165,39 @@ bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::str
             } else if (key == "ID") {
                 source.id = value;
             }
-        } else if (section.size() > 5 && section.substr(0, 5) == "Layer"
-            && (key == "Text" || key == "TextColor")) {
+        } else if (section.size() > 5 && section.substr(0, 5) == "Layer") {
             const std::string_view layerNumber = std::string_view(section).substr(5);
             const int index = parseInt(layerNumber, -1);
             if (index < 0 || index >= 256 || std::to_string(index) != layerNumber) {
                 continue;
             }
-            (key == "Text" ? layerTexts : layerColors)[static_cast<std::size_t>(index)] = value;
+            RtssVisualLayer& layer = visual->layers[static_cast<std::size_t>(index)];
+            if (key == "Text") {
+                layerTexts[static_cast<std::size_t>(index)] = value;
+                if (value.size() <= 8192) {
+                    layer.text = value;
+                }
+            } else if (key == "TextColor") {
+                layerColors[static_cast<std::size_t>(index)] = value;
+                layer.textColor = color(value, 0xFFFFFFFFu);
+            } else if (key == "BgndColor") {
+                layer.backgroundColor = color(value, 0);
+                layer.hasBackground = true;
+            } else if (key == "VisibilitySource" && value.size() <= 256) {
+                layer.visibilitySource = value;
+            } else if (key == "PositionX") {
+                layer.x = coordinate(value, 0);
+            } else if (key == "PositionY") {
+                layer.y = coordinate(value, 0);
+            } else if (key == "ExtentX") {
+                layer.width = coordinate(value, 0);
+            } else if (key == "ExtentY") {
+                layer.height = coordinate(value, 0);
+            } else if (key == "ExtentOrigin") {
+                layer.origin = std::clamp(parseInt(value, 0), 0, 8);
+            } else if (key == "Size") {
+                layer.size = std::clamp(parseInt(value, 100), 10, 400);
+            }
         }
     }
     if (!version || !validLayers
@@ -1146,6 +1206,7 @@ bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::str
         error = "Неподдерживаемый шаблон RTSS OverlayEditor";
         return false;
     }
+    visual->layers.resize(static_cast<std::size_t>(layers));
     const auto availableSource = [&](const RtssMetric& metric) {
         if (metric.source.empty()) {
             return true; // <FR> выдаёт сам RTSS, не [SourceN].
@@ -1164,6 +1225,11 @@ bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::str
         }
         return found;
     };
+    for (const RtssMetric& metric : kRtssMetrics) {
+        if (availableSource(metric)) {
+            visual->availableTags.emplace_back(metric.tag, metric.id);
+        }
+    }
     for (int index = 0; index < layers; ++index) {
         std::string lowered = layerTexts[static_cast<std::size_t>(index)];
         std::transform(lowered.begin(), lowered.end(), lowered.begin(),
@@ -1200,6 +1266,7 @@ bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::str
     imported.metricRgba = colors;
     imported.rtssTemplate = original;
     imported.rtssExchange.reset();
+    imported.rtssVisual = std::move(visual);
     imported.rtssOmittedLayers = omitted;
     imported.rtssResources = 0;
     std::array<bool, kMetricCount> placed { };

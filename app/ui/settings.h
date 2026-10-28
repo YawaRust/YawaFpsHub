@@ -8,6 +8,8 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace yawa {
 
@@ -69,6 +71,31 @@ struct CaptureSettings
     int targetHz = 60;
     // Авто: цель кадра берётся из герцовки монитора, определённой при запуске.
     bool targetAuto = true;
+};
+
+struct RtssVisualLayer
+{
+    std::string text;
+    std::string visibilitySource;
+    int x = 0;
+    int y = 0;
+    int width = 0;
+    int height = 0;
+    int origin = 0;
+    int size = 100;
+    std::uint32_t textColor = 0xFFFFFFFFu;
+    std::uint32_t backgroundColor = 0;
+    bool hasBackground = false;
+};
+
+struct RtssVisualLayout
+{
+    std::string fontFace;
+    int fontHeight = 13;
+    int fontWeight = 400;
+    int zoom = 1;
+    std::vector<RtssVisualLayer> layers;
+    std::vector<std::pair<std::string, MetricId>> availableTags;
 };
 
 struct OverlaySettings
@@ -158,6 +185,7 @@ struct OverlaySettings
     // Исходный импортированный OVL хранится отдельно от редактируемых строк Yawa.
     std::shared_ptr<const std::string> rtssTemplate;
     std::shared_ptr<const std::string> rtssExchange;
+    std::shared_ptr<const RtssVisualLayout> rtssVisual;
     int rtssOmittedLayers = 0;
     int rtssResources = 0;
 };
