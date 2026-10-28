@@ -75,8 +75,9 @@ def main() -> None:
         invalid_html = Path(directory) / "invalid.html"
         invoke(args.exe, [f"--report={broken}", f"--html={invalid_html}"], 1, "Report:")
         assert not invalid_html.exists()
-        invoke(args.exe, [f"--report={package}", "--json", f"--html={invalid_html}"],
-               2, "Usage:")
+        assert json.loads(invoke(args.exe,
+                                 [f"--report={package}", "--json", f"--html={invalid_html}"],
+                                 2, '"error":"usage"')) == {"error": "usage"}
         assert not invalid_html.exists()
         invoke(args.exe, f"--report={Path(directory) / 'missing.yawa'}", 1, "cannot open")
         invoke(args.exe, r"--report=\\server\share\report.yawa", 1, "network paths")
