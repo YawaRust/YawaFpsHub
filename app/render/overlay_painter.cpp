@@ -1807,17 +1807,17 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
                 spec.height, static_cast<float>((row.y >= 0 ? row.y : 12 + static_cast<int>(i) * 28) + 30));
         }
     }
-    if (settings.layout == OverlayLayout::Plates) {
-        if (settings.backgroundWidthPx >= 80)
-            spec.width = static_cast<float>(settings.backgroundWidthPx);
-        if (settings.backgroundHeightPx >= 40)
-            spec.height = static_cast<float>(settings.backgroundHeightPx);
-    }
     const bool hasSparkline = settings.showSparkline && text.sparklineHistory.size() >= 2
         && std::all_of(text.sparklineHistory.begin(), text.sparklineHistory.end(),
             [](float value) { return std::isfinite(value) && value >= 0.0f; });
     if (hasSparkline) {
         spec.height += 30.0f;
+    }
+    if (settings.layout == OverlayLayout::Plates) {
+        if (settings.backgroundWidthPx >= 80)
+            spec.width = static_cast<float>(settings.backgroundWidthPx);
+        if (settings.backgroundHeightPx >= 40)
+            spec.height = static_cast<float>(settings.backgroundHeightPx);
     }
     const float width = spec.width * scale;
     const float height = spec.height * scale;
