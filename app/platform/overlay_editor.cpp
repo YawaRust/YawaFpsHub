@@ -2131,7 +2131,7 @@ void OverlayEditor::paint()
             Rect { 32.0f, m_inspector.top + 119.0f, 205.0f, m_inspector.top + 137.0f }, TextRole::Tiny,
             theme.textDim);
         for (const auto& [left, label] : std::array<std::pair<float, std::wstring_view>, 3> {
-                 { 230.0f, L"−" }, { 278.0f, L"+" }, { 326.0f, L"100 %" } }) {
+                 { { 230.0f, L"−" }, { 278.0f, L"+" }, { 326.0f, L"100 %" } } }) {
             const Rect button { left, m_inspector.top + 118.0f, left + (left > 320.0f ? 72.0f : 42.0f),
                 m_inspector.top + 136.0f };
             m_renderer.fillRoundRect(button, 4.0f, theme.panelSoft);
