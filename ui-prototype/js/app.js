@@ -389,6 +389,11 @@
     const edit = overlayState.rtssLayerEdits[index] || {};
     $("#osdRtssName").textContent = `RTSS · ${layer?.name || `слой ${index}`}`;
     $("#osdRtssCoordinates").textContent = `X: ${edit.x || 0} px · Y: ${edit.y || 0} px`;
+    $("#osdRtssText").value = edit.text ?? layer?.label ?? "";
+    const argb = edit.textColor ?? layer?.color ?? "FFFFFFFF";
+    $("#osdRtssColor").value = /^([0-9a-f]{8})$/i.test(argb)
+      ? `#${argb.slice(2)}${argb.slice(0, 2)}` : "#FFFFFFFF";
+    $("#osdRtssSize").value = String(edit.size || layer?.size || 100);
     $("[data-rtss-action=visible]").textContent = edit.visible === false ? "Показать" : "Скрыть";
   }
 
@@ -486,12 +491,42 @@
       const step = event.shiftKey ? 10 : 1;
       const x = action === "reset" ? 0 : (edit.x || 0) + (action === "left" ? -step : action === "right" ? step : 0);
       const y = action === "reset" ? 0 : (edit.y || 0) + (action === "up" ? -step : action === "down" ? step : 0);
-      overlayState.rtssLayerEdits[index] = { ...edit, x: Math.max(-2048, Math.min(2048, x)),
+      const next = { ...edit, x: Math.max(-2048, Math.min(2048, x)),
         y: Math.max(-2048, Math.min(2048, y)),
         visible: action === "visible" ? edit.visible === false : edit.visible !== false };
+      if (action === "reset") {
+        delete next.text;
+        delete next.textColor;
+        delete next.size;
+      }
+      overlayState.rtssLayerEdits[index] = next;
       store.write("rtssLayerEdits", JSON.stringify(overlayState.rtssLayerEdits));
       applyOverlay();
       renderOverlayLayers();
+    });
+    const updateRtss = (patch) => {
+      if (!selectedLayer.startsWith("rtss:")) return;
+      const index = Number(selectedLayer.slice(5));
+      overlayState.rtssLayerEdits[index] = { ...overlayState.rtssLayerEdits[index], ...patch };
+      store.write("rtssLayerEdits", JSON.stringify(overlayState.rtssLayerEdits));
+      applyOverlay();
+    };
+    $("#osdRtssText").addEventListener("input", (event) => updateRtss({ text: event.target.value }));
+    $("#osdRtssColor").addEventListener("change", (event) => {
+      const hex = event.target.value.trim();
+      if (!/^#[0-9a-f]{8}$/i.test(hex)) {
+        refreshRtssInspector();
+        return;
+      }
+      updateRtss({ textColor: `${hex.slice(7)}${hex.slice(1, 7)}`.toUpperCase() });
+    });
+    $("#osdRtssSize").addEventListener("change", (event) => {
+      const size = Number(event.target.value);
+      if (!Number.isInteger(size) || size < 10 || size > 400) {
+        refreshRtssInspector();
+        return;
+      }
+      updateRtss({ size });
     });
     const hexInput = $("#osdLayerHex");
     $("#osdColorTarget").addEventListener("change", (event) => {
@@ -2110,10 +2145,14 @@
       (layer) => overlayState.rtssLayerEdits[layer.index]?.visible !== false);
     const canvas = document.createElement("div");
     canvas.className = "rtss-visual-canvas";
+    const layerWidth = (layer) => Math.max(layer.width,
+      (overlayState.rtssLayerEdits[layer.index]?.text ?? layer.label).length * rtssVisual.cellHeight * .61);
     canvas.style.width = `${Math.max(1, ...visibleLayers.map((layer) =>
-      layer.x + layer.width + (overlayState.rtssLayerEdits[layer.index]?.x || 0) * rtssVisual.zoom))}px`;
+      layer.x + layerWidth(layer) + (overlayState.rtssLayerEdits[layer.index]?.x || 0) * rtssVisual.zoom))}px`;
     canvas.style.height = `${Math.max(1, ...visibleLayers.map((layer) =>
-      layer.y + layer.height + (overlayState.rtssLayerEdits[layer.index]?.y || 0) * rtssVisual.zoom))}px`;
+      layer.y + Math.max(layer.height, rtssVisual.cellHeight *
+        (overlayState.rtssLayerEdits[layer.index]?.size || layer.size) / 100) +
+        (overlayState.rtssLayerEdits[layer.index]?.y || 0) * rtssVisual.zoom))}px`;
     canvas.style.fontFamily = `'${rtssVisual.family.replaceAll("'", "")}', Consolas, monospace`;
     canvas.style.fontWeight = String(rtssVisual.weight);
     const paint = (encoded, fallback) => /^[0-9a-f]{6}([0-9a-f]{2})?$/i.test(encoded)
@@ -2130,12 +2169,13 @@
       node.dataset.rtssLayer = String(layer.index);
       node.style.left = `${layer.x + (edit.x || 0) * rtssVisual.zoom}px`;
       node.style.top = `${layer.y + (edit.y || 0) * rtssVisual.zoom}px`;
-      node.style.width = `${layer.width}px`;
-      node.style.height = `${layer.height}px`;
-      node.style.fontSize = `${rtssVisual.cellHeight * layer.size / 100}px`;
-      node.style.color = paint(layer.color, "#fff");
+      node.style.width = `${layerWidth(layer)}px`;
+      node.style.height = `${Math.max(layer.height, rtssVisual.cellHeight * (edit.size || layer.size) / 100)}px`;
+      node.style.fontSize = `${rtssVisual.cellHeight * (edit.size || layer.size) / 100}px`;
+      node.style.color = paint(edit.textColor ?? layer.color, "#fff");
       node.style.backgroundColor = paint(layer.bg, "transparent");
-      node.textContent = layer.label.replace(/<[^>]*>|%[^%]*%/g, (tag) => {
+      const source = edit.text ?? layer.label;
+      node.textContent = source.replace(/<[^>]*>|%[^%]*%/g, (tag) => {
         const metric = metrics[tag.toLowerCase()];
         if (!metric) return "нет данных";
         if (tag.toLowerCase() !== "<fr>") {
@@ -2146,7 +2186,7 @@
         }
         return osd.querySelector(`[data-metric="${metric}"]`)?.textContent?.trim() || "нет данных";
       }).replace(/\\[nrtb]/g, " ");
-      const graph = layer.label.match(/^<G=(Frametime|Framerate 1% Low),.*,(80|81)>$/);
+      const graph = source.match(/^<G=(Frametime|Framerate 1% Low),.*,(80|81)>$/);
       if (graph) {
         const history = lastSnapshot?.sensors.get(graph[1] === "Frametime" ? "frameMs" : "fpsLow1")?.history
           ?.slice(-32);
@@ -2163,7 +2203,7 @@
             graph[2] === "81" ? "polygon" : "polyline");
           shape.setAttribute("points", graph[2] === "81"
             ? `0,${layer.height} ${points} ${layer.width},${layer.height}` : points);
-          shape.setAttribute(graph[2] === "81" ? "fill" : "stroke", paint(layer.color, "#fff"));
+          shape.setAttribute(graph[2] === "81" ? "fill" : "stroke", paint(edit.textColor ?? layer.color, "#fff"));
           if (graph[2] === "80") shape.setAttribute("fill", "none");
           svg.append(shape);
           node.replaceChildren(svg);

@@ -354,12 +354,16 @@ void OverlayEditor::layout()
     const float y = m_inspector.top;
     const auto px
         = [this](float coordinate) { return static_cast<int>(std::lround(coordinate * m_dpiScale)); };
-    SetWindowPos(m_labelEdit, nullptr, px(112), px(y + 44), px(390), px(26), SWP_NOZORDER | SWP_NOACTIVATE);
+    const bool rtss = m_rtssSelected >= 0 && static_cast<std::size_t>(m_rtssSelected) < rtssLayerCount();
+    SetWindowPos(m_labelEdit, nullptr, px(112), px(y + (rtss ? 40 : 44)), px(390), px(26),
+        SWP_NOZORDER | SWP_NOACTIVATE);
     SetWindowPos(m_labelX, nullptr, px(106), px(y + 92), px(58), px(26), SWP_NOZORDER | SWP_NOACTIVATE);
     SetWindowPos(m_valueX, nullptr, px(275), px(y + 92), px(58), px(26), SWP_NOZORDER | SWP_NOACTIVATE);
-    SetWindowPos(m_y, nullptr, px(408), px(y + 92), px(58), px(26), SWP_NOZORDER | SWP_NOACTIVATE);
+    SetWindowPos(
+        m_y, nullptr, px(408), px(y + (rtss ? 72 : 92)), px(58), px(26), SWP_NOZORDER | SWP_NOACTIVATE);
     SetWindowPos(m_alphaEdit, nullptr, px(472), px(y + 139), px(42), px(24), SWP_NOZORDER | SWP_NOACTIVATE);
-    SetWindowPos(m_hexEdit, nullptr, px(112), px(y + 72), px(138), px(20), SWP_NOZORDER | SWP_NOACTIVATE);
+    SetWindowPos(
+        m_hexEdit, nullptr, px(112), px(y + 72), px(138), px(rtss ? 26 : 20), SWP_NOZORDER | SWP_NOACTIVATE);
     SetWindowPos(
         m_catalogSearch, nullptr, px(width - 380), px(16), px(256), px(26), SWP_NOZORDER | SWP_NOACTIVATE);
 }
@@ -370,10 +374,26 @@ void OverlayEditor::syncFields()
         return;
     }
     const bool isRtss = m_rtssSelected >= 0 && static_cast<std::size_t>(m_rtssSelected) < rtssLayerCount();
-    for (HWND field : { m_labelEdit, m_labelX, m_valueX, m_y, m_alphaEdit, m_hexEdit }) {
+    for (HWND field : { m_labelX, m_valueX, m_alphaEdit }) {
         ShowWindow(field, isRtss ? SW_HIDE : SW_SHOW);
     }
+    for (HWND field : { m_labelEdit, m_y, m_hexEdit }) {
+        ShowWindow(field, SW_SHOW);
+    }
+    SendMessageW(m_labelEdit, EM_SETLIMITTEXT, isRtss ? 256 : 64, 0);
+    layout();
     if (isRtss) {
+        const auto index = static_cast<std::size_t>(m_rtssSelected);
+        const auto& edit = m_model->settings.overlay.rtssLayerEdits[index];
+        const auto& layer = m_model->settings.overlay.rtssVisual->layers[index];
+        m_syncing = true;
+        const std::wstring source = edit.text ? widen(*edit.text) : rtssLayerName(layer.text);
+        input(m_labelEdit, source.c_str());
+        const std::uint32_t color = edit.textColor.value_or(layer.textColor);
+        const std::wstring hex = widen(overlayRgbaHex((color << 8) | (color >> 24)));
+        input(m_hexEdit, hex.c_str());
+        input(m_y, std::to_wstring(edit.size == 0 ? layer.size : edit.size).c_str());
+        m_syncing = false;
         return;
     }
     const OverlaySettings& settings = m_model->settings.overlay;
@@ -931,9 +951,43 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
     }
     case WM_COMMAND: {
         const HWND field = reinterpret_cast<HWND>(lParam);
-        if (m_rtssSelected >= 0
+        if (m_rtssSelected >= 0 && static_cast<std::size_t>(m_rtssSelected) < rtssLayerCount()
             && (field == m_labelEdit || field == m_labelX || field == m_valueX || field == m_y
                 || field == m_alphaEdit || field == m_hexEdit)) {
+            auto& edit = m_model->settings.overlay.rtssLayerEdits[static_cast<std::size_t>(m_rtssSelected)];
+            if (field == m_labelEdit && HIWORD(wParam) == EN_CHANGE && !m_syncing) {
+                wchar_t buffer[257] { };
+                GetWindowTextW(field, buffer, 257);
+                edit.text = narrow(buffer);
+                changed(false);
+            } else if (field == m_labelEdit && HIWORD(wParam) == EN_KILLFOCUS && !m_syncing) {
+                changed(true);
+            } else if (field == m_hexEdit && HIWORD(wParam) == EN_KILLFOCUS && !m_syncing) {
+                wchar_t buffer[16] { };
+                GetWindowTextW(field, buffer, 16);
+                std::uint32_t rgba = 0;
+                if (parseOverlayRgba(narrow(buffer), rgba)) {
+                    edit.textColor = (rgba >> 8) | (rgba << 24);
+                    changed(true);
+                } else {
+                    MessageBoxW(m_window, L"Введите цвет в формате #RRGGBBAA.", L"Неверный цвет RGBA",
+                        MB_OK | MB_ICONWARNING);
+                }
+                syncFields();
+            } else if (field == m_y && HIWORD(wParam) == EN_KILLFOCUS && !m_syncing) {
+                wchar_t buffer[16] { };
+                GetWindowTextW(field, buffer, 16);
+                wchar_t* end = nullptr;
+                const long size = std::wcstol(buffer, &end, 10);
+                if (end != buffer && *end == L'\0' && size >= 10 && size <= 400) {
+                    edit.size = static_cast<int>(size);
+                    changed(true);
+                } else {
+                    MessageBoxW(m_window, L"Размер шрифта RTSS: от 10 до 400 %.", L"Неверный размер",
+                        MB_OK | MB_ICONWARNING);
+                }
+                syncFields();
+            }
             return 0;
         }
         if (field == m_catalogSearch && HIWORD(wParam) == EN_CHANGE) {
@@ -1174,9 +1228,13 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
                         edit.visible = !edit.visible;
                     } else {
                         edit.x = edit.y = 0;
+                        edit.text.reset();
+                        edit.textColor.reset();
+                        edit.size = 0;
+                        syncFields();
                     }
                     changed(true);
-                } else if (localY >= 112 && localY <= 148 && localX >= 12 && localX < 405) {
+                } else if (localY >= 132 && localY <= 166 && localX >= 12 && localX < 405) {
                     const int direction = (localX - 12) / 98;
                     const int step = GetKeyState(VK_SHIFT) < 0 ? 10 : 1;
                     edit.x = std::clamp(edit.x
@@ -1805,22 +1863,27 @@ void OverlayEditor::paint()
         m_renderer.text(clipText(m_renderer, L"RTSS · " + name, TextRole::Heading, 280.0f),
             Rect { 32.0f, m_inspector.top + 7.0f, 316.0f, m_inspector.top + 34.0f }, TextRole::Heading,
             theme.text);
-        m_renderer.text(L"Сбросить сдвиг",
+        m_renderer.text(L"Сбросить правки",
             Rect { 318.0f, m_inspector.top + 9.0f, 425.0f, m_inspector.top + 32.0f }, TextRole::Tiny,
             theme.accent);
         m_renderer.text(edit.visible ? L"Скрыть" : L"Показать",
             Rect { 434.0f, m_inspector.top + 9.0f, 508.0f, m_inspector.top + 32.0f }, TextRole::Tiny,
             theme.warn);
-        m_renderer.text(L"X: " + std::to_wstring(edit.x) + L" px     Y: " + std::to_wstring(edit.y) + L" px",
-            Rect { 32.0f, m_inspector.top + 48.0f, 400.0f, m_inspector.top + 76.0f }, TextRole::Small,
+        m_renderer.text(L"Текст", Rect { 32.0f, m_inspector.top + 43.0f, 110.0f, m_inspector.top + 68.0f },
+            TextRole::Small, theme.text);
+        m_renderer.text(L"Цвет", Rect { 32.0f, m_inspector.top + 76.0f, 110.0f, m_inspector.top + 98.0f },
+            TextRole::Small, theme.text);
+        m_renderer.text(L"Размер %",
+            Rect { 310.0f, m_inspector.top + 76.0f, 405.0f, m_inspector.top + 98.0f }, TextRole::Small,
             theme.text);
-        m_renderer.text(L"Позиция изменяет только вид в Yawa; исходный пакет RTSS не меняется.",
-            Rect { 32.0f, m_inspector.top + 78.0f, 506.0f, m_inspector.top + 103.0f }, TextRole::Tiny,
+        m_renderer.text(L"X: " + std::to_wstring(edit.x) + L" px     Y: " + std::to_wstring(edit.y)
+                + L" px · правки только для Yawa",
+            Rect { 32.0f, m_inspector.top + 105.0f, 506.0f, m_inspector.top + 130.0f }, TextRole::Tiny,
             theme.textDim);
         const std::array<std::wstring_view, 4> directions { L"←", L"→", L"↑", L"↓" };
         for (int direction = 0; direction < 4; ++direction) {
             const float left = 32.0f + static_cast<float>(direction) * 98.0f;
-            const Rect button { left, m_inspector.top + 112.0f, left + 92.0f, m_inspector.top + 148.0f };
+            const Rect button { left, m_inspector.top + 132.0f, left + 92.0f, m_inspector.top + 166.0f };
             m_renderer.fillRoundRect(button, 6.0f, theme.panelSoft);
             m_renderer.text(directions[static_cast<std::size_t>(direction)], button, TextRole::Small,
                 theme.accent, TextAlign::Center);

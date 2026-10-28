@@ -1023,7 +1023,8 @@ namespace {
         return value;
     }
 
-    std::wstring rtssText(const RtssVisualLayout& layout, std::string_view source, const OverlayText& values)
+    std::wstring rtssText(
+        const RtssVisualLayout& layout, std::string_view source, const OverlayText& values, bool utf8 = false)
     {
         std::wstring result;
         for (std::size_t at = 0; at < source.size() && result.size() < 8192;) {
@@ -1070,7 +1071,7 @@ namespace {
                 && static_cast<unsigned char>(source[end]) >= 32) {
                 ++end;
             }
-            result += rtssWide(source.substr(at, end - at));
+            result += utf8 ? wideLabel(source.substr(at, end - at)) : rtssWide(source.substr(at, end - at));
             at = end;
         }
         return result;
@@ -1105,13 +1106,15 @@ namespace {
         for (std::size_t index = 0; index < layout.layers.size(); ++index) {
             const RtssVisualLayer& layer = layout.layers[index];
             const RtssLayerEdit& edit = settings.rtssLayerEdits[index];
-            std::wstring text = rtssText(layout, layer.text, values);
+            const std::string_view source
+                = edit.text ? std::string_view(*edit.text) : std::string_view(layer.text);
+            std::wstring text = rtssText(layout, source, values, edit.text.has_value());
             int graph = -1;
-            const bool fillGraph = layer.text.ends_with(",81>");
-            if (layer.text.ends_with(",80>") || fillGraph) {
-                if (layer.text.starts_with("<G=Frametime,")) {
+            const bool fillGraph = source.ends_with(",81>");
+            if (source.ends_with(",80>") || fillGraph) {
+                if (source.starts_with("<G=Frametime,")) {
                     graph = 0;
-                } else if (layer.text.starts_with("<G=Framerate 1% Low,")) {
+                } else if (source.starts_with("<G=Framerate 1% Low,")) {
                     graph = 1;
                 }
             }
@@ -1129,15 +1132,18 @@ namespace {
                 placed.push_back({ });
                 continue;
             }
-            const float nominalWidth = layer.width == 0
-                ? std::max(static_cast<float>(text.size()) * cellWidth, cellWidth)
-                : units(layer.width, false);
-            // Не обрезаем «нет данных» до одного символа у узких RTSS-слоёв.
-            const float width = text.find(L"нет данных") != std::wstring::npos
-                ? std::max(nominalWidth, static_cast<float>(text.size()) * cellWidth)
+            const int size = edit.size == 0 ? layer.size : edit.size;
+            const float textWidth = static_cast<float>(text.size()) * cellWidth * size / 100.0f;
+            const float nominalWidth
+                = layer.width == 0 ? std::max(textWidth, cellWidth) : units(layer.width, false);
+            // Не обрезаем «нет данных» или текст, явно изменённый пользователем.
+            const float width = text.find(L"нет данных") != std::wstring::npos || edit.text || edit.size != 0
+                ? std::max(nominalWidth, textWidth)
                 : nominalWidth;
+            const float nominalHeight
+                = layer.height == 0 ? cellHeight * size / 100.0f : units(layer.height, true);
             const float height
-                = layer.height == 0 ? cellHeight * layer.size / 100.0f : units(layer.height, true);
+                = edit.size != 0 ? std::max(nominalHeight, cellHeight * size / 100.0f) : nominalHeight;
             float x = units(layer.x, false) + static_cast<float>(edit.x) * zoom;
             float y = units(layer.y, true) + static_cast<float>(edit.y) * zoom;
             x -= width * static_cast<float>(layer.origin % 3) / 2.0f;
@@ -1179,6 +1185,9 @@ namespace {
         const float opacity = static_cast<float>(std::clamp(settings.opacityPercent, 0, 100)) / 100.0f;
         for (std::size_t index = 0; index < layout.layers.size(); ++index) {
             const RtssVisualLayer& layer = layout.layers[index];
+            const RtssLayerEdit& edit = settings.rtssLayerEdits[index];
+            const std::uint32_t color = edit.textColor.value_or(layer.textColor);
+            const int textSize = edit.size == 0 ? layer.size : edit.size;
             const RtssPlacement& placement = placed[index];
             if (placement.rect.right <= placement.rect.left) {
                 continue;
@@ -1203,7 +1212,7 @@ namespace {
                 const auto highest = std::max_element(history.begin(), history.end());
                 const float ceiling = std::max(placement.graph == 0 ? 33.0f : 1.0f, *highest);
                 ID2D1SolidColorBrush* brush = nullptr;
-                if (SUCCEEDED(target->CreateSolidColorBrush(toD2D(fromRgba(layer.textColor), opacity), &brush))) {
+                if (SUCCEEDED(target->CreateSolidColorBrush(toD2D(fromRgba(color), opacity), &brush))) {
                     const auto point = [&](std::size_t sample) {
                         const float x = rect.left + (rect.right - rect.left)
                             * static_cast<float>(sample) / static_cast<float>(history.size() - 1);
@@ -1227,9 +1236,9 @@ namespace {
             if (placement.text.empty()) {
                 continue;
             }
-            IDWriteTextFormat*& format = fonts[static_cast<std::size_t>(layer.size)];
+            IDWriteTextFormat*& format = fonts[static_cast<std::size_t>(textSize)];
             if (format == nullptr) {
-                const float size = cellHeight * static_cast<float>(layer.size) / 100.0f;
+                const float size = cellHeight * static_cast<float>(textSize) / 100.0f;
                 if (FAILED(formats.factory->CreateTextFormat(family.c_str(), nullptr,
                         static_cast<DWRITE_FONT_WEIGHT>(layout.fontWeight), DWRITE_FONT_STYLE_NORMAL,
                         DWRITE_FONT_STRETCH_NORMAL, size, L"ru-RU", &format))) {
@@ -1238,7 +1247,7 @@ namespace {
                 format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
             }
             ID2D1SolidColorBrush* brush = nullptr;
-            if (SUCCEEDED(target->CreateSolidColorBrush(toD2D(fromRgba(layer.textColor), opacity), &brush))) {
+            if (SUCCEEDED(target->CreateSolidColorBrush(toD2D(fromRgba(color), opacity), &brush))) {
                 target->DrawTextW(placement.text.data(), static_cast<UINT32>(placement.text.size()), format,
                     D2D1::RectF(rect.left, rect.top, std::max(rect.right, rect.left + cellWidth),
                         std::max(rect.bottom, rect.top + cellHeight)),

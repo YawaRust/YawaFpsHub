@@ -702,6 +702,12 @@
               </div>
               <div class="workshop-color" id="osdRtssInspector" hidden>
                 <strong id="osdRtssName"></strong>
+                <label for="osdRtssText">Текст слоя</label>
+                <input id="osdRtssText" type="text" maxlength="256" spellcheck="false" aria-label="Текст RTSS-слоя">
+                <label for="osdRtssColor">Цвет текста · #RRGGBBAA</label>
+                <input id="osdRtssColor" type="text" maxlength="9" spellcheck="false" aria-label="Цвет текста RTSS-слоя">
+                <label for="osdRtssSize">Размер шрифта, % (10–400)</label>
+                <input id="osdRtssSize" type="number" min="10" max="400" step="1" aria-label="Размер текста RTSS-слоя">
                 <span id="osdRtssCoordinates"></span>
                 <div>
                   <button class="btn btn--ghost" type="button" data-rtss-action="left" aria-label="Влево">←</button>
@@ -710,7 +716,7 @@
                   <button class="btn btn--ghost" type="button" data-rtss-action="down" aria-label="Вниз">↓</button>
                 </div>
                 <div>
-                  <button class="btn btn--ghost" type="button" data-rtss-action="reset">Сбросить сдвиг</button>
+                  <button class="btn btn--ghost" type="button" data-rtss-action="reset">Сбросить правки</button>
                   <button class="btn btn--ghost" type="button" data-rtss-action="visible">Скрыть</button>
                 </div>
                 <small>Изменяется вид в Yawa; исходный пакет RTSS не меняется.</small>

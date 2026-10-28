@@ -110,6 +110,10 @@ struct RtssLayerEdit
     int x = 0;
     int y = 0;
     bool visible = true;
+    // Локальные правки вида: оригинальный .ovl/.ovx остаётся нетронутым.
+    std::optional<std::string> text; // UTF-8; исходный RTSS-текст кодируется отдельно (CP1251).
+    std::optional<std::uint32_t> textColor; // AARRGGBB, как в RTSS.
+    int size = 0; // 0 — исходный размер; иначе 10…400 %.
 };
 
 struct OverlaySettings

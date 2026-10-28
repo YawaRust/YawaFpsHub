@@ -1018,7 +1018,33 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                 const int visible = parseInt(trim(value.substr(second + 1)), -1);
                 if (x >= -2048 && x <= 2048 && y >= -2048 && y <= 2048
                     && (visible == 0 || visible == 1)) {
-                    target.overlay.rtssLayerEdits[static_cast<std::size_t>(index)] = { x, y, visible == 1 };
+                    auto& edit = target.overlay.rtssLayerEdits[static_cast<std::size_t>(index)];
+                    edit.x = x;
+                    edit.y = y;
+                    edit.visible = visible == 1;
+                }
+            }
+        } else if (section == "rtss_layer_text" || section == "rtss_layer_color"
+            || section == "rtss_layer_size") {
+            const int index = parseInt(key, -1);
+            if (index >= 0 && index < 256 && std::to_string(index) == key) {
+                auto& edit = target.overlay.rtssLayerEdits[static_cast<std::size_t>(index)];
+                if (section == "rtss_layer_text" && value.size() <= 2 * 8192 && value.size() % 2 == 0) {
+                    const std::string decoded = hexDecode(value, 8192);
+                    if (value.empty() || !decoded.empty()) {
+                        edit.text = decoded;
+                    }
+                } else if (section == "rtss_layer_color" && value.size() == 8) {
+                    std::uint32_t color = 0;
+                    const auto parsed = std::from_chars(value.data(), value.data() + value.size(), color, 16);
+                    if (parsed.ec == std::errc { } && parsed.ptr == value.data() + value.size()) {
+                        edit.textColor = color;
+                    }
+                } else if (section == "rtss_layer_size") {
+                    const int size = parseInt(value, 0);
+                    if (size >= 10 && size <= 400) {
+                        edit.size = size;
+                    }
                 }
             }
         } else if (section == "hotkeys") {
@@ -1632,6 +1658,38 @@ std::string serializeSettings(const Settings& settings)
             }
         }
         text += "\n";
+    }
+    for (std::string_view section : { "rtss_layer_text", "rtss_layer_color", "rtss_layer_size" }) {
+        bool header = false;
+        for (std::size_t index = 0; index < settings.overlay.rtssLayerEdits.size(); ++index) {
+            const auto& edit = settings.overlay.rtssLayerEdits[index];
+            std::string value;
+            bool hasValue = false;
+            if (section == "rtss_layer_text" && edit.text && edit.text->size() <= 8192) {
+                value = hexEncode(*edit.text);
+                hasValue = true;
+            } else if (section == "rtss_layer_color" && edit.textColor) {
+                constexpr char digits[] = "0123456789ABCDEF";
+                for (int shift = 28; shift >= 0; shift -= 4) {
+                    value += digits[(*edit.textColor >> shift) & 15];
+                }
+                hasValue = true;
+            } else if (section == "rtss_layer_size" && edit.size >= 10 && edit.size <= 400) {
+                value = std::to_string(edit.size);
+                hasValue = true;
+            }
+            if (!hasValue) {
+                continue;
+            }
+            if (!header) {
+                text += "[" + std::string(section) + "]\n";
+                header = true;
+            }
+            text += std::to_string(index) + " = " + value + "\n";
+        }
+        if (header) {
+            text += "\n";
+        }
     }
     text += "[hotkeys]\n";
     text += "overlay = " + std::to_string(settings.hotkeys.overlay) + "\n";
