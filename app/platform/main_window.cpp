@@ -332,6 +332,25 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
             m_overlayEditor.refresh();
             InvalidateRect(m_window, nullptr, FALSE);
         });
+        m_overlay.setBackgroundEditHandler(
+            [this](int width, int height, int originX, int originY, bool finished) {
+                {
+                    std::lock_guard<std::mutex> guard(m_modelMutex);
+                    auto& overlay = m_model.settings.overlay;
+                    overlay.backgroundWidthPx = width;
+                    overlay.backgroundHeightPx = height;
+                    overlay.anchorMode = OverlayAnchorMode::Free;
+                    overlay.originX = originX;
+                    overlay.originY = originY;
+                    overlay.offsetX = overlay.offsetY = 0;
+                }
+                if (finished) {
+                    rememberOverlayMonitor(m_model.settings.overlay, overlayVirtualScreen());
+                    saveSettings();
+                }
+                m_overlayEditor.refresh();
+                InvalidateRect(m_window, nullptr, FALSE);
+            });
         m_overlay.setLayerEditHandler([this](std::size_t index, int x, int y, bool finished) {
             if (index >= m_model.settings.overlay.rtssLayerEdits.size()) {
                 return;

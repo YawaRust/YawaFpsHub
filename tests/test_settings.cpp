@@ -417,6 +417,9 @@ namespace {
         const CanvasAxis workspaceX { 184.0f, workspace.panX, workspace.zoom * 1115.0f / 1920.0f };
         CHECK(workspaceX.toCanvas(550.0f) - workspaceX.toCanvas(100.0f) > 1000.0f);
         CHECK(std::abs(workspaceX.toScreen(workspaceX.toCanvas(325.0f)) - 325.0f) < 0.01f);
+        CHECK(alignCanvasEdge(10.0f, 90.0f, 40.0f, 70.0f, 0) == -30.0f);
+        CHECK(alignCanvasEdge(10.0f, 90.0f, 40.0f, 70.0f, 1) == -5.0f);
+        CHECK(alignCanvasEdge(10.0f, 90.0f, 40.0f, 70.0f, 2) == 20.0f);
         // RTSS со смещёнными абсолютными координатами: вписываем слои, не пустоту от (0,0).
         const CanvasFit rtss = fitCanvasContent({ 1420, 680, 1720, 880 }, 356.0f, 200.0f, 1920.0f);
         const CanvasAxis rtssX { 20.0f, rtss.panX, rtss.zoom * 356.0f / 1920.0f };
@@ -572,7 +575,11 @@ namespace {
                                  "letter_spacing = 150\n"
                                  "uppercase = 1\n"
                                  "separators = 0\n"
-                                 "fps_decimals = 2\n";
+                                 "fps_decimals = 2\n"
+                                 "background_width = 180\n"
+                                 "background_height = 90\n"
+                                 "[overlay_metric_text_scale]\n"
+                                 "cpu_load = 150\n";
 
         Settings settings;
         std::string error;
@@ -588,6 +595,10 @@ namespace {
         CHECK(settings.overlay.uppercaseMode == 1);
         CHECK(settings.overlay.separatorsMode == 0);
         CHECK(settings.overlay.fpsDecimals == 2);
+        CHECK(settings.overlay.backgroundWidthPx == 180);
+        CHECK(settings.overlay.backgroundHeightPx == 90);
+        CHECK(settings.overlay.metricTextScalePercent[static_cast<std::size_t>(MetricId::CpuLoad)] == 150);
+        CHECK(settings.overlay.metricTextScalePercent[static_cast<std::size_t>(MetricId::GpuLoad)] == 100);
 
         Settings copy;
         CHECK(parseSettings(serializeSettings(settings), copy, error));
@@ -596,6 +607,9 @@ namespace {
         CHECK(copy.overlay.rowColors[2] == 5);
         CHECK(copy.overlay.borderWidth == 2);
         CHECK(copy.overlay.fpsDecimals == 2);
+        CHECK(copy.overlay.backgroundWidthPx == 180);
+        CHECK(copy.overlay.backgroundHeightPx == 90);
+        CHECK(copy.overlay.metricTextScalePercent[static_cast<std::size_t>(MetricId::CpuLoad)] == 150);
 
         // Смена пресета возвращает ручные подстройки к значениям стиля.
         applyStyleDefaults(copy.overlay, OverlayStyle::Rtss);
@@ -626,6 +640,12 @@ namespace {
         CHECK(settings.overlay.shadowStrength == 100);
         CHECK(settings.overlay.letterSpacing == 0);
         CHECK(settings.overlay.fpsDecimals == 2);
+        CHECK(parseSettings("[overlay]\nbackground_width = 79\nbackground_height = 5000\n"
+                            "[overlay_metric_text_scale]\ncpu_load = 201\n",
+            settings, error));
+        CHECK(settings.overlay.backgroundWidthPx == -1);
+        CHECK(settings.overlay.backgroundHeightPx == -1);
+        CHECK(settings.overlay.metricTextScalePercent[static_cast<std::size_t>(MetricId::CpuLoad)] == 100);
     }
 
     void testParsesValues()

@@ -134,13 +134,14 @@ namespace {
     {
     public:
         Painter(ID2D1RenderTarget* target, const Theme& theme, const OverlayFormats& formats, float scale,
-            float opacity, const OverlayChrome& chrome, int outline = 0)
+            float opacity, const OverlayChrome& chrome, const OverlaySettings& settings, int outline = 0)
             : m_target(target)
             , m_theme(theme)
             , m_formats(formats)
             , m_scale(scale)
             , m_opacity(opacity)
             , m_chrome(chrome)
+            , m_settings(settings)
             , m_outline(static_cast<float>(std::max(outline, 0)))
         {
         }
@@ -238,6 +239,8 @@ namespace {
                 return;
             }
 
+            const float textBottom
+                = rect.bottom + std::max(0.0f, (m_rowTextFactor - 1.0f) * format->GetFontSize());
             const DWRITE_TEXT_ALIGNMENT previous = format->GetTextAlignment();
             format->SetTextAlignment(align == TextAlign::Right ? DWRITE_TEXT_ALIGNMENT_TRAILING
                     : align == TextAlign::Center               ? DWRITE_TEXT_ALIGNMENT_CENTER
@@ -257,7 +260,7 @@ namespace {
                     };
                     for (const auto& [dx, dy] : shifts) {
                         m_target->DrawTextW(value.data(), static_cast<UINT32>(value.size()), format,
-                            D2D1::RectF(rect.left + dx, rect.top + dy, rect.right + dx, rect.bottom + dy),
+                            D2D1::RectF(rect.left + dx, rect.top + dy, rect.right + dx, textBottom + dy),
                             edgeBrush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
                     }
                     edgeBrush->Release();
@@ -271,8 +274,7 @@ namespace {
             }
 
             m_target->DrawTextW(value.data(), static_cast<UINT32>(value.size()), format,
-                D2D1::RectF(rect.left, rect.top, rect.right, rect.bottom), brush,
-                D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                D2D1::RectF(rect.left, rect.top, rect.right, textBottom), brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
             format->SetTextAlignment(previous);
             brush->Release();
         }
@@ -303,8 +305,46 @@ namespace {
             m_fit = fit;
         }
 
+        void beginTextSize(MetricId id)
+        {
+            const int percent = m_settings.metricTextScalePercent[static_cast<std::size_t>(id)];
+            if (percent == 100 || m_formats.factory == nullptr) {
+                return;
+            }
+            m_baseFormats = m_formats;
+            const float factor = static_cast<float>(std::clamp(percent, 70, 200)) / 100.0f;
+            m_rowFormats = { styledFormat(m_formats.factory, m_formats.key, factor, m_settings),
+                styledFormat(m_formats.factory, m_formats.value, factor, m_settings),
+                styledFormat(m_formats.factory, m_formats.smallText, factor, m_settings),
+                styledFormat(m_formats.factory, m_formats.mono, factor, m_settings) };
+            if (std::all_of(m_rowFormats.begin(), m_rowFormats.end(),
+                    [](IDWriteTextFormat* format) { return format != nullptr; })) {
+                m_formats = OverlayFormats { m_formats.factory, m_rowFormats[0], m_rowFormats[1],
+                    m_rowFormats[2], m_rowFormats[3] };
+                m_rowTextFactor = factor;
+            } else {
+                endTextSize();
+            }
+        }
+
+        void endTextSize()
+        {
+            if (m_rowFormats[0] == nullptr && m_rowFormats[1] == nullptr && m_rowFormats[2] == nullptr
+                && m_rowFormats[3] == nullptr) {
+                return;
+            }
+            m_formats = m_baseFormats;
+            for (auto*& format : m_rowFormats) {
+                if (format)
+                    format->Release();
+                format = nullptr;
+            }
+            m_rowTextFactor = 1.0f;
+        }
+
         void beginRow(MetricId id, const Rect& row)
         {
+            beginTextSize(id);
             const auto& offset = (*m_rowOffsets)[static_cast<std::size_t>(id)];
             const float dx = static_cast<float>(offset.x) * m_scale;
             const float dy = static_cast<float>(offset.y) * m_scale;
@@ -328,6 +368,7 @@ namespace {
                 m_target->SetTransform(m_rowTransform);
                 m_rowTransformed = false;
             }
+            endTextSize();
         }
 
         float scale() const { return m_scale; }
@@ -362,6 +403,10 @@ namespace {
         float m_scale = 1.0f;
         float m_opacity = 1.0f;
         OverlayChrome m_chrome;
+        const OverlaySettings& m_settings;
+        OverlayFormats m_baseFormats { };
+        std::array<IDWriteTextFormat*, 4> m_rowFormats { };
+        float m_rowTextFactor = 1.0f;
         float m_outline = 0.0f;
         float m_backgroundOpacity = 1.0f;
         std::vector<OverlayRowBounds>* m_rowBounds = nullptr;
@@ -1669,7 +1714,7 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
     chrome.borderWidth = settings.borderWidth >= 0 ? static_cast<float>(settings.borderWidth) : 1.0f;
     chrome.shadowStrength = static_cast<float>(std::clamp(settings.shadowStrength, 0, 100)) / 100.0f;
 
-    Painter measurer(target, theme, scaled, scale, opacity, chrome, settings.textOutline);
+    Painter measurer(target, theme, scaled, scale, opacity, chrome, settings, settings.textOutline);
     measurer.setBackgroundOpacity(backgroundOpacity);
     const TextRole inlineRole = look.mono ? TextRole::Mono : TextRole::Small;
     float lineWidth = 0.0f;
@@ -1681,9 +1726,11 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
             lineWidth += measurer.measure(tracked(L"   ", look.letterSpacing), inlineRole) / scale;
         }
         const std::wstring label = look.uppercase ? upperCase(text.labels[index]) : text.labels[index];
+        measurer.beginTextSize(text.ids[index]);
         lineWidth
             += measurer.measure(tracked(label + L" " + text.values[index], look.letterSpacing), inlineRole)
             / scale;
+        measurer.endTextSize();
     }
     StyleSpec spec = styleSpec(settings, text, lineWidth);
     const auto labels = rowLabels(text, look);
@@ -1691,11 +1738,13 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
         float cellsWidth = look.padding * 2.0f;
         for (std::size_t index = 0; index < text.labels.size(); ++index) {
             if (rowShown(text, index)) {
+                measurer.beginTextSize(text.ids[index]);
                 cellsWidth += std::max(measurer.measure(labels[index], TextRole::Tiny),
                                   measurer.measure(
                                       text.values[index], index == 0 ? TextRole::Value : TextRole::Small))
                         / scale
                     + 20.0f;
+                measurer.endTextSize();
             }
         }
         spec.width = std::max(spec.width, cellsWidth);
@@ -1705,9 +1754,11 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
             continue;
         }
         const auto role = look.mono ? TextRole::Mono : TextRole::Small;
+        measurer.beginTextSize(text.ids[index]);
         look.labelWidth = std::max(look.labelWidth, measurer.measure(labels[index], role) / scale + 12.0f);
         look.valueWidth
             = std::max(look.valueWidth, measurer.measure(text.values[index], role) / scale + 12.0f);
+        measurer.endTextSize();
     }
     if (settings.layout == OverlayLayout::Plates && settings.style != OverlayStyle::Esport) {
         spec.width = std::max(spec.width, look.labelWidth + look.valueWidth + look.padding * 2.0f + 12.0f);
@@ -1754,6 +1805,12 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
                 spec.height, static_cast<float>((row.y >= 0 ? row.y : 12 + static_cast<int>(i) * 28) + 30));
         }
     }
+    if (settings.layout == OverlayLayout::Plates) {
+        if (settings.backgroundWidthPx >= 80)
+            spec.width = static_cast<float>(settings.backgroundWidthPx);
+        if (settings.backgroundHeightPx >= 40)
+            spec.height = static_cast<float>(settings.backgroundHeightPx);
+    }
     const bool hasSparkline = settings.showSparkline && text.sparklineHistory.size() >= 2
         && std::all_of(text.sparklineHistory.begin(), text.sparklineHistory.end(),
             [](float value) { return std::isfinite(value) && value >= 0.0f; });
@@ -1795,7 +1852,7 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
     target->GetTransform(&previousTransform);
     target->SetTransform(D2D1::Matrix3x2F::Scale(fit, fit, D2D1::Point2F(left, top)) * previousTransform);
     const Rect frame { left, top, left + width, top + height };
-    Painter painter(target, theme, scaled, scale, opacity, chrome, settings.textOutline);
+    Painter painter(target, theme, scaled, scale, opacity, chrome, settings, settings.textOutline);
     painter.setBackgroundOpacity(backgroundOpacity);
     painter.setRowBounds(settings, rowBounds, frame, fit);
 
@@ -1819,6 +1876,7 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
                         left + fit * std::max(labelEnd, valueEnd) * scale,
                         top + fit * (y + 26.0f * scale - top) } });
             }
+            painter.beginTextSize(text.ids[i]);
             if (labelEnd > row.labelX) {
                 painter.text(text.labels[i],
                     Rect { frame.left + row.labelX * scale, y, frame.left + labelEnd * scale,
@@ -1831,6 +1889,7 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
                         y + 26.0f * scale },
                     TextRole::Small, look.rowPalette[i]);
             }
+            painter.endTextSize();
         }
     } else if (settings.layout == OverlayLayout::Line) {
         drawInline(painter, settings, text, frame, look);

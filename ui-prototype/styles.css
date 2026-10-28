@@ -853,6 +853,11 @@ body.is-compact .chart-wrap--frames canvas { height: 96px; }
 .game__guide--x { left: var(--guide-x); top: 0; bottom: 0; width: 1px; }
 .game__guide--y { top: var(--guide-y); left: 0; right: 0; height: 1px; }
 .canvas-help { margin-top: 9px; }
+.canvas-align { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-bottom: 10px; color: var(--text-dim); font-size: 11px; }
+.canvas-align button { border: 1px solid var(--line); border-radius: 5px; padding: 4px 7px; background: var(--panel-flat); color: var(--accent); cursor: pointer; }
+.canvas-align button:hover { border-color: var(--accent); }
+.osd.is-dragging, .osd.is-resizing { transition: none !important; }
+.osd.is-dragging .osd__row, .osd.is-resizing .osd__row { transition: none !important; }
 .overlay-workshop { grid-column: 1 / -1; display: grid; grid-template-columns: 210px minmax(0, 1fr) minmax(290px, .85fr); gap: 14px; align-items: start; }
 .workshop-nav { display: flex; gap: 6px; margin-bottom: 14px; }
 .workshop-nav button { flex: 1; border: 1px solid var(--line); background: var(--panel-flat); color: var(--text-dim); padding: 10px; border-radius: 8px; cursor: pointer; }
@@ -1126,10 +1131,10 @@ body.is-compact .chart-wrap--frames canvas { height: 96px; }
 .swatch-rows .swatch-row > span { font-size: 11px; color: var(--text-dim); }
 .swatch-rows .swatches { flex-wrap: nowrap; gap: 4px; }
 .swatch-rows .swatch { width: 22px; height: 20px; border-radius: 6px; }
-.osd .osd__val { font-size: calc(18px * var(--osd-text, 1)); transition: font-size 180ms ease; }
-.osd .osd__val--sm { font-size: calc(12.5px * var(--osd-text, 1)); }
-.osd .osd__key { font-size: calc(9.5px * var(--osd-text, 1)); }
-.osd .osd__unit { font-size: calc(9.5px * var(--osd-text, 1)); }
+.osd .osd__val { font-size: calc(18px * var(--row-text, var(--osd-text, 1))); transition: font-size 180ms ease; }
+.osd .osd__val--sm { font-size: calc(12.5px * var(--row-text, var(--osd-text, 1))); }
+.osd .osd__key { font-size: calc(9.5px * var(--row-text, var(--osd-text, 1))); }
+.osd .osd__unit { font-size: calc(9.5px * var(--row-text, var(--osd-text, 1))); }
 
 .osd__key {
   font-size: 9.5px;
@@ -1970,6 +1975,12 @@ body.is-paused .tag--live { color: var(--warn); border-color: rgba(255, 179, 71,
 .osd { cursor: grab; }
 .osd.is-dragging { cursor: grabbing; transition: none; }
 .osd.is-resizing { cursor: nwse-resize; transition: none; }
+.osd .osd__row[data-custom-text] .osd__val { font-size: calc(18px * var(--row-text)) !important; }
+.osd .osd__row[data-custom-text] .osd__val--sm { font-size: calc(12.5px * var(--row-text)) !important; }
+.osd .osd__row [data-metric][data-custom-text].osd__val { font-size: calc(18px * var(--metric-text)) !important; }
+.osd .osd__row [data-metric][data-custom-text].osd__val--sm { font-size: calc(12.5px * var(--metric-text)) !important; }
+.osd .osd__row[data-custom-text] .osd__key,
+.osd .osd__row[data-custom-text] .osd__unit { font-size: calc(9.5px * var(--row-text)) !important; }
 
 
 /* ── «Баланс»: калькулятор узкого места и «Сведения о системе» ─────────────── */

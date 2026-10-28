@@ -112,6 +112,24 @@ LRESULT CALLBACK OverlayWindow::windowProc(HWND window, UINT message, WPARAM wPa
                 self->m_resizeScale = self->m_settings.scalePercent;
                 self->m_resizeWidth = self->m_contentRectD2D.right - self->m_contentRectD2D.left;
                 self->m_resizeHeight = self->m_contentRectD2D.bottom - self->m_contentRectD2D.top;
+                self->m_backgroundResizing = self->m_settings.layout == OverlayLayout::Plates
+                    && !self->m_settings.rtssVisual && static_cast<bool>(self->m_onBackgroundEdit);
+                if (self->m_backgroundResizing) {
+                    auto& settings = self->m_settings;
+                    self->m_backgroundUnit = std::max(0.001f, self->m_rowUnit);
+                    self->m_backgroundStartWidth = settings.backgroundWidthPx >= 80
+                        ? settings.backgroundWidthPx
+                        : static_cast<int>(std::lround(self->m_resizeWidth / self->m_backgroundUnit));
+                    self->m_backgroundStartHeight = settings.backgroundHeightPx >= 40
+                        ? settings.backgroundHeightPx
+                        : static_cast<int>(std::lround(self->m_resizeHeight / self->m_backgroundUnit));
+                    if (settings.anchorMode == OverlayAnchorMode::Corner) {
+                        settings.originX = static_cast<int>(std::lround(self->m_contentRectD2D.left));
+                        settings.originY = static_cast<int>(std::lround(self->m_contentRectD2D.top));
+                        settings.anchorMode = OverlayAnchorMode::Free;
+                        settings.offsetX = settings.offsetY = 0;
+                    }
+                }
             } else if (self->onPaddingGrip(x, y)) {
                 self->m_paddingDragging = true;
                 self->m_paddingOrigin = POINT { x, y };
@@ -469,6 +487,11 @@ void OverlayWindow::setDirectEditHandler(std::function<void(int, int, int, bool)
     m_onDirectEdit = std::move(handler);
 }
 
+void OverlayWindow::setBackgroundEditHandler(std::function<void(int, int, int, int, bool)> handler)
+{
+    m_onBackgroundEdit = std::move(handler);
+}
+
 bool OverlayWindow::onResizeCorner(int x, int y) const
 {
     const float width = m_contentRectD2D.right - m_contentRectD2D.left;
@@ -498,6 +521,21 @@ void OverlayWindow::updateResize(int x, int y)
     if (!m_resizing) {
         return;
     }
+    if (m_backgroundResizing) {
+        const int width = std::clamp(
+            m_backgroundStartWidth + static_cast<int>(std::lround((x - m_resizeOrigin.x) / m_backgroundUnit)),
+            80, 2000);
+        const int height = std::clamp(m_backgroundStartHeight
+                + static_cast<int>(std::lround((y - m_resizeOrigin.y) / m_backgroundUnit)),
+            40, 1600);
+        if (width != m_settings.backgroundWidthPx || height != m_settings.backgroundHeightPx) {
+            m_settings.backgroundWidthPx = width;
+            m_settings.backgroundHeightPx = height;
+            repaint();
+            m_onBackgroundEdit(width, height, m_settings.originX, m_settings.originY, false);
+        }
+        return;
+    }
     const float deltaX = static_cast<float>(x - m_resizeOrigin.x) / std::max(1.0f, m_resizeWidth);
     const float deltaY = static_cast<float>(y - m_resizeOrigin.y) / std::max(1.0f, m_resizeHeight);
     const int next = std::clamp(
@@ -517,7 +555,11 @@ void OverlayWindow::finishResize()
         return;
     }
     m_resizing = false;
-    if (m_onDirectEdit) {
+    if (m_backgroundResizing) {
+        m_backgroundResizing = false;
+        m_onBackgroundEdit(m_settings.backgroundWidthPx, m_settings.backgroundHeightPx, m_settings.originX,
+            m_settings.originY, true);
+    } else if (m_onDirectEdit) {
         m_onDirectEdit(m_settings.scalePercent, m_settings.paddingPx, m_settings.rowGapPx, true);
     }
 }
@@ -653,8 +695,11 @@ void OverlayWindow::updateRowDrag(int x, int y)
         const int minY = static_cast<int>(std::ceil(-m_rowStartBounds.top / m_rowDragScale));
         const int maxY
             = static_cast<int>(std::floor((m_bitmapHeight - m_rowStartBounds.bottom) / m_rowDragScale));
-        next.x = std::clamp(next.x, m_styleRowStart.x + minX, m_styleRowStart.x + maxX);
-        next.y = std::clamp(next.y, m_styleRowStart.y + minY, m_styleRowStart.y + maxY);
+        // Существующая строка за пределами экрана не должна прыгать при нулевом сдвиге.
+        next.x = std::clamp(
+            next.x, m_styleRowStart.x + std::min(0, minX), m_styleRowStart.x + std::max(0, maxX));
+        next.y = std::clamp(
+            next.y, m_styleRowStart.y + std::min(0, minY), m_styleRowStart.y + std::max(0, maxY));
         auto& current = m_settings.styleRowOffsets[static_cast<std::size_t>(m_rowDragId)];
         if (current.x != next.x || current.y != next.y) {
             current = next;

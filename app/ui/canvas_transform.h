@@ -70,6 +70,15 @@ inline int originOnMonitor(int origin, int monitorStart)
     return std::max(0, origin - monitorStart);
 }
 
+// Сдвиг к левой/центральной/правой или верхней/средней/нижней границе опорной строки.
+inline float alignCanvasEdge(
+    float referenceStart, float referenceEnd, float itemStart, float itemEnd, int edge)
+{
+    const float fraction = edge == 0 ? 0.0f : edge == 1 ? 0.5f : 1.0f;
+    return referenceStart + (referenceEnd - referenceStart) * fraction - itemStart
+        - (itemEnd - itemStart) * fraction;
+}
+
 struct CanvasFit
 {
     float zoom = 1.0f;

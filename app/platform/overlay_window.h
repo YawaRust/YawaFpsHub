@@ -56,6 +56,8 @@ public:
     // origin_x/y в свободном режиме, offset_x/y в угловом (finished — отпускание).
     void setMoveHandler(std::function<void(int offsetX, int offsetY, bool finished)> handler);
     void setDirectEditHandler(std::function<void(int scale, int padding, int rowGap, bool finished)> handler);
+    void setBackgroundEditHandler(
+        std::function<void(int width, int height, int originX, int originY, bool finished)> handler);
     void setLayerEditHandler(std::function<void(std::size_t index, int x, int y, bool finished)> handler);
     void setRowEditHandler(
         std::function<void(MetricId id, OverlayRowPosition position, bool finished)> handler);
@@ -133,6 +135,7 @@ private:
     // Перетаскивание и плавные переходы.
     std::function<void(int, int, bool)> m_onMove;
     std::function<void(int, int, int, bool)> m_onDirectEdit;
+    std::function<void(int, int, int, int, bool)> m_onBackgroundEdit;
     std::function<void(std::size_t, int, int, bool)> m_onLayerEdit;
     std::vector<Rect> m_rtssLayerBounds;
     float m_rtssLayerScale = 1.0f;
@@ -158,6 +161,10 @@ private:
     bool m_resizing = false;
     POINT m_resizeOrigin{};
     int m_resizeScale = 100;
+    bool m_backgroundResizing = false;
+    int m_backgroundStartWidth = 0;
+    int m_backgroundStartHeight = 0;
+    float m_backgroundUnit = 1.0f;
     float m_resizeWidth = 1.0f;
     float m_resizeHeight = 1.0f;
     bool m_paddingDragging = false;

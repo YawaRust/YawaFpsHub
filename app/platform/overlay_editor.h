@@ -34,6 +34,7 @@ private:
     void move(int x, int y);
     float canvasScale() const;
     void fitCanvasToContent();
+    void alignSelectedRows(int edge);
     std::size_t rtssLayerCount() const;
     void moveRtssLayer(int x, int y);
     void moveStyledRow(int x, int y);
@@ -115,10 +116,14 @@ private:
     int m_rtssSelected = -1;
     bool m_rtssDragging = false;
     bool m_scaleDragging = false;
+    bool m_backgroundResizing = false;
     bool m_paddingDragging = false;
+    int m_backgroundStartWidth = 0;
+    int m_backgroundStartHeight = 0;
     int m_gripStart = 0;
     float m_gripWidth = 1.0f;
     float m_gripHeight = 1.0f;
+    float m_gripUnit = 1.0f;
     int m_rtssStartX = 0;
     int m_rtssStartY = 0;
     int m_rtssOffsetX = 0;

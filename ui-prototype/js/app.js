@@ -146,6 +146,9 @@
     clickThrough: false,
     labels: { ...DEFAULT_LABELS },
     rowPositions: {},
+    metricTextScale: {},
+    backgroundWidth: null,
+    backgroundHeight: null,
     rtssLayerEdits: {}
   };
 
@@ -424,6 +427,10 @@
     $("#osdLayerPicker").value = hex.slice(0, 7);
     $("#osdLayerAlpha").value = String(Math.round(parseInt(hex.slice(7, 9), 16) / 255 * 100));
     $("#osdLayerAlphaValue").textContent = `${$("#osdLayerAlpha").value}%`;
+    const textSize = overlayState.metricTextScale[id] || 100;
+    $("#osdMetricTextSize").value = String(textSize);
+    $("#osdMetricTextSizeValue").textContent = `${textSize} %`;
+    $("#osdMetricTextSize").disabled = id.startsWith("rtss:");
     ["osdLayerHex", "osdLayerPicker", "osdLayerAlpha", "osdLayerAuto", "osdLayerSample"]
       .forEach((field) => { $(`#${field}`).disabled = id.startsWith("rtss:"); });
     $$("#osdLayers .workshop-layer__name").forEach((button) => {
@@ -547,6 +554,17 @@
     $("#osdColorTarget").addEventListener("change", (event) => {
       colorTarget = event.target.value;
       selectOverlayLayer(selectedLayer);
+    });
+    $("#osdMetricTextSize").addEventListener("input", (event) => {
+      if (selectedLayer.startsWith("rtss:")) return;
+      const size = Number(event.target.value);
+      overlayState.metricTextScale[selectedLayer] = size;
+      $("#osdMetricTextSizeValue").textContent = `${size} %`;
+      applyOverlay();
+    });
+    $("#osdMetricTextSize").addEventListener("change", () => {
+      store.write("yawa.metricTextScale", JSON.stringify(overlayState.metricTextScale));
+      recordOverlayHistory();
     });
     const picker = $("#osdLayerPicker");
     const alpha = $("#osdLayerAlpha");
@@ -1436,6 +1454,10 @@
     osd.style.setProperty("--osd-origin-x", `${overlayState.originX}px`);
     osd.style.setProperty("--osd-origin-y", `${overlayState.originY}px`);
     osd.dataset.layout = overlayState.layout;
+    osd.style.width = overlayState.layout === "plates" && overlayState.backgroundWidth !== null
+      ? `${overlayState.backgroundWidth}px` : "";
+    osd.style.height = overlayState.layout === "plates" && overlayState.backgroundHeight !== null
+      ? `${overlayState.backgroundHeight}px` : "";
     osd.classList.toggle("is-sparkline", overlayState.sparkline && sparklineHistory.length >= 2);
     osd.style.setProperty("--menu-opacity", (overlayState.menuOpacity / 100).toFixed(2));
     $("#osdMenuOpacity").value = String(overlayState.menuOpacity);
@@ -1533,6 +1555,15 @@
     osd.querySelectorAll(".osd__row").forEach((row) => {
       const position = overlayState.rowPositions[row.dataset.osdItem] || { x: 0, y: 0 };
       row.style.translate = `${position.x}px ${position.y}px`;
+      const metrics = [...row.querySelectorAll("[data-metric]")];
+      const size = overlayState.metricTextScale[metrics[0]?.dataset.metric] || 100;
+      row.toggleAttribute("data-custom-text", size !== 100);
+      row.style.setProperty("--row-text", ((overlayState.textScale / 100) * (size / 100)).toFixed(3));
+      for (const metric of metrics.slice(1)) {
+        const textSize = overlayState.metricTextScale[metric.dataset.metric] || 100;
+        metric.toggleAttribute("data-custom-text", textSize !== size);
+        metric.style.setProperty("--metric-text", ((overlayState.textScale / 100) * (textSize / 100)).toFixed(3));
+      }
     });
 
     renderRtssVisual(osd);
@@ -1764,6 +1795,26 @@
     const markRows = () => osd.querySelectorAll(".osd__row").forEach((node) => {
       node.classList.toggle("is-selected", selected.has(node.dataset.osdItem));
     });
+    $(".canvas-align").addEventListener("click", (event) => {
+      const edge = event.target.closest("[data-align]")?.dataset.align;
+      if (!edge) return;
+      const rows = [...osd.querySelectorAll(".osd__row")]
+        .filter((row) => selected.has(row.dataset.osdItem) && !row.classList.contains("is-hidden"));
+      if (rows.length < 2) { toast("Выберите минимум две строки с Ctrl+кликом."); return; }
+      const reference = rows[0].getBoundingClientRect();
+      const unit = Math.max(.001, osd.getBoundingClientRect().width / Math.max(1, osd.offsetWidth));
+      const axis = edge === "top" || edge === "centerY" || edge === "bottom" ? "y" : "x";
+      const position = (rect) => edge === "left" ? rect.left : edge === "right" ? rect.right
+        : edge === "top" ? rect.top : edge === "bottom" ? rect.bottom
+          : axis === "x" ? (rect.left + rect.right) / 2 : (rect.top + rect.bottom) / 2;
+      for (const row of rows.slice(1)) {
+        const offset = overlayState.rowPositions[row.dataset.osdItem] || { x: 0, y: 0 };
+        overlayState.rowPositions[row.dataset.osdItem] = { ...offset,
+          [axis]: Math.round(offset[axis] + (position(reference) - position(row.getBoundingClientRect())) / unit) };
+      }
+      applyOverlay();
+      recordOverlayHistory();
+    });
 
     osd.addEventListener("pointerdown", (event) => {
       if (event.button !== 0) return;
@@ -1778,8 +1829,13 @@
       }
       if (rect.width >= 60 && rect.height >= 45 && event.clientX >= rect.right - 16
         && event.clientY >= rect.bottom - 16) {
-        drag = { resize: true, x: event.clientX, y: event.clientY,
-          width: rect.width, height: rect.height, scale: overlayState.scale };
+        const background = overlayState.layout === "plates" && overlayState.recipe !== "rtss";
+        if (background) freeOverlayAnchor();
+        drag = { resize: true, background, x: event.clientX, y: event.clientY,
+          width: rect.width, height: rect.height, scale: overlayState.scale,
+          baseWidth: overlayState.backgroundWidth ?? osd.offsetWidth,
+          baseHeight: overlayState.backgroundHeight ?? osd.offsetHeight,
+          unit: Math.max(.001, rect.width / Math.max(1, osd.offsetWidth)) };
         overlayHistory.gesture = true;
         osd.setPointerCapture(event.pointerId);
         osd.classList.add("is-resizing");
@@ -1852,12 +1908,19 @@
         return;
       }
       if (drag.resize) {
-        const deltaX = (event.clientX - drag.x) / Math.max(1, drag.width);
-        const deltaY = (event.clientY - drag.y) / Math.max(1, drag.height);
-        overlayState.scale = Math.max(70, Math.min(160,
-          Math.round(drag.scale * (1 + (deltaX + deltaY) / 2))));
+        if (drag.background) {
+          overlayState.backgroundWidth = Math.max(80, Math.min(2000,
+            Math.round(drag.baseWidth + (event.clientX - drag.x) / drag.unit)));
+          overlayState.backgroundHeight = Math.max(40, Math.min(1600,
+            Math.round(drag.baseHeight + (event.clientY - drag.y) / drag.unit)));
+        } else {
+          const deltaX = (event.clientX - drag.x) / Math.max(1, drag.width);
+          const deltaY = (event.clientY - drag.y) / Math.max(1, drag.height);
+          overlayState.scale = Math.max(70, Math.min(160,
+            Math.round(drag.scale * (1 + (deltaX + deltaY) / 2))));
+          syncOsdControls();
+        }
         applyOverlay();
-        syncOsdControls();
         return;
       }
       if (drag.reorder) {
@@ -1874,15 +1937,18 @@
       if (drag.row) {
         const dx = Math.round((event.clientX - drag.x) / drag.unit);
         const dy = Math.round((event.clientY - drag.y) / drag.unit);
+        if (dx === 0 && dy === 0) return;
         const bounds = drag.bounds;
         const screen = drag.screen;
         const x = Math.max(-2048, Math.min(2048, drag.startX + dx));
         const y = Math.max(-2048, Math.min(2048, drag.startY + dy));
+        const minX = Math.min(drag.startX, drag.startX + (screen.left - bounds.left) / drag.unit);
+        const maxX = Math.max(drag.startX, drag.startX + (screen.right - bounds.right) / drag.unit);
+        const minY = Math.min(drag.startY, drag.startY + (screen.top - bounds.top) / drag.unit);
+        const maxY = Math.max(drag.startY, drag.startY + (screen.bottom - bounds.bottom) / drag.unit);
         overlayState.rowPositions[drag.row.dataset.osdItem] = {
-          x: Math.round(Math.max(drag.startX + (screen.left - bounds.left) / drag.unit,
-            Math.min(drag.startX + (screen.right - bounds.right) / drag.unit, x))),
-          y: Math.round(Math.max(drag.startY + (screen.top - bounds.top) / drag.unit,
-            Math.min(drag.startY + (screen.bottom - bounds.bottom) / drag.unit, y)))
+          x: Math.round(Math.max(minX, Math.min(maxX, x))),
+          y: Math.round(Math.max(minY, Math.min(maxY, y)))
         };
         applyOverlay();
         return;
@@ -1912,6 +1978,10 @@
       if (!drag) return;
       const reordered = Boolean(drag.reorder);
       if (drag.rtss !== undefined) store.write("rtssLayerEdits", JSON.stringify(overlayState.rtssLayerEdits));
+      if (drag.background) {
+        store.write("yawa.backgroundWidth", String(overlayState.backgroundWidth));
+        store.write("yawa.backgroundHeight", String(overlayState.backgroundHeight));
+      }
       drag = null;
       overlayHistory.gesture = false;
       recordOverlayHistory();
@@ -3076,6 +3146,18 @@
   }
 
   function restorePreferences() {
+    try {
+      const sizes = JSON.parse(store.read("yawa.metricTextScale") || "{}");
+      overlayState.metricTextScale = Object.fromEntries(Object.entries(sizes)
+        .filter(([id, size]) => sensorRows.has(id) && Number.isInteger(size) && size >= 70 && size <= 200));
+    } catch (error) { overlayState.metricTextScale = {}; }
+    for (const [field, key, min, max] of [
+      ["backgroundWidth", "yawa.backgroundWidth", 80, 2000],
+      ["backgroundHeight", "yawa.backgroundHeight", 40, 1600]
+    ]) {
+      const number = Number(store.read(key));
+      if (Number.isInteger(number) && number >= min && number <= max) overlayState[field] = number;
+    }
     const accent = store.read("yawa.accent");
     if (accent) applyAccent(accent);
 

@@ -702,6 +702,8 @@
                 <input id="osdLayerAlpha" type="range" min="0" max="100" value="100">
                 <button id="osdLayerAuto" class="btn btn--ghost" type="button">Взять из рецепта</button>
                 <button id="osdLayerSample" class="btn btn--ghost" type="button">Пипетка · из предпросмотра</button>
+                <label for="osdMetricTextSize">Размер текста выбранного датчика · <output id="osdMetricTextSizeValue">100 %</output></label>
+                <input id="osdMetricTextSize" type="range" min="70" max="200" step="10" value="100">
               </div>
               <div class="workshop-color" id="osdRtssInspector" hidden>
                 <strong id="osdRtssName"></strong>
@@ -737,6 +739,15 @@
               </div>
             </header>
 
+            <div class="canvas-align" aria-label="Выравнивание выделенных строк">
+              <span>Ctrl+клик — выбрать строки:</span>
+              <button type="button" data-align="left">Слева</button>
+              <button type="button" data-align="centerX">Центр X</button>
+              <button type="button" data-align="right">Справа</button>
+              <button type="button" data-align="top">Сверху</button>
+              <button type="button" data-align="centerY">Центр Y</button>
+              <button type="button" data-align="bottom">Снизу</button>
+            </div>
             <div class="game" id="gameScene" tabindex="0" aria-label="Холст оверлея: колесо — масштаб, пробел с перетаскиванием — панорама">
               <div class="game__viewport" id="gameViewport">
                 <div class="game__sky"></div>

@@ -592,6 +592,60 @@ void OverlayEditor::fitCanvasToContent()
     m_panY = fit.panY;
 }
 
+void OverlayEditor::alignSelectedRows(int edge)
+{
+    if (rtssLayerCount() > 0 || m_canvasRowBounds.empty() || edge < 0 || edge > 5) {
+        return;
+    }
+    auto& settings = m_model->settings.overlay;
+    const auto selected = [this](MetricId id) {
+        return m_selectedRows.empty()
+            ? id == m_selected
+            : std::find(m_selectedRows.begin(), m_selectedRows.end(), id) != m_selectedRows.end();
+    };
+    const auto reference = std::find_if(m_canvasRowBounds.begin(), m_canvasRowBounds.end(),
+        [&selected](const OverlayRowBounds& row) { return selected(row.id); });
+    if (reference == m_canvasRowBounds.end()) {
+        return;
+    }
+    const bool vertical = edge >= 3;
+    const float unit = std::max(0.001f, m_canvasRowScale);
+    bool changedAny = false;
+    for (const OverlayRowBounds& item : m_canvasRowBounds) {
+        if (!selected(item.id) || item.id == reference->id) {
+            continue;
+        }
+        const float delta = vertical ? alignCanvasEdge(reference->rect.top, reference->rect.bottom,
+                                           item.rect.top, item.rect.bottom, edge - 3)
+                                     : alignCanvasEdge(reference->rect.left, reference->rect.right,
+                                           item.rect.left, item.rect.right, edge);
+        const int shift = static_cast<int>(std::lround(delta / unit));
+        if (shift == 0) {
+            continue;
+        }
+        if (settings.pixelLayout && settings.layout == OverlayLayout::Plates) {
+            auto& position = settings.rowPositions[static_cast<std::size_t>(item.id)];
+            if (vertical) {
+                position.y = std::clamp(position.y + shift, 0, kMaxY);
+            } else {
+                const int dx = std::clamp(shift, -std::min(position.labelX, position.valueX),
+                    470 - std::max(position.labelX, position.valueX));
+                position.labelX += dx;
+                position.valueX += dx;
+            }
+        } else {
+            auto& offset = settings.styleRowOffsets[static_cast<std::size_t>(item.id)];
+            int& coordinate = vertical ? offset.y : offset.x;
+            coordinate = std::clamp(coordinate + shift, -2048, 2048);
+        }
+        changedAny = true;
+    }
+    if (changedAny) {
+        syncFields();
+        changed(true);
+    }
+}
+
 std::size_t OverlayEditor::rtssLayerCount() const
 {
     const auto& settings = m_model->settings.overlay;
@@ -626,8 +680,11 @@ void OverlayEditor::moveStyledRow(int x, int y)
     const int minY = static_cast<int>(std::ceil(-m_styledRowBounds.top / m_canvasRowScale));
     const int maxY = static_cast<int>(
         std::floor((GetSystemMetrics(SM_CYVIRTUALSCREEN) - m_styledRowBounds.bottom) / m_canvasRowScale));
-    next.x = std::clamp(next.x, m_styledRowStart.x + minX, m_styledRowStart.x + maxX);
-    next.y = std::clamp(next.y, m_styledRowStart.y + minY, m_styledRowStart.y + maxY);
+    // Если стиль изначально выходит за экран, нулевой сдвиг не должен телепортировать строку.
+    next.x
+        = std::clamp(next.x, m_styledRowStart.x + std::min(0, minX), m_styledRowStart.x + std::max(0, maxX));
+    next.y
+        = std::clamp(next.y, m_styledRowStart.y + std::min(0, minY), m_styledRowStart.y + std::max(0, maxY));
     auto& current = m_model->settings.overlay.styleRowOffsets[static_cast<std::size_t>(m_styledRowId)];
     if (current.x != next.x || current.y != next.y) {
         current = next;
@@ -670,7 +727,19 @@ Rect OverlayEditor::paddingGrip() const
 void OverlayEditor::moveGrip(int x, int y)
 {
     auto& settings = m_model->settings.overlay;
-    if (m_scaleDragging) {
+    if (m_scaleDragging && m_backgroundResizing) {
+        const int width = std::clamp(
+            m_backgroundStartWidth + static_cast<int>(std::lround((x - m_dragStartX) / m_gripUnit)), 80,
+            2000);
+        const int height = std::clamp(
+            m_backgroundStartHeight + static_cast<int>(std::lround((y - m_dragStartY) / m_gripUnit)), 40,
+            1600);
+        if (settings.backgroundWidthPx != width || settings.backgroundHeightPx != height) {
+            settings.backgroundWidthPx = width;
+            settings.backgroundHeightPx = height;
+            changed(false);
+        }
+    } else if (m_scaleDragging) {
         const float dx = static_cast<float>(x - m_dragStartX) / std::max(1.0f, m_gripWidth);
         const float dy = static_cast<float>(y - m_dragStartY) / std::max(1.0f, m_gripHeight);
         const int next
@@ -1123,6 +1192,10 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
             refresh();
             return 0;
         }
+        if (m_focusCanvas && y >= 63 && y < 85 && x >= 184 && x < 184 + 6 * 88) {
+            alignSelectedRows((x - 184) / 88);
+            return 0;
+        }
         if (m_fitButton.contains(static_cast<float>(x), static_cast<float>(y))) {
             m_samplingColor = false;
             m_fitPending = true;
@@ -1340,6 +1413,18 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
                 }
                 return 0;
             }
+            if (localY >= 118 && localY < 137 && localX >= 210 && localX < 399) {
+                auto& size
+                    = m_model->settings.overlay.metricTextScalePercent[static_cast<std::size_t>(m_selected)];
+                const int next = localX < 258 ? std::max(70, size - 10)
+                    : localX < 306            ? std::min(200, size + 10)
+                                              : 100;
+                if (size != next) {
+                    size = next;
+                    changed(true);
+                }
+                return 0;
+            }
             if (localY >= 137 && localY <= 166) {
                 const int color = (localX - 20) / 56 - 1;
                 if (localX >= 20 && color >= -1 && color < kOverlayColorCount && localX < 411) {
@@ -1386,7 +1471,25 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
                 && (scaleGrip().contains(static_cast<float>(x), static_cast<float>(y))
                     || paddingGrip().contains(static_cast<float>(x), static_cast<float>(y)))) {
                 m_scaleDragging = scaleGrip().contains(static_cast<float>(x), static_cast<float>(y));
+                m_backgroundResizing = m_scaleDragging && rtssLayerCount() == 0
+                    && m_model->settings.overlay.layout == OverlayLayout::Plates;
                 m_paddingDragging = !m_scaleDragging;
+                m_gripUnit = std::max(0.001f, canvasScale() * m_canvasRowScale);
+                if (m_backgroundResizing) {
+                    auto& settings = m_model->settings.overlay;
+                    m_backgroundStartWidth = settings.backgroundWidthPx >= 80
+                        ? settings.backgroundWidthPx
+                        : static_cast<int>(std::lround(m_screenPlate.width() / m_canvasRowScale));
+                    m_backgroundStartHeight = settings.backgroundHeightPx >= 40
+                        ? settings.backgroundHeightPx
+                        : static_cast<int>(std::lround(m_screenPlate.height() / m_canvasRowScale));
+                    if (settings.anchorMode == OverlayAnchorMode::Corner) {
+                        settings.originX = static_cast<int>(std::lround(m_screenPlate.left));
+                        settings.originY = static_cast<int>(std::lround(m_screenPlate.top));
+                        settings.anchorMode = OverlayAnchorMode::Free;
+                        settings.offsetX = settings.offsetY = 0;
+                    }
+                }
                 m_dragStartX = x;
                 m_dragStartY = y;
                 m_gripStart = m_scaleDragging                 ? m_model->settings.overlay.scalePercent
@@ -1428,6 +1531,15 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
                         horizontal.toCanvas(it->rect.right), vertical.toCanvas(it->rect.bottom) };
                     if (!onCanvas.contains(static_cast<float>(x), static_cast<float>(y))) {
                         continue;
+                    }
+                    if (GetKeyState(VK_CONTROL) < 0) {
+                        const auto selected = std::find(m_selectedRows.begin(), m_selectedRows.end(), it->id);
+                        if (selected == m_selectedRows.end())
+                            m_selectedRows.push_back(it->id);
+                        else
+                            m_selectedRows.erase(selected);
+                        select(it->id, false);
+                        return 0;
                     }
                     select(it->id, false);
                     m_styledRowDragging = true;
@@ -1624,7 +1736,7 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
             }
             if (m_scaleDragging || m_paddingDragging) {
                 moveGrip(x, y);
-                m_scaleDragging = m_paddingDragging = false;
+                m_scaleDragging = m_paddingDragging = m_backgroundResizing = false;
                 changed(true);
                 ReleaseCapture();
                 return 0;
@@ -1655,7 +1767,8 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
     }
     case WM_CAPTURECHANGED:
         if (m_rtssDragging || m_styledRowDragging || m_scaleDragging || m_paddingDragging) {
-            m_rtssDragging = m_styledRowDragging = m_scaleDragging = m_paddingDragging = false;
+            m_rtssDragging = m_styledRowDragging = m_scaleDragging = m_paddingDragging = m_backgroundResizing
+                = false;
             changed(true);
         }
         return 0;
@@ -1770,6 +1883,18 @@ void OverlayEditor::paint()
                                  : L"Слои и холст · настройки справа",
         Rect { 166.0f, 37.0f, 540.0f, 61.0f }, TextRole::Small, theme.textDim);
 
+    if (m_focusCanvas) {
+        const std::array<std::wstring_view, 6> labels { L"Слева", L"Центр X", L"Справа", L"Сверху",
+            L"Центр Y", L"Снизу" };
+        for (int index = 0; index < 6; ++index) {
+            const Rect button { 184.0f + index * 88.0f, 63.0f, 268.0f + index * 88.0f, 85.0f };
+            m_renderer.fillRoundRect(button, 4.0f, theme.panelSoft);
+            m_renderer.text(labels[static_cast<std::size_t>(index)], button, TextRole::Tiny, theme.accent,
+                TextAlign::Center);
+        }
+        m_renderer.text(L"Ctrl+клик: выбрать строки для выравнивания",
+            Rect { 720.0f, 63.0f, width - 20.0f, 85.0f }, TextRole::Tiny, theme.textDim);
+    }
     drawOverlayEditorPreview(m_renderer, *m_model, theme, m_preview, GetSystemMetrics(SM_CXVIRTUALSCREEN),
         GetSystemMetrics(SM_CYVIRTUALSCREEN));
     const auto& rtss = m_model->settings.overlay;
@@ -2000,6 +2125,18 @@ void OverlayEditor::paint()
             theme.textDim);
         m_renderer.text(L"Y", Rect { 380.0f, m_inspector.top + 96.0f, 403.0f, m_inspector.top + 119.0f },
             TextRole::Tiny, theme.textDim);
+        const int size
+            = m_model->settings.overlay.metricTextScalePercent[static_cast<std::size_t>(m_selected)];
+        m_renderer.text(L"Текст: " + std::to_wstring(size) + L" %",
+            Rect { 32.0f, m_inspector.top + 119.0f, 205.0f, m_inspector.top + 137.0f }, TextRole::Tiny,
+            theme.textDim);
+        for (const auto& [left, label] : std::array<std::pair<float, std::wstring_view>, 3> {
+                 { 230.0f, L"−" }, { 278.0f, L"+" }, { 326.0f, L"100 %" } }) {
+            const Rect button { left, m_inspector.top + 118.0f, left + (left > 320.0f ? 72.0f : 42.0f),
+                m_inspector.top + 136.0f };
+            m_renderer.fillRoundRect(button, 4.0f, theme.panelSoft);
+            m_renderer.text(label, button, TextRole::Tiny, theme.accent, TextAlign::Center);
+        }
         const auto palette = overlayColorPalette();
         const int selectedColor
             = m_model->settings.overlay.metricColors[static_cast<std::size_t>(m_selected)];

@@ -863,6 +863,14 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                 target.overlay.paddingPx = std::clamp(parseInt(value, target.overlay.paddingPx), -1, 28);
             } else if (key == "row_gap") {
                 target.overlay.rowGapPx = std::clamp(parseInt(value, target.overlay.rowGapPx), -1, 14);
+            } else if (key == "background_width") {
+                const int width = parseInt(value, -1);
+                if (width == -1 || (width >= 80 && width <= 2000))
+                    target.overlay.backgroundWidthPx = width;
+            } else if (key == "background_height") {
+                const int height = parseInt(value, -1);
+                if (height == -1 || (height >= 40 && height <= 1600))
+                    target.overlay.backgroundHeightPx = height;
             } else if (key == "value_color") {
                 target.overlay.valueColor = std::clamp(parseInt(value, target.overlay.valueColor), -1, 5);
             } else if (key == "label_color") {
@@ -990,6 +998,14 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                 if (x >= -2048 && x <= 2048 && y >= -2048 && y <= 2048) {
                     target.overlay.styleRowOffsets[static_cast<std::size_t>(entry->id)] = { x, y };
                 }
+            }
+        } else if (section == "overlay_metric_text_scale") {
+            const auto entry = std::find_if(kMetricTable.begin(), kMetricTable.end(),
+                [&key](const MetricInfo& info) { return info.key == key; });
+            if (entry != kMetricTable.end()) {
+                const int size = parseInt(value, 0);
+                if (size >= 70 && size <= 200)
+                    target.overlay.metricTextScalePercent[static_cast<std::size_t>(entry->id)] = size;
             }
         } else if (section == "overlay_metric_colors" || section == "overlay_metric_rgba") {
             const auto entry = std::find_if(kMetricTable.begin(), kMetricTable.end(),
@@ -1598,6 +1614,8 @@ std::string serializeSettings(const Settings& settings)
     text += "bg_opacity = " + std::to_string(settings.overlay.backgroundOpacityPercent) + "\n";
     text += "padding = " + std::to_string(settings.overlay.paddingPx) + "\n";
     text += "row_gap = " + std::to_string(settings.overlay.rowGapPx) + "\n";
+    text += "background_width = " + std::to_string(settings.overlay.backgroundWidthPx) + "\n";
+    text += "background_height = " + std::to_string(settings.overlay.backgroundHeightPx) + "\n";
     text += "value_color = " + std::to_string(settings.overlay.valueColor) + "\n";
     text += "label_color = " + std::to_string(settings.overlay.labelColor) + "\n";
     text += "accent_color = " + std::to_string(settings.overlay.accentColor) + "\n";
@@ -1658,6 +1676,12 @@ std::string serializeSettings(const Settings& settings)
             text += std::string(metric.key) + " = " + std::to_string(offset.x) + ","
                 + std::to_string(offset.y) + "\n";
         }
+    }
+    text += "\n[overlay_metric_text_scale]\n";
+    for (const MetricInfo& metric : kMetricTable) {
+        const int size = settings.overlay.metricTextScalePercent[static_cast<std::size_t>(metric.id)];
+        if (size != 100)
+            text += std::string(metric.key) + " = " + std::to_string(size) + "\n";
     }
     text += "\n[overlay_metric_colors]\n";
     for (const MetricInfo& metric : kMetricTable) {

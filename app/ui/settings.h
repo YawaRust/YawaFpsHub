@@ -165,6 +165,9 @@ struct OverlaySettings
     // -1 — отступы и межстрочный интервал из пресета, иначе ручные (px).
     int paddingPx = -1;
     int rowGapPx = -1;
+    // -1 — размер подложки из стиля; 80…2000 / 40…1600 — ручной размер в пикселях макета.
+    int backgroundWidthPx = -1;
+    int backgroundHeightPx = -1;
     // -1 — цвет из пресета, 0…5 — цвет палитры для значений и для подписей.
     int valueColor = -1;
     int labelColor = -1;
@@ -200,6 +203,12 @@ struct OverlaySettings
     std::array<OverlayRowOffset, kMetricCount> styleRowOffsets { };
     std::array<int, kMetricCount> metricColors = defaultOverlayMetricColors(); // -1 — палитра стиля
     std::array<std::optional<std::uint32_t>, kMetricCount> metricRgba { };
+    // 100 — размер из стиля; применяется к подписи и значению только этой строки.
+    std::array<int, kMetricCount> metricTextScalePercent = [] {
+        std::array<int, kMetricCount> sizes { };
+        sizes.fill(100);
+        return sizes;
+    }();
     std::array<bool, kMetricCount> customLabelSet { };
     std::array<std::string, kMetricCount> customLabels { };
     std::array<bool, kLabelCount> visible { true, true, true, true, true };
