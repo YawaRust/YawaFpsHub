@@ -157,7 +157,9 @@ struct OverlaySettings
     std::array<std::string, kLabelCount> labels { "FPS", "CPU", "GPU", "RAM", "VRAM" };
     // Исходный импортированный OVL хранится отдельно от редактируемых строк Yawa.
     std::shared_ptr<const std::string> rtssTemplate;
+    std::shared_ptr<const std::string> rtssExchange;
     int rtssOmittedLayers = 0;
+    int rtssResources = 0;
 };
 
 struct UiSettings
@@ -242,6 +244,8 @@ std::string serializeOverlayRecipeJson(const OverlaySettings& overlay);
 bool importOverlayRecipeJson(std::string_view json, OverlaySettings& overlay, std::string& error);
 // Поддерживает только однозначно сопоставимые текстовые датчики RTSS OverlayEditor v2.
 bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::string& error);
+// Извлекает OVL из OVX в памяти и хранит исходный пакет для обратного экспорта.
+bool importRtssExchange(std::string_view bytes, OverlaySettings& overlay, std::string& error);
 // Экспортирует только известные RTSS/ HAL показатели: внешние провайдеры и изображения не создаёт.
 std::string serializeRtssOverlay(const OverlaySettings& overlay);
 void copyOverlayPlacement(OverlaySettings& target, const OverlaySettings& source);

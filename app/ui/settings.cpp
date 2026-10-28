@@ -1,5 +1,6 @@
 #include "ui/settings.h"
 #include "metrics/overlay_metric.h"
+#include "ui/rtss_exchange.h"
 
 #include <algorithm>
 #include <cctype>
@@ -17,6 +18,7 @@ namespace {
     constexpr int kMaxScale = 160;
     constexpr std::size_t kMaxLabelLength = 10;
     constexpr std::size_t kMaxRtssBytes = 1024 * 1024;
+    constexpr std::size_t kMaxRtssExchangeBytes = 8 * 1024 * 1024;
 
     struct StyleKey
     {
@@ -109,9 +111,9 @@ namespace {
         return encoded;
     }
 
-    std::string hexDecode(std::string_view encoded)
+    std::string hexDecode(std::string_view encoded, std::size_t maxBytes)
     {
-        if (encoded.size() > 2 * kMaxRtssBytes || encoded.size() % 2 != 0) {
+        if (encoded.size() > 2 * maxBytes || encoded.size() % 2 != 0) {
             return { };
         }
         std::string bytes;
@@ -965,13 +967,21 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                 setOverlayMetricLabel(target.overlay, entry->id, std::string(value));
             }
         } else if (section == "rtss_original") {
-            if (key == "template_hex") {
-                std::string decoded = hexDecode(value);
+            if (key == "template_hex" || key == "exchange_hex") {
+                const std::size_t limit = key == "exchange_hex" ? kMaxRtssExchangeBytes : kMaxRtssBytes;
+                std::string decoded = hexDecode(value, limit);
                 if (!decoded.empty()) {
-                    target.overlay.rtssTemplate = std::make_shared<const std::string>(std::move(decoded));
+                    auto original = std::make_shared<const std::string>(std::move(decoded));
+                    if (key == "exchange_hex") {
+                        target.overlay.rtssExchange = std::move(original);
+                    } else {
+                        target.overlay.rtssTemplate = std::move(original);
+                    }
                 }
             } else if (key == "omitted_layers") {
                 target.overlay.rtssOmittedLayers = std::clamp(parseInt(value, 0), 0, 256);
+            } else if (key == "resources") {
+                target.overlay.rtssResources = std::clamp(parseInt(value, 0), 0, 63);
             }
         } else if (section == "hotkeys") {
             if (key == "overlay") {
@@ -1014,6 +1024,18 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
 
     if (!target.overlay.rtssTemplate) {
         target.overlay.rtssOmittedLayers = 0;
+        target.overlay.rtssExchange.reset();
+    }
+    if (target.overlay.rtssExchange) {
+        RtssExchange package;
+        std::string packageError;
+        if (!unpackRtssExchange(*target.overlay.rtssExchange, package, packageError)
+            || package.layout != *target.overlay.rtssTemplate) {
+            target.overlay.rtssExchange.reset();
+        }
+    }
+    if (!target.overlay.rtssExchange) {
+        target.overlay.rtssResources = 0;
     }
     if (!hasMetricSelection) {
         for (std::size_t index = 0; index < kLabelCount; ++index) {
@@ -1177,7 +1199,9 @@ bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::str
     imported.metrics = selected;
     imported.metricRgba = colors;
     imported.rtssTemplate = original;
+    imported.rtssExchange.reset();
     imported.rtssOmittedLayers = omitted;
+    imported.rtssResources = 0;
     std::array<bool, kMetricCount> placed { };
     std::size_t output = 0;
     for (MetricId id : order) {
@@ -1189,6 +1213,22 @@ bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::str
             imported.order[output++] = id;
         }
     }
+    overlay = std::move(imported);
+    return true;
+}
+
+bool importRtssExchange(std::string_view bytes, OverlaySettings& overlay, std::string& error)
+{
+    RtssExchange package;
+    if (!unpackRtssExchange(bytes, package, error)) {
+        return false;
+    }
+    OverlaySettings imported = overlay;
+    if (!importRtssOverlay(package.layout, imported, error)) {
+        return false;
+    }
+    imported.rtssExchange = std::make_shared<const std::string>(bytes);
+    imported.rtssResources = package.resources;
     overlay = std::move(imported);
     return true;
 }
@@ -1442,7 +1482,12 @@ std::string serializeSettings(const Settings& settings)
     if (settings.overlay.rtssTemplate && settings.overlay.rtssTemplate->size() <= kMaxRtssBytes) {
         text += "[rtss_original]\n";
         text += "template_hex = " + hexEncode(*settings.overlay.rtssTemplate) + "\n";
-        text += "omitted_layers = " + std::to_string(settings.overlay.rtssOmittedLayers) + "\n\n";
+        text += "omitted_layers = " + std::to_string(settings.overlay.rtssOmittedLayers) + "\n";
+        if (settings.overlay.rtssExchange && settings.overlay.rtssExchange->size() <= kMaxRtssExchangeBytes) {
+            text += "exchange_hex = " + hexEncode(*settings.overlay.rtssExchange) + "\n";
+            text += "resources = " + std::to_string(settings.overlay.rtssResources) + "\n";
+        }
+        text += "\n";
     }
 
     text += "[hotkeys]\n";

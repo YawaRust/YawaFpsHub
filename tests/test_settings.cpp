@@ -7,6 +7,7 @@
 
 #include "test_support.h"
 #include <algorithm>
+#include <charconv>
 
 #include <string>
 #include <string_view>
@@ -898,6 +899,54 @@ namespace {
         CHECK(restored.overlay.rtssTemplate && *restored.overlay.rtssTemplate == embedded);
     }
 
+    void testRtssExchangeKeepsOriginalAndRejectsDamage()
+    {
+        const std::string_view hex
+            = "3043445592000000a7000000000000000000000030575a4c006104d132451200000004000000e00c000000b6000000"
+              "604b93"
+              "3073e89491d3a58182246de0b029d3a68c1b3a61e8a479e3a6878c060ab61c29e3a68c9c306cba3450c0244c9e3272"
+              "e6f490"
+              "d140c1162661f2949103a34b030554cae0a1d3838711293e1a28d8c2244c9e3272627469a0804a193c747ab07973e6"
+              "4d0305"
+              "65f0846903874d19176fecb001f0000000000600000090088a93230d14b07973e68d0b386ece000808";
+        std::string package;
+        for (std::size_t at = 0; at < hex.size(); at += 2) {
+            unsigned int byte = 0;
+            const auto parsed = std::from_chars(hex.data() + at, hex.data() + at + 2, byte, 16);
+            CHECK(parsed.ec == std::errc { });
+            package.push_back(static_cast<char>(byte));
+        }
+        OverlaySettings imported;
+        imported.savedMonitorId = "MY_MONITOR";
+        std::string error;
+        CHECK(importRtssExchange(package, imported, error));
+        CHECK(imported.rtssTemplate && imported.rtssTemplate->find("Text=<FR>") != std::string::npos);
+        CHECK(imported.rtssExchange && *imported.rtssExchange == package);
+        CHECK(imported.rtssResources == 1 && imported.rtssOmittedLayers == 1);
+        CHECK(imported.metrics[static_cast<std::size_t>(MetricId::Fps)]);
+        CHECK(imported.savedMonitorId == "MY_MONITOR");
+        Settings saved;
+        saved.overlay = imported;
+        Settings restored;
+        CHECK(parseSettings(serializeSettings(saved), restored, error));
+        CHECK(restored.overlay.rtssExchange && *restored.overlay.rtssExchange == package);
+        CHECK(restored.overlay.rtssTemplate && *restored.overlay.rtssTemplate == *imported.rtssTemplate);
+        CHECK(restored.overlay.rtssResources == 1);
+        OverlaySettings snapshot = imported;
+        package[0] = 'X';
+        CHECK(!importRtssExchange(package, imported, error));
+        CHECK(imported.rtssExchange == snapshot.rtssExchange);
+        package[0] = '0';
+        package.back() = static_cast<char>(static_cast<unsigned char>(package.back()) | 0x80u);
+        CHECK(!importRtssExchange(package, imported, error));
+        CHECK(imported.rtssExchange == snapshot.rtssExchange);
+        package[4] = 0;
+        CHECK(!importRtssExchange(package, imported, error));
+        CHECK(imported.rtssExchange == snapshot.rtssExchange);
+        CHECK(!importRtssExchange(package.substr(0, package.size() - 2), imported, error));
+        CHECK(imported.rtssExchange == snapshot.rtssExchange);
+    }
+
     void testRtssExportKeepsSupportedOrderAndColor()
     {
         OverlaySettings source;
@@ -999,6 +1048,7 @@ void runSettingsTests()
     testRecipeMigrationAndAxes();
     testRtssImportRecognizesOnlyKnownSources();
     testRtssExternalProviderCannotImpersonateHal();
+    testRtssExchangeKeepsOriginalAndRejectsDamage();
     testRtssExportKeepsSupportedOrderAndColor();
     testGameProfileKeepsPersonalPlacement();
     testCrlfFile();

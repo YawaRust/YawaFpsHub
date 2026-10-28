@@ -48,6 +48,7 @@ add_executable(YawaFpsHub WIN32
     ui/overlay_view.cpp
     ui/sensors_view.cpp
     ui/settings.cpp
+    ui/rtss_exchange.cpp
     ui/overlay_recipe_json.cpp
     ui/settings_view.cpp
     ui/system_view.cpp

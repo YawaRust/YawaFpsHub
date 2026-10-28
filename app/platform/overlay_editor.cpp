@@ -411,7 +411,13 @@ void OverlayEditor::recordHistory()
     previous.overlay = m_historyCommitted;
     Settings current;
     current.overlay = m_model->settings.overlay;
-    if (serializeSettings(previous) == serializeSettings(current)) {
+    const bool sameRtss = previous.overlay.rtssTemplate == current.overlay.rtssTemplate
+        && previous.overlay.rtssExchange == current.overlay.rtssExchange;
+    previous.overlay.rtssTemplate.reset();
+    previous.overlay.rtssExchange.reset();
+    current.overlay.rtssTemplate.reset();
+    current.overlay.rtssExchange.reset();
+    if (sameRtss && serializeSettings(previous) == serializeSettings(current)) {
         return;
     }
     m_undo.push_back(m_historyCommitted);
@@ -1498,10 +1504,10 @@ void OverlayEditor::paint()
             Rect { m_controls.left, 12.0f, width - 400.0f, 44.0f }, TextRole::Heading, theme.text);
     }
     m_renderer.fillRoundRect(Rect { width - 368.0f, 12.0f, width - 248.0f, 45.0f }, 8.0f, theme.panelSoft);
-    m_renderer.text(L"Импорт JSON", Rect { width - 366.0f, 12.0f, width - 250.0f, 45.0f }, TextRole::Tiny,
+    m_renderer.text(L"Импорт файла", Rect { width - 366.0f, 12.0f, width - 250.0f, 45.0f }, TextRole::Tiny,
         theme.accent, TextAlign::Center);
     m_renderer.fillRoundRect(Rect { width - 242.0f, 12.0f, width - 130.0f, 45.0f }, 8.0f, theme.panelSoft);
-    m_renderer.text(L"Экспорт JSON", Rect { width - 240.0f, 12.0f, width - 132.0f, 45.0f }, TextRole::Tiny,
+    m_renderer.text(L"Экспорт файла", Rect { width - 240.0f, 12.0f, width - 132.0f, 45.0f }, TextRole::Tiny,
         theme.accent, TextAlign::Center);
     m_renderer.fillRoundRect(Rect { width - 110.0f, 12.0f, width - 18.0f, 45.0f }, 8.0f, theme.accentSoft);
     m_renderer.text(m_catalogOpen ? L"Закрыть" : L"+ Датчик",

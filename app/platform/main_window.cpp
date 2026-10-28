@@ -1941,7 +1941,8 @@ void MainWindow::applyAction(const UiHit& hit)
         OPENFILENAMEW dialog { };
         dialog.lStructSize = sizeof(dialog);
         dialog.hwndOwner = GetActiveWindow() != nullptr ? GetActiveWindow() : m_window;
-        dialog.lpstrFilter = L"Рецепт JSON (*.json)\0*.json\0RTSS OverlayEditor (*.ovl)\0*.ovl\0\0";
+        dialog.lpstrFilter
+            = L"Рецепт JSON (*.json)\0*.json\0RTSS-макет (*.ovl)\0*.ovl\0RTSS-пакет (*.ovx)\0*.ovx\0\0";
         dialog.lpstrFile = filename;
         dialog.nMaxFile = MAX_PATH;
         dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
@@ -1949,7 +1950,8 @@ void MainWindow::applyAction(const UiHit& hit)
             break;
 
         const wchar_t* suffix = std::wcsrchr(filename, L'.');
-        const bool rtss = suffix != nullptr && _wcsicmp(suffix, L".ovl") == 0;
+        const bool exchange = suffix != nullptr && _wcsicmp(suffix, L".ovx") == 0;
+        const bool rtss = exchange || (suffix != nullptr && _wcsicmp(suffix, L".ovl") == 0);
         std::string content;
         std::string error;
         const HANDLE file = CreateFileW(
@@ -1960,7 +1962,7 @@ void MainWindow::applyAction(const UiHit& hit)
             LARGE_INTEGER length { };
             if (GetFileSizeEx(file, &length) == FALSE || length.QuadPart < 0) {
                 error = "Не удалось определить размер файла оверлея";
-            } else if (length.QuadPart > (rtss ? 1024 * 1024 : 16384)) {
+            } else if (length.QuadPart > (exchange ? 8 * 1024 * 1024 : rtss ? 1024 * 1024 : 16384)) {
                 error = "Файл оверлея слишком большой";
             } else {
                 content.resize(static_cast<std::size_t>(length.QuadPart));
@@ -1975,7 +1977,9 @@ void MainWindow::applyAction(const UiHit& hit)
         }
         OverlaySettings imported = m_model.settings.overlay;
         if (error.empty()) {
-            if (rtss) {
+            if (exchange) {
+                importRtssExchange(content, imported, error);
+            } else if (rtss) {
                 importRtssOverlay(content, imported, error);
             } else {
                 importOverlayRecipeJson(content, imported, error);
@@ -1989,10 +1993,13 @@ void MainWindow::applyAction(const UiHit& hit)
         }
         if (rtss) {
             const std::wstring notice = L"Распознанные датчики HAL и FPS доступны в Yawa. "
-                + std::to_wstring(imported.rtssOmittedLayers)
-                + L" слоёв не показаны; исходный .ovl сохранён без изменений для обратного экспорта. "
-                  L"Правки в мастерской влияют только на вид в Yawa. "
-                  L"Внешние файлы изображений, если они указаны в шаблоне, остаются на прежних путях.";
+                + std::to_wstring(imported.rtssOmittedLayers) + L" слоёв не показаны. "
+                + (exchange ? L"Исходный .ovx и " + std::to_wstring(imported.rtssResources)
+                            + L" вложенных ресурсов сохранены в пакете для обратного экспорта. "
+                              L"Yawa их не распаковывает и не отрисовывает."
+                            : L"Исходный .ovl сохранён без изменений для обратного экспорта. "
+                              L"Внешние изображения остаются на прежних путях.")
+                + L" Правки в мастерской влияют только на вид в Yawa.";
             MessageBoxW(dialog.hwndOwner, notice.c_str(), L"Импорт RTSS", MB_OK | MB_ICONINFORMATION);
         }
         m_model.settings.overlay = std::move(imported);
@@ -2008,7 +2015,8 @@ void MainWindow::applyAction(const UiHit& hit)
         OPENFILENAMEW dialog { };
         dialog.lStructSize = sizeof(dialog);
         dialog.hwndOwner = GetActiveWindow() != nullptr ? GetActiveWindow() : m_window;
-        dialog.lpstrFilter = L"Рецепт JSON (*.json)\0*.json\0RTSS OverlayEditor (*.ovl)\0*.ovl\0\0";
+        dialog.lpstrFilter = L"Рецепт JSON (*.json)\0*.json\0RTSS-макет (*.ovl)\0*.ovl\0Исходный RTSS-пакет "
+                             L"(*.ovx)\0*.ovx\0\0";
         dialog.lpstrFile = filename;
         dialog.nMaxFile = MAX_PATH;
         dialog.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
@@ -2019,15 +2027,24 @@ void MainWindow::applyAction(const UiHit& hit)
         const std::size_t dot = path.find_last_of(L'.');
         const std::size_t slash = path.find_last_of(L"\\/");
         const bool hasExtension = dot != std::wstring::npos && (slash == std::wstring::npos || dot > slash);
+        const bool exchange
+            = hasExtension ? _wcsicmp(path.c_str() + dot, L".ovx") == 0 : dialog.nFilterIndex == 3;
         const bool rtss
             = hasExtension ? _wcsicmp(path.c_str() + dot, L".ovl") == 0 : dialog.nFilterIndex == 2;
-        if (hasExtension && !rtss && _wcsicmp(path.c_str() + dot, L".json") != 0) {
-            MessageBoxW(dialog.hwndOwner, L"Поддерживается только экспорт .json и .ovl.", L"YawaFpsHub",
-                MB_OK | MB_ICONWARNING);
+        if (hasExtension && !rtss && !exchange && _wcsicmp(path.c_str() + dot, L".json") != 0) {
+            MessageBoxW(dialog.hwndOwner, L"Поддерживается экспорт .json, .ovl и исходного .ovx.",
+                L"YawaFpsHub", MB_OK | MB_ICONWARNING);
+            break;
+        }
+        if (exchange && !m_model.settings.overlay.rtssExchange) {
+            MessageBoxW(dialog.hwndOwner,
+                L"Нет импортированного .ovx для обратного экспорта. "
+                L"Создание нового пакета .ovx в Yawa не поддерживается.",
+                L"YawaFpsHub", MB_OK | MB_ICONWARNING);
             break;
         }
         if (!hasExtension) {
-            path += rtss ? L".ovl" : L".json";
+            path += exchange ? L".ovx" : rtss ? L".ovl" : L".json";
             if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES
                 && MessageBoxW(dialog.hwndOwner, L"Файл уже существует. Заменить?", L"YawaFpsHub",
                        MB_YESNO | MB_ICONWARNING)
@@ -2049,9 +2066,10 @@ void MainWindow::applyAction(const UiHit& hit)
             }
             exportOriginal = choice == IDYES;
         }
-        const std::string content = exportOriginal ? *m_model.settings.overlay.rtssTemplate
-            : rtss                                 ? serializeRtssOverlay(m_model.settings.overlay)
-                                                   : serializeOverlayRecipeJson(m_model.settings.overlay);
+        const std::string content = exchange ? *m_model.settings.overlay.rtssExchange
+            : exportOriginal                 ? *m_model.settings.overlay.rtssTemplate
+            : rtss                           ? serializeRtssOverlay(m_model.settings.overlay)
+                                             : serializeOverlayRecipeJson(m_model.settings.overlay);
         if (content.empty()) {
             MessageBoxW(dialog.hwndOwner, L"Нет показателей, которые можно экспортировать в RTSS.",
                 L"YawaFpsHub", MB_OK | MB_ICONWARNING);
@@ -2063,11 +2081,16 @@ void MainWindow::applyAction(const UiHit& hit)
             }
             MessageBoxW(
                 dialog.hwndOwner, L"Не удалось сохранить файл оверлея.", L"YawaFpsHub", MB_OK | MB_ICONERROR);
+        } else if (exchange) {
+            MessageBoxW(dialog.hwndOwner,
+                L"Исходный пакет .ovx записан без изменений, включая вложенные "
+                L"файлы. Правки мастерской Yawa в нём не отражены.",
+                L"Экспорт RTSS", MB_OK | MB_ICONINFORMATION);
         } else if (rtss) {
             MessageBoxW(dialog.hwndOwner,
                 exportOriginal
-                    ? L"Исходный .ovl записан без изменений. Если шаблон ссылается на внешние изображения, "
-                      L"их файлы должны оставаться доступны RTSS по тем же путям."
+                    ? L"Исходный .ovl записан без изменений. Вложенные в импортированный .ovx изображения "
+                      L"в этот файл не включены: для полного пакета экспортируйте исходный .ovx."
                     : L"Созданы только показатели RTSS HAL и FPS. Форма, картинки и внешние датчики "
                       L"не добавлены. Проверьте шаблон в RTSS OverlayEditor.",
                 L"Экспорт RTSS", MB_OK | MB_ICONINFORMATION);
@@ -2493,7 +2516,7 @@ void MainWindow::onTick()
         std::string content;
         std::string error;
         const bool hasProfile = !gameKey.empty() && readTextFile(gameOverlayPath(gameKey), content)
-            && content.size() <= 2621440 && parseSettings(content, saved, error);
+            && content.size() <= 20 * 1024 * 1024 && parseSettings(content, saved, error);
         OverlaySettings resolved;
         {
             std::lock_guard<std::mutex> guard(m_modelMutex);

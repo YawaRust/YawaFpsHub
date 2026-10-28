@@ -38,8 +38,9 @@
     write(key, value) {
       try {
         localStorage.setItem(key, value);
+        return true;
       } catch (error) {
-        /* настройки прототипа не критичны */
+        return false; // при file:// хранилище может быть недоступно
       }
     }
   };
@@ -148,6 +149,7 @@
   };
 
   let originalRtss = store.read("rtssOriginal") || "";
+  let originalOvx = store.read("rtssExchange") || "";
   let rtssOmittedLayers = Number(store.read("rtssOmittedLayers") || 0);
   const overlayHistory = { undo: [], redo: [], committed: null, gesture: false, restoring: false };
 
@@ -1864,6 +1866,91 @@
     return data;
   }
 
+  function rtssBase64(bytes) {
+    const chunks = [];
+    for (let offset = 0; offset < bytes.length; offset += 8192) {
+      chunks.push(String.fromCharCode(...bytes.slice(offset, offset + 8192)));
+    }
+    return btoa(chunks.join(""));
+  }
+
+  function unpackOvx(bytes) {
+    const error = () => { throw new Error("Повреждённый или неподдерживаемый RTSS .ovx"); };
+    const signature = (array, at) => String.fromCharCode(...array.slice(at, at + 4));
+    if (bytes.length < 26 || bytes.length > 8 * 1024 * 1024
+      || signature(bytes, 0) !== "0CDU" || signature(bytes, 20) !== "0WZL") error();
+    const header = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const size = header.getUint32(4, true);
+    if (size < 22 || size > 24 * 1024 * 1024 || header.getUint32(8, true) !== bytes.length - 24) error();
+    const compressed = bytes.subarray(24);
+    const output = new Uint8Array(size);
+    const dictionary = Array.from({ length: 4096 }, (_, code) => code < 256 ? Uint8Array.of(code) : null);
+    let bitOffset = 0;
+    let written = 0;
+    let width = 9;
+    let nextCode = 258;
+    let previous = null;
+    let started = false;
+    let finished = false;
+    while (bitOffset + width <= compressed.length * 8) {
+      let code = 0;
+      for (let bit = 0; bit < width; ++bit) {
+        const at = bitOffset + bit;
+        code |= ((compressed[at >> 3] >> (at & 7)) & 1) << bit;
+      }
+      bitOffset += width;
+      if (code === 256) {
+        nextCode = 258; width = 9; previous = null; started = true;
+        continue;
+      }
+      if (!started) error();
+      if (code === 257) { finished = true; break; }
+      if (code > nextCode || (code === nextCode && !previous)) error();
+      const value = code === nextCode ? Uint8Array.from([...previous, previous[0]]) : dictionary[code];
+      if (!value || !value.length || value.length > size - written) error();
+      output.set(value, written);
+      written += value.length;
+      if (previous && nextCode < 4096) {
+        dictionary[nextCode] = Uint8Array.from([...previous, value[0]]);
+        nextCode++;
+        if (nextCode === (1 << width) && width < 12) width++;
+      }
+      previous = value;
+    }
+    if (!finished || written !== size) error();
+    for (; bitOffset < compressed.length * 8; ++bitOffset) {
+      if ((compressed[bitOffset >> 3] >> (bitOffset & 7)) & 1) error();
+    }
+    if (signature(output, 0) !== "0AZS") error();
+    const archive = new DataView(output.buffer);
+    const count = archive.getUint32(8, true);
+    if (archive.getUint32(4, true) !== size || count < 1 || count > 64) error();
+    const names = new Set();
+    let cursor = 12;
+    let layout = null;
+    let resources = 0;
+    for (let index = 0; index < count; ++index) {
+      if (cursor + 8 > size) error();
+      const entry = archive.getUint32(cursor, true);
+      const length = archive.getUint32(cursor + 4, true);
+      cursor += 8;
+      if (entry > size - cursor || length > entry || entry - length < 2 || entry - length > 257
+        || output[cursor + entry - 1] !== 0) error();
+      const nameBytes = output.subarray(cursor + length, cursor + entry - 1);
+      if (nameBytes.includes(0)) error();
+      const name = new TextDecoder("windows-1251").decode(nameBytes);
+      if (!name || name.includes("..") || /[\\/:]/.test(name) || names.has(name)) error();
+      names.add(name);
+      if (name.toLowerCase().endsWith(".ovl")) {
+        if (layout || length > 1024 * 1024) error();
+        layout = output.slice(cursor, cursor + length);
+      } else resources++;
+      cursor += entry;
+    }
+    if (cursor !== size || !layout?.length) error();
+    return { layout, resources };
+  }
+
   function bindOsdStyles() {
     const gallery = $("#osdStyles");
     gallery.querySelectorAll(".style-tile").forEach((tile) => { tile.dataset.recipe = tile.dataset.style; });
@@ -1922,6 +2009,7 @@
       applyOverlay();
     });
     const fileInput = $("#importOsdRecipeFile");
+    $("#exportOsdOvx").disabled = !originalOvx;
     $("#rtssOmittedHint").textContent = rtssOmittedLayers
       ? `RTSS: ${rtssOmittedLayers} слоёв только в оригинале` : "";
     $("#importOsdRecipe").addEventListener("click", () => fileInput.click());
@@ -1929,9 +2017,14 @@
       const file = fileInput.files?.[0];
       if (!file) return;
       try {
-        if (file.name.toLowerCase().endsWith(".ovl")) {
-          if (file.size > 1024 * 1024) throw new Error("Файл RTSS слишком большой (предел 1 МиБ)");
-          const bytes = new Uint8Array(await file.arrayBuffer());
+        const isOvx = file.name.toLowerCase().endsWith(".ovx");
+        if (isOvx || file.name.toLowerCase().endsWith(".ovl")) {
+          if (file.size > (isOvx ? 8 * 1024 * 1024 : 1024 * 1024)) {
+            throw new Error("Файл RTSS слишком большой");
+          }
+          const inputBytes = new Uint8Array(await file.arrayBuffer());
+          const { layout: bytes, resources } = isOvx ? unpackOvx(inputBytes)
+            : { layout: inputBytes, resources: 0 };
           const text = new TextDecoder("windows-1251").decode(bytes);
           if (!/^Implementation=2\s*$/mi.test(text) || !/^Layers=([1-9]\d*)\s*$/mi.test(text)) {
             throw new Error("Ожидался текстовый шаблон RTSS OverlayEditor v2");
@@ -1983,14 +2076,13 @@
           if (!sections.some(([, index]) => Number(index) < layers)) {
             throw new Error("В шаблоне нет слоёв RTSS");
           }
-          const chunks = [];
-          for (let offset = 0; offset < bytes.length; offset += 8192) {
-            chunks.push(String.fromCharCode(...bytes.slice(offset, offset + 8192)));
-          }
-          originalRtss = btoa(chunks.join(""));
+          originalRtss = rtssBase64(bytes);
+          originalOvx = isOvx ? rtssBase64(inputBytes) : "";
           rtssOmittedLayers = omitted;
-          store.write("rtssOriginal", originalRtss);
+          const persisted = store.write("rtssOriginal", originalRtss)
+            && store.write("rtssExchange", originalOvx);
           store.write("rtssOmittedLayers", String(omitted));
+          $("#exportOsdOvx").disabled = !originalOvx;
           $("#rtssOmittedHint").textContent = omitted
             ? `RTSS: ${omitted} слоёв только в оригинале` : "";
           gallery.querySelector('[data-recipe="rtss"]').click();
@@ -1998,7 +2090,8 @@
           overlayState.metricOrder = [...chosen];
           overlayState.metricRgba = colors;
           saveOverlaySensors(); rebuildOverlaySensors(); applySensorFilter(); applyOverlay();
-          toast(`RTSS: ${omitted} слоёв только в оригинале; файл сохранён для обратного экспорта`);
+          toast(`RTSS: ${omitted} слоёв только в оригинале, ${resources} ресурсов в пакете; `
+            + (persisted ? "сохранено для обратного экспорта" : "сохранено до закрытия вкладки"));
           return;
         }
         if (file.size > 16384) throw new Error("Файл рецепта слишком большой (предел 16 КБ)");
@@ -2028,6 +2121,17 @@
       } finally {
         fileInput.value = "";
       }
+    });
+    $("#exportOsdOvx").addEventListener("click", () => {
+      if (!originalOvx) return;
+      const bytes = Uint8Array.from(atob(originalOvx), (symbol) => symbol.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "rtss-original.ovx";
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast("Исходный .ovx сохранён без изменений; правки Yawa в него не включены");
     });
     $("#exportOsdRtss").addEventListener("click", () => {
       if (originalRtss && window.confirm("Экспортировать исходный RTSS .ovl без изменений?\n"
