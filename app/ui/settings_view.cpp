@@ -231,7 +231,9 @@ void drawAboutCard(Renderer& renderer, const AppModel& model, const Theme& theme
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
-    float top = drawSettingsCardHeader(renderer, card, L"О программе", L"YawaFpsHub 0.4 · Windows 10/11 x64", theme);
+    const std::wstring build
+        = wideText(std::string("YawaFpsHub ") + YAWA_VERSION_STRING + " · Windows 10/11 x64");
+    float top = drawSettingsCardHeader(renderer, card, L"О программе", build, theme);
 
     const std::array<std::array<std::wstring, 2>, 4> rows {
         std::array<std::wstring, 2> { L"Собственное потребление",
