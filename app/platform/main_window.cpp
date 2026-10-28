@@ -1992,15 +1992,26 @@ void MainWindow::applyAction(const UiHit& hit)
             break;
         }
         if (rtss) {
-            const std::wstring notice = L"Распознанные датчики HAL и FPS доступны в Yawa. "
-                + std::to_wstring(imported.rtssOmittedLayers) + L" слоёв не показаны. "
-                + (exchange ? L"Исходный .ovx и " + std::to_wstring(imported.rtssResources)
-                            + L" вложенных ресурсов сохранены в пакете для обратного экспорта. "
-                              L"Yawa их не распаковывает и не отрисовывает."
-                            : L"Исходный .ovl сохранён без изменений для обратного экспорта. "
-                              L"Внешние изображения остаются на прежних путях.")
-                + L" Правки в мастерской влияют только на вид в Yawa.";
-            MessageBoxW(dialog.hwndOwner, notice.c_str(), L"Импорт RTSS", MB_OK | MB_ICONINFORMATION);
+            const bool hasRows = std::any_of(
+                imported.metrics.begin(), imported.metrics.end(), [](bool selected) { return selected; });
+            if (!hasRows) {
+                MessageBoxW(dialog.hwndOwner,
+                    L"Не найдено ни одного показателя, который Yawa может отобразить. "
+                    L"Импорт отменён, текущий оверлей не изменён. Этот шаблон нельзя "
+                    L"воспроизвести простым переименованием .ovx в .ovl.",
+                    L"Шаблон RTSS не перенесён", MB_OK | MB_ICONWARNING);
+                break;
+            }
+            const std::wstring notice = L"Это частичный перенос, а не копия оверлея 1:1. "
+                + std::to_wstring(imported.rtssOmittedLayers)
+                + L" слоёв не будут показаны. Геометрия, произвольный текст, графики, "
+                  L"шрифты и картинки RTSS также не переносятся. Исходный файл сохранится "
+                  L"для обратного экспорта.\n\nЗаменить текущий оверлей только распознанными показателями?";
+            if (MessageBoxW(dialog.hwndOwner, notice.c_str(), L"Частичный импорт RTSS",
+                    MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2)
+                != IDYES) {
+                break;
+            }
         }
         m_model.settings.overlay = std::move(imported);
         m_overlay.setSettings(m_model.settings.overlay);

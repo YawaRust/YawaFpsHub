@@ -2076,6 +2076,12 @@
           if (!sections.some(([, index]) => Number(index) < layers)) {
             throw new Error("В шаблоне нет слоёв RTSS");
           }
+          if (!chosen.size) {
+            throw new Error("Нет показателей для Yawa. Текущий оверлей не изменён");
+          }
+          if (!window.confirm(`Это частичный импорт, не копия 1:1. ${omitted} слоёв, `
+              + "геометрия, текст, графики и картинки RTSS не переносятся. "
+              + "Заменить текущий оверлей только распознанными показателями?")) return;
           originalRtss = rtssBase64(bytes);
           originalOvx = isOvx ? rtssBase64(inputBytes) : "";
           rtssOmittedLayers = omitted;
