@@ -1620,6 +1620,17 @@
 
     osd.addEventListener("pointerdown", (event) => {
       if (event.button !== 0) return;
+      const rect = osd.getBoundingClientRect();
+      if (rect.width >= 60 && rect.height >= 45 && event.clientX >= rect.right - 16
+        && event.clientY >= rect.bottom - 16) {
+        drag = { resize: true, x: event.clientX, y: event.clientY,
+          width: rect.width, height: rect.height, scale: overlayState.scale };
+        overlayHistory.gesture = true;
+        osd.setPointerCapture(event.pointerId);
+        osd.classList.add("is-resizing");
+        event.preventDefault();
+        return;
+      }
       const row = overlayState.layout === "plates" && !event.altKey
         ? event.target.closest(".osd__row") : null;
       if (row) selectOverlayLayer(row.querySelector("[data-metric]")?.dataset.metric || "fps");
@@ -1653,6 +1664,15 @@
 
     osd.addEventListener("pointermove", (event) => {
       if (!drag) return;
+      if (drag.resize) {
+        const deltaX = (event.clientX - drag.x) / Math.max(1, drag.width);
+        const deltaY = (event.clientY - drag.y) / Math.max(1, drag.height);
+        overlayState.scale = Math.max(70, Math.min(160,
+          Math.round(drag.scale * (1 + (deltaX + deltaY) / 2))));
+        applyOverlay();
+        syncOsdControls();
+        return;
+      }
       const screen = osd.offsetParent.getBoundingClientRect();
       const plate = osd.getBoundingClientRect();
       if (drag.row) {
@@ -1713,11 +1733,25 @@
       guides.classList.remove("is-active");
       showGuide("x", null);
       showGuide("y", null);
-      osd.classList.remove("is-dragging");
+      osd.classList.remove("is-dragging", "is-resizing");
       if (osd.hasPointerCapture(event.pointerId)) osd.releasePointerCapture(event.pointerId);
     };
     osd.addEventListener("pointerup", release);
     osd.addEventListener("pointercancel", release);
+    osd.addEventListener("wheel", (event) => {
+      if (!event.ctrlKey && !event.shiftKey) return;
+      const step = event.deltaY < 0 ? 1 : -1;
+      if (event.ctrlKey && event.shiftKey) {
+        overlayState.rowGap = Math.max(0, Math.min(14, (overlayState.rowGap ?? 3) + step * 2));
+      } else if (event.ctrlKey) {
+        overlayState.scale = Math.max(70, Math.min(160, overlayState.scale + step * 5));
+      } else {
+        overlayState.padding = Math.max(0, Math.min(28, (overlayState.padding ?? 10) + step * 2));
+      }
+      event.preventDefault();
+      applyOverlay();
+      syncOsdControls();
+    }, { passive: false });
   }
 
   function bindOsdChrome() {

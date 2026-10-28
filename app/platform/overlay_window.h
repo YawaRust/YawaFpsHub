@@ -42,13 +42,15 @@ public:
     void hide();
     void toggle(std::string* error = nullptr);
     bool isVisible() const { return m_visible; }
-    bool isDragging() const { return m_dragging; }
+    bool hasVisiblePixels() const;
+    bool isDragging() const { return m_dragging || m_resizing; }
 
     void repaint();
 
     // Перетаскивание прямо по оверлею: Ctrl + левая кнопка мыши. Координаты —
     // origin_x/y в свободном режиме, offset_x/y в угловом (finished — отпускание).
     void setMoveHandler(std::function<void(int offsetX, int offsetY, bool finished)> handler);
+    void setDirectEditHandler(std::function<void(int scale, int padding, int rowGap, bool finished)> handler);
     // Окно приложения: правый клик по оверлею показывает его, чтобы не искать в трее.
     void setOwnerWindow(HWND owner) { m_owner = owner; }
 
@@ -72,6 +74,9 @@ private:
     void beginDrag(int screenX, int screenY);
     void updateDrag(int screenX, int screenY);
     void endDrag();
+    bool onResizeCorner(int x, int y) const;
+    void updateResize(int x, int y);
+    void finishResize();
     void startAnimation(const OverlaySettings& from, bool fadeContent);
     void tickAnimation();
     OverlaySettings animatedSettings() const;
@@ -107,6 +112,12 @@ private:
 
     // Перетаскивание и плавные переходы.
     std::function<void(int, int, bool)> m_onMove;
+    std::function<void(int, int, int, bool)> m_onDirectEdit;
+    bool m_resizing = false;
+    POINT m_resizeOrigin{};
+    int m_resizeScale = 100;
+    float m_resizeWidth = 1.0f;
+    float m_resizeHeight = 1.0f;
     bool m_dragging = false;
     POINT m_dragOrigin{};
     int m_dragOffsetX = 0;

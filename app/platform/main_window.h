@@ -48,6 +48,7 @@ public:
         m_overlay.setSettings(m_model.settings.overlay);
     }
     void setOverlayVisible(bool visible);
+    bool smokeImportRtss(std::string_view package, std::string& error);
     void openEditorForSmoke();
     void scheduleSensorElevation();
     void exportOverlayStyles();

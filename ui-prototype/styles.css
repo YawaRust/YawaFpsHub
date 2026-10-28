@@ -1938,6 +1938,7 @@ body.is-paused .tag--live { color: var(--warn); border-color: rgba(255, 179, 71,
 }
 .osd { cursor: grab; }
 .osd.is-dragging { cursor: grabbing; transition: none; }
+.osd.is-resizing { cursor: nwse-resize; transition: none; }
 
 
 /* ── «Баланс»: калькулятор узкого места и «Сведения о системе» ─────────────── */

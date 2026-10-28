@@ -139,6 +139,13 @@ jobs:
           if (-not $exe) { throw "Собранный YawaFpsHub.exe не найден" }
           python tests/test_report_cli.py --exe $exe
 
+      - name: Проверить видимый оверлей после импорта RTSS
+        shell: pwsh
+        run: |
+          $exe = (Get-ChildItem -Path .\build -Recurse -Filter YawaFpsHub.exe | Select-Object -First 1).FullName
+          $process = Start-Process -FilePath $exe -ArgumentList @("--smoke=2", "--smoke-rtss=tests/fixtures/rtss_visual.ovl") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Импорт RTSS создал невидимый оверлей (exit $($process.ExitCode))" }
+
       - name: Самопроверка приложения
         shell: pwsh
         run: |

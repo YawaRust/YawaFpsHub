@@ -1085,16 +1085,25 @@ bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::str
         return std::clamp(parseInt(value, fallback), -512, 2048);
     };
     const auto decodeColor = [](std::string_view encoded, std::uint32_t fallback) {
-        encoded = encoded.substr(0, encoded.find(','));
-        if (encoded.size() != 6 && encoded.size() != 8) {
-            return fallback;
+        // У RTSS условный цвет начинается с управляющих полей, затем идут
+        // цветовые значения. Берём первое буквальное значение, не вычисляя условие.
+        for (int index = 0; index < 12 && !encoded.empty(); ++index) {
+            const auto comma = encoded.find(',');
+            const std::string_view candidate = encoded.substr(0, comma);
+            if (candidate.size() == 6 || candidate.size() == 8) {
+                std::uint32_t parsed = 0;
+                const auto result
+                    = std::from_chars(candidate.data(), candidate.data() + candidate.size(), parsed, 16);
+                if (result.ec == std::errc { } && result.ptr == candidate.data() + candidate.size()) {
+                    return candidate.size() == 6 ? parsed | 0xFF000000u : parsed;
+                }
+            }
+            if (comma == std::string_view::npos) {
+                break;
+            }
+            encoded.remove_prefix(comma + 1);
         }
-        std::uint32_t parsed = 0;
-        const auto result = std::from_chars(encoded.data(), encoded.data() + encoded.size(), parsed, 16);
-        if (result.ec != std::errc { } || result.ptr != encoded.data() + encoded.size()) {
-            return fallback;
-        }
-        return encoded.size() == 6 ? parsed | 0xFF000000u : parsed;
+        return fallback;
     };
     std::array<bool, kMetricCount> selected { };
     std::array<std::string, 256> layerTexts { };

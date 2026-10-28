@@ -276,6 +276,20 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
             }
             InvalidateRect(m_window, nullptr, FALSE);
         });
+        m_overlay.setDirectEditHandler([this](int scale, int padding, int rowGap, bool finished) {
+            {
+                std::lock_guard<std::mutex> guard(m_modelMutex);
+                auto& overlay = m_model.settings.overlay;
+                overlay.scalePercent = scale;
+                overlay.paddingPx = padding;
+                overlay.rowGapPx = rowGap;
+            }
+            if (finished) {
+                saveSettings();
+            }
+            m_overlayEditor.refresh();
+            InvalidateRect(m_window, nullptr, FALSE);
+        });
     }
 
     m_model.settingsPath = settingsPath();
@@ -413,6 +427,28 @@ void MainWindow::setOverlayVisible(bool visible)
     if (visible != m_overlay.isVisible()) {
         toggleOverlay();
     }
+}
+
+bool MainWindow::smokeImportRtss(std::string_view package, std::string& error)
+{
+    OverlaySettings imported = m_model.settings.overlay;
+    const bool parsed = package.starts_with("0CDU") ? importRtssExchange(package, imported, error)
+                                                    : importRtssOverlay(package, imported, error);
+    if (!parsed) {
+        return false;
+    }
+    imported.opacityPercent = 100;
+    m_overlay.setSettings(imported);
+    if (!m_overlay.show(&error)) {
+        return false;
+    }
+    if (!m_overlay.hasVisiblePixels()) {
+        error = "импорт RTSS создал прозрачный кадр";
+        return false;
+    }
+    m_model.settings.overlay = std::move(imported);
+    m_model.overlayVisible = true;
+    return true;
 }
 
 int MainWindow::run(int smokeSeconds, const std::wstring& overlayShotDir)
@@ -2014,8 +2050,36 @@ void MainWindow::applyAction(const UiHit& hit)
                 break;
             }
         }
+        const OverlaySettings previous = m_model.settings.overlay;
+        const bool wasVisible = m_overlay.isVisible();
+        if (rtss && imported.opacityPercent == 0) {
+            imported.opacityPercent = 100;
+        }
         m_model.settings.overlay = std::move(imported);
         m_overlay.setSettings(m_model.settings.overlay);
+        std::string renderError;
+        if (!wasVisible && !m_model.menuScene) {
+            m_overlay.show(&renderError);
+        }
+        if (renderError.empty() && m_overlay.isVisible() && m_model.settings.overlay.opacityPercent > 0
+            && !m_overlay.hasVisiblePixels()) {
+            renderError = "Импортированный макет не дал видимых пикселей";
+        }
+        if (!renderError.empty()) {
+            m_model.settings.overlay = previous;
+            m_overlay.setSettings(previous);
+            if (!wasVisible) {
+                m_overlay.hide();
+            }
+            m_model.overlayVisible = wasVisible;
+            if (m_log) {
+                m_log->warning("импорт оверлея: " + renderError);
+            }
+            MessageBoxW(dialog.hwndOwner, widen(renderError).c_str(), L"Оверлей оставлен без изменений",
+                MB_OK | MB_ICONWARNING);
+            break;
+        }
+        m_model.overlayVisible = m_overlay.isVisible();
         saveSettings();
         m_overlayEditor.refresh();
         InvalidateRect(m_window, nullptr, FALSE);

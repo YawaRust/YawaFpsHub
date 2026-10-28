@@ -1027,9 +1027,13 @@ namespace {
                 placed.push_back({ });
                 continue;
             }
-            const float width = layer.width == 0
+            const float nominalWidth = layer.width == 0
                 ? std::max(static_cast<float>(text.size()) * cellWidth, cellWidth)
                 : units(layer.width, false);
+            // Не обрезаем «нет данных» до одного символа у узких RTSS-слоёв.
+            const float width = text.find(L"нет данных") != std::wstring::npos
+                ? std::max(nominalWidth, static_cast<float>(text.size()) * cellWidth)
+                : nominalWidth;
             const float height
                 = layer.height == 0 ? cellHeight * layer.size / 100.0f : units(layer.height, true);
             float x = units(layer.x, false);

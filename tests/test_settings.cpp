@@ -856,7 +856,7 @@ namespace {
                                    "FontWeight=700\nZoomRatio=2\n[General]\nLayers=3\nSources=1\n"
                                    "[Source0]\nName=GPU1 usage\nProvider=Other\nID=GPU1 usage\n"
                                    "[Layer0]\nText=GPU\nPositionX=-2\nPositionY=-4\n"
-                                   "ExtentX=-16\nExtentY=-6\nBgndColor=80000000\n"
+                                   "ExtentX=-16\nExtentY=-6\nBgndColor=1000000,,0,80000000,0,(Framerate,1)\n"
                                    "[Layer1]\nText=%GPU1 usage%\nPositionX=-12\nTextColor=FFFF8000\n"
                                    "[Layer2]\nText=<FR> FPS\nExtentOrigin=2\nSize=200\n";
         OverlaySettings imported;

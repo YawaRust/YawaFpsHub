@@ -1,0 +1,37 @@
+[Master]
+Implementation=2
+FontFace=Consolas
+FontHeight=-13
+FontWeight=700
+ZoomRatio=1
+[General]
+Sources=1
+Layers=3
+[Source0]
+Name=CPU temperature
+Provider=HWiNFO
+ID=CPU temperature
+[Layer0]
+Name=Dynamic background
+Text=
+PositionX=0
+PositionY=0
+ExtentX=-35
+ExtentY=-7
+BgndColor=1000000,,0,80000000,0,(CPU temperature,1)
+[Layer1]
+Name=Unknown external sensor
+Text=CPU %CPU temperature% °C
+PositionX=-2
+PositionY=-1
+ExtentX=-24
+ExtentY=-2
+TextColor=FFFFFFFF
+[Layer2]
+Name=FPS
+Text=<FR> FPS
+PositionX=-2
+PositionY=-4
+ExtentX=-24
+ExtentY=-2
+TextColor=FFFFFFFF
