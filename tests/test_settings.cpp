@@ -881,6 +881,12 @@ namespace {
         CHECK(restored.overlay.rtssTemplate && *restored.overlay.rtssTemplate == source);
         CHECK(restored.overlay.rtssVisual && restored.overlay.rtssVisual->layers[0].x == -2);
         CHECK(restored.overlay.rtssVisual->availableTags.size() == 1);
+        Settings invalidEdits;
+        CHECK(parseSettings("[rtss_layer_edits]\n1 = 2049,0,0\n2 = 0,0,3\n256 = 1,1,1\n",
+            invalidEdits, error));
+        CHECK(invalidEdits.overlay.rtssLayerEdits[1].visible
+            && invalidEdits.overlay.rtssLayerEdits[1].x == 0
+            && invalidEdits.overlay.rtssLayerEdits[2].visible);
         CHECK(importRtssOverlay(source, restored.overlay, error));
         CHECK(restored.overlay.rtssLayerEdits[1].visible
             && restored.overlay.rtssLayerEdits[1].x == 0);

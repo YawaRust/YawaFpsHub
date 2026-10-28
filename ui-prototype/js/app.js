@@ -145,13 +145,18 @@
     fpsDecimals: null,
     clickThrough: false,
     labels: { ...DEFAULT_LABELS },
-    rowPositions: {}
+    rowPositions: {},
+    rtssLayerEdits: {}
   };
 
   let originalRtss = store.read("rtssOriginal") || "";
   let originalOvx = store.read("rtssExchange") || "";
   let rtssVisualSource = "";
   let rtssVisual = null;
+  try {
+    const edits = JSON.parse(store.read("rtssLayerEdits") || "{}");
+    if (edits && typeof edits === "object" && !Array.isArray(edits)) overlayState.rtssLayerEdits = edits;
+  } catch { /* Повреждённые правки не мешают открыть демо. */ }
   let rtssOmittedLayers = Number(store.read("rtssOmittedLayers") || 0);
   const overlayHistory = { undo: [], redo: [], committed: null, gesture: false, restoring: false };
 
@@ -178,6 +183,8 @@
     const snapshot = source.pop();
     const previousGraph = overlayState.sparklineMetric;
     Object.assign(overlayState, JSON.parse(snapshot));
+    store.write("rtssLayerEdits", JSON.stringify(overlayState.rtssLayerEdits || {}));
+    renderOverlayLayers();
     if (previousGraph !== overlayState.sparklineMetric) {
       sparklineHistory.length = 0;
       $("#osdSparklinePoints").setAttribute("points", "");
@@ -375,17 +382,24 @@
   function selectOverlayLayer(id) {
     selectedLayer = id;
     const hex = currentRgba() || "#FFFFFFFF";
-    $("#osdLayerName").textContent = colorTarget === "metric"
-      ? sensorRows.get(id)?.sensor.label || id : $("#osdColorTarget").selectedOptions[0].textContent;
+    $("#osdLayerName").textContent = id.startsWith("rtss:")
+      ? `RTSS · слой ${id.slice(5)} (перемещение и глазик)`
+      : colorTarget === "metric"
+        ? sensorRows.get(id)?.sensor.label || id : $("#osdColorTarget").selectedOptions[0].textContent;
     $("#osdLayerHex").value = hex;
     $("#osdLayerPicker").value = hex.slice(0, 7);
     $("#osdLayerAlpha").value = String(Math.round(parseInt(hex.slice(7, 9), 16) / 255 * 100));
     $("#osdLayerAlphaValue").textContent = `${$("#osdLayerAlpha").value}%`;
+    ["osdLayerHex", "osdLayerPicker", "osdLayerAlpha", "osdLayerAuto", "osdLayerSample"]
+      .forEach((field) => { $(`#${field}`).disabled = id.startsWith("rtss:"); });
     $$("#osdLayers .workshop-layer__name").forEach((button) => {
       button.classList.toggle("is-active", button.dataset.layer === id);
     });
     $$("#osdPreview .osd__row").forEach((row) => {
       row.classList.toggle("is-selected", row.querySelector(`[data-metric="${id}"]`) !== null);
+    });
+    $$("#osdPreview .rtss-visual-layer").forEach((node) => {
+      node.classList.toggle("is-selected", id === `rtss:${node.dataset.rtssLayer}`);
     });
   }
 
@@ -416,6 +430,33 @@
       });
       row.append(name, eye);
       host.appendChild(row);
+    }
+    if (overlayState.recipe === "rtss" && originalRtss && rtssVisual) {
+      for (const layer of rtssVisual.layers) {
+        const id = `rtss:${layer.index}`;
+        const edit = overlayState.rtssLayerEdits[layer.index] || {};
+        const row = document.createElement("div");
+        row.className = "workshop-layer";
+        const name = document.createElement("button");
+        name.type = "button";
+        name.className = "workshop-layer__name";
+        name.dataset.layer = id;
+        name.textContent = `RTSS · ${layer.name || `слой ${layer.index}`}`;
+        name.addEventListener("click", () => selectOverlayLayer(id));
+        const eye = document.createElement("button");
+        eye.type = "button";
+        eye.className = `workshop-layer__eye${edit.visible === false ? "" : " is-on"}`;
+        eye.textContent = edit.visible === false ? "○" : "◉";
+        eye.setAttribute("aria-label", `${edit.visible === false ? "Показать" : "Скрыть"} слой ${layer.index}`);
+        eye.addEventListener("click", () => {
+          overlayState.rtssLayerEdits[layer.index] = { ...edit, visible: edit.visible === false };
+          store.write("rtssLayerEdits", JSON.stringify(overlayState.rtssLayerEdits));
+          applyOverlay();
+          renderOverlayLayers();
+        });
+        row.append(name, eye);
+        host.appendChild(row);
+      }
     }
     selectOverlayLayer(selectedLayer);
   }
@@ -1631,6 +1672,19 @@
         event.preventDefault();
         return;
       }
+      const rtssNode = !event.altKey && overlayState.recipe === "rtss"
+        ? event.target.closest(".rtss-visual-layer") : null;
+      if (rtssNode) {
+        const index = Number(rtssNode.dataset.rtssLayer);
+        const edit = overlayState.rtssLayerEdits[index] || {};
+        selectOverlayLayer(`rtss:${index}`);
+        drag = { rtss: index, x: event.clientX, y: event.clientY,
+          layerX: edit.x || 0, layerY: edit.y || 0 };
+        overlayHistory.gesture = true;
+        osd.setPointerCapture(event.pointerId);
+        event.preventDefault();
+        return;
+      }
       const row = overlayState.layout === "plates" && !event.altKey
         ? event.target.closest(".osd__row") : null;
       if (row) selectOverlayLayer(row.querySelector("[data-metric]")?.dataset.metric || "fps");
@@ -1664,6 +1718,16 @@
 
     osd.addEventListener("pointermove", (event) => {
       if (!drag) return;
+      if (drag.rtss !== undefined) {
+        const plate = osd.getBoundingClientRect();
+        const unit = Math.max(.001, plate.width / Math.max(1, osd.offsetWidth) * rtssVisual.zoom);
+        const edit = overlayState.rtssLayerEdits[drag.rtss] || {};
+        overlayState.rtssLayerEdits[drag.rtss] = { ...edit,
+          x: Math.max(-2048, Math.min(2048, Math.round(drag.layerX + (event.clientX - drag.x) / unit))),
+          y: Math.max(-2048, Math.min(2048, Math.round(drag.layerY + (event.clientY - drag.y) / unit))) };
+        applyOverlay();
+        return;
+      }
       if (drag.resize) {
         const deltaX = (event.clientX - drag.x) / Math.max(1, drag.width);
         const deltaY = (event.clientY - drag.y) / Math.max(1, drag.height);
@@ -1727,6 +1791,7 @@
 
     const release = (event) => {
       if (!drag) return;
+      if (drag.rtss !== undefined) store.write("rtssLayerEdits", JSON.stringify(overlayState.rtssLayerEdits));
       drag = null;
       overlayHistory.gesture = false;
       recordOverlayHistory();
@@ -1738,6 +1803,22 @@
     };
     osd.addEventListener("pointerup", release);
     osd.addEventListener("pointercancel", release);
+    document.addEventListener("keydown", (event) => {
+      if (!$("[data-view=overlay]").classList.contains("is-active") || !selectedLayer.startsWith("rtss:")
+        || event.target.closest("input, textarea, select") || !event.key.startsWith("Arrow")) return;
+      const index = Number(selectedLayer.slice(5));
+      const edit = overlayState.rtssLayerEdits[index] || {};
+      const step = event.shiftKey ? 10 : 1;
+      const dx = event.key === "ArrowLeft" ? -step : event.key === "ArrowRight" ? step : 0;
+      const dy = event.key === "ArrowUp" ? -step : event.key === "ArrowDown" ? step : 0;
+      if (!dx && !dy) return;
+      overlayState.rtssLayerEdits[index] = { ...edit,
+        x: Math.max(-2048, Math.min(2048, (edit.x || 0) + dx)),
+        y: Math.max(-2048, Math.min(2048, (edit.y || 0) + dy)) };
+      store.write("rtssLayerEdits", JSON.stringify(overlayState.rtssLayerEdits));
+      event.preventDefault();
+      applyOverlay();
+    });
     osd.addEventListener("wheel", (event) => {
       if (!event.ctrlKey && !event.shiftKey) return;
       const step = event.deltaY < 0 ? 1 : -1;
@@ -1938,7 +2019,8 @@
       const origin = Math.max(0, Math.min(8, number("ExtentOrigin")));
       const x = units(number("PositionX"), false) - layerWidth * (origin % 3) / 2;
       const y = units(number("PositionY"), true) - layerHeight * Math.floor(origin / 3) / 2;
-      layers.push({ label, bg, color: field(body, "TextColor", "").split(",")[0],
+      layers.push({ index: Number(index), name: field(body, "Name", "").slice(0, 96),
+        label, bg, color: field(body, "TextColor", "").split(",")[0],
         size: Math.max(10, Math.min(400, number("Size", 100))),
         x, y, width: layerWidth, height: layerHeight });
       width = Math.max(width, x + layerWidth);
@@ -1947,25 +2029,37 @@
     const sources = [...text.matchAll(/^\[Source\d+\]\s*$([\s\S]*?)(?=^\[|$(?![\s\S]))/gmi)]
       .map(([, body]) => ({ name: field(body, "Name", ""),
         provider: field(body, "Provider", ""), id: field(body, "ID", "") }));
-    return { layers, width, height, cellHeight, sources,
+    return { layers, width, height, cellHeight, zoom, sources,
       family: field(master, "FontFace", "Consolas").slice(0, 96),
       weight: Math.max(100, Math.min(900, Number(field(master, "FontWeight", "400")) || 400)) };
   }
 
   function renderRtssVisual(osd) {
     const visualActive = overlayState.recipe === "rtss" && Boolean(originalRtss);
+    const wasVisual = osd.classList.contains("is-rtss-visual");
     osd.classList.toggle("is-rtss-visual", visualActive);
     osd.querySelector(".rtss-visual-canvas")?.remove();
-    if (!visualActive) return;
+    if (!visualActive) {
+      if (wasVisual) renderOverlayLayers();
+      return;
+    }
     if (rtssVisualSource !== originalRtss) {
       rtssVisualSource = originalRtss;
       try { rtssVisual = parseRtssVisual(originalRtss); } catch { rtssVisual = null; }
+      renderOverlayLayers();
     }
-    if (!rtssVisual) return;
+    if (!rtssVisual?.layers.length) {
+      osd.classList.remove("is-rtss-visual");
+      return;
+    }
+    const visibleLayers = rtssVisual.layers.filter(
+      (layer) => overlayState.rtssLayerEdits[layer.index]?.visible !== false);
     const canvas = document.createElement("div");
     canvas.className = "rtss-visual-canvas";
-    canvas.style.width = `${rtssVisual.width}px`;
-    canvas.style.height = `${rtssVisual.height}px`;
+    canvas.style.width = `${Math.max(1, ...visibleLayers.map((layer) =>
+      layer.x + layer.width + (overlayState.rtssLayerEdits[layer.index]?.x || 0) * rtssVisual.zoom))}px`;
+    canvas.style.height = `${Math.max(1, ...visibleLayers.map((layer) =>
+      layer.y + layer.height + (overlayState.rtssLayerEdits[layer.index]?.y || 0) * rtssVisual.zoom))}px`;
     canvas.style.fontFamily = `'${rtssVisual.family.replaceAll("'", "")}', Consolas, monospace`;
     canvas.style.fontWeight = String(rtssVisual.weight);
     const paint = (encoded, fallback) => /^[0-9a-f]{6}([0-9a-f]{2})?$/i.test(encoded)
@@ -1975,11 +2069,13 @@
       "%cpu power%": "cpuPower", "%gpu1 usage%": "gpu", "%gpu1 temperature%": "gpuTemp",
       "%gpu1 clock%": "gpuClock", "%gpu1 power%": "gpuPower",
       "%gpu1 memory usage%": "vramUsed", "%total ram%": "ramUsed" };
-    for (const layer of rtssVisual.layers) {
+    for (const layer of visibleLayers) {
+      const edit = overlayState.rtssLayerEdits[layer.index] || {};
       const node = document.createElement("span");
-      node.className = "rtss-visual-layer";
-      node.style.left = `${layer.x}px`;
-      node.style.top = `${layer.y}px`;
+      node.className = `rtss-visual-layer${selectedLayer === `rtss:${layer.index}` ? " is-selected" : ""}`;
+      node.dataset.rtssLayer = String(layer.index);
+      node.style.left = `${layer.x + (edit.x || 0) * rtssVisual.zoom}px`;
+      node.style.top = `${layer.y + (edit.y || 0) * rtssVisual.zoom}px`;
       node.style.width = `${layer.width}px`;
       node.style.height = `${layer.height}px`;
       node.style.fontSize = `${rtssVisual.cellHeight * layer.size / 100}px`;
@@ -2203,14 +2299,18 @@
           if (!sections.some(([, index]) => Number(index) < layers)) {
             throw new Error("В шаблоне нет слоёв RTSS");
           }
-          if (!chosen.size && !sections.some(([, , body]) => /^Text=.+|^BgndColor=.+/mi.test(body))) {
-            throw new Error("Нет слоёв для отображения. Текущий оверлей не изменён");
+          const preflight = parseRtssVisual(rtssBase64(bytes));
+          if (!preflight.layers.length || preflight.width <= 0 || preflight.height <= 0
+            || !preflight.layers.some((layer) => layer.label || layer.bg)) {
+            throw new Error("RTSS-макет не даёт видимого кадра. Текущий оверлей не изменён");
           }
           if (!window.confirm(`Это предварительная отрисовка, не копия RTSS 1:1. ${omitted} слоёв `
               + "без связанной метрики. Фон, текст и координаты переносятся, "
               + "графики, сложные теги и картинки пока нет. Открыть макет?")) return;
           originalRtss = rtssBase64(bytes);
           originalOvx = isOvx ? rtssBase64(inputBytes) : "";
+          overlayState.rtssLayerEdits = {};
+          store.write("rtssLayerEdits", "{}");
           rtssOmittedLayers = omitted;
           const persisted = store.write("rtssOriginal", originalRtss)
             && store.write("rtssExchange", originalOvx);

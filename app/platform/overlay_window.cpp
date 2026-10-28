@@ -84,8 +84,9 @@ LRESULT CALLBACK OverlayWindow::windowProc(HWND window, UINT message, WPARAM wPa
                 && static_cast<float>(cursor.y) >= area.top - 4.0f
                 && static_cast<float>(cursor.y) <= area.bottom + 4.0f;
             if (overContent) {
-                SetCursor(LoadCursorW(
-                    nullptr, self->onResizeCorner(cursor.x, cursor.y) ? IDC_SIZENWSE : IDC_SIZEALL));
+                const wchar_t* shape = self->onResizeCorner(cursor.x, cursor.y) ? IDC_SIZENWSE
+                    : self->layerAt(cursor.x, cursor.y) >= 0 ? IDC_HAND : IDC_SIZEALL;
+                SetCursor(LoadCursorW(nullptr, shape));
                 return TRUE;
             }
         }
@@ -101,6 +102,15 @@ LRESULT CALLBACK OverlayWindow::windowProc(HWND window, UINT message, WPARAM wPa
                 self->m_resizeScale = self->m_settings.scalePercent;
                 self->m_resizeWidth = self->m_contentRectD2D.right - self->m_contentRectD2D.left;
                 self->m_resizeHeight = self->m_contentRectD2D.bottom - self->m_contentRectD2D.top;
+            } else if (self->m_onLayerEdit && GetKeyState(VK_MENU) >= 0
+                && self->layerAt(x, y) >= 0) {
+                self->m_layerIndex = static_cast<std::size_t>(self->layerAt(x, y));
+                self->m_layerDragging = true;
+                self->m_layerDragOrigin = POINT { x, y };
+                self->m_layerDragScale = self->m_rtssLayerScale;
+                const RtssLayerEdit& edit = self->m_settings.rtssLayerEdits[self->m_layerIndex];
+                self->m_layerStartX = edit.x;
+                self->m_layerStartY = edit.y;
             } else {
                 self->beginDrag(x + static_cast<int>(self->m_monitorRect.left),
                     y + static_cast<int>(self->m_monitorRect.top));
@@ -122,6 +132,10 @@ LRESULT CALLBACK OverlayWindow::windowProc(HWND window, UINT message, WPARAM wPa
     case WM_MOUSEMOVE:
         if (self != nullptr && self->m_resizing) {
             self->updateResize(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+            return 0;
+        }
+        if (self != nullptr && self->m_layerDragging) {
+            self->updateLayerDrag(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
             return 0;
         }
         if (self != nullptr && self->m_dragging) {
@@ -161,6 +175,12 @@ LRESULT CALLBACK OverlayWindow::windowProc(HWND window, UINT message, WPARAM wPa
             ReleaseCapture();
             return 0;
         }
+        if (self != nullptr && self->m_layerDragging) {
+            self->updateLayerDrag(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+            self->finishLayerDrag();
+            ReleaseCapture();
+            return 0;
+        }
         if (self != nullptr && self->m_dragging) {
             self->endDrag();
             ReleaseCapture();
@@ -171,6 +191,7 @@ LRESULT CALLBACK OverlayWindow::windowProc(HWND window, UINT message, WPARAM wPa
     case WM_CAPTURECHANGED:
         if (self != nullptr) {
             self->finishResize();
+            self->finishLayerDrag();
             self->endDrag();
         }
         break;
@@ -350,6 +371,7 @@ void OverlayWindow::setSettings(const OverlaySettings& settings)
             }
             endDrag();
             finishResize();
+            finishLayerDrag();
         }
     }
 
@@ -414,6 +436,56 @@ void OverlayWindow::finishResize()
     m_resizing = false;
     if (m_onDirectEdit) {
         m_onDirectEdit(m_settings.scalePercent, m_settings.paddingPx, m_settings.rowGapPx, true);
+    }
+}
+
+void OverlayWindow::setLayerEditHandler(std::function<void(std::size_t, int, int, bool)> handler)
+{
+    m_onLayerEdit = std::move(handler);
+}
+
+int OverlayWindow::layerAt(int x, int y) const
+{
+    if (!m_settings.rtssTemplate || !m_settings.rtssVisual || m_settings.recipe != OverlayRecipe::Rtss) {
+        return -1;
+    }
+    for (std::size_t index = m_rtssLayerBounds.size(); index > 0; --index) {
+        const Rect& box = m_rtssLayerBounds[index - 1];
+        if (box.right > box.left && box.contains(static_cast<float>(x), static_cast<float>(y))) {
+            return static_cast<int>(index - 1);
+        }
+    }
+    return -1;
+}
+
+void OverlayWindow::updateLayerDrag(int x, int y)
+{
+    if (!m_layerDragging || !m_onLayerEdit || m_layerIndex >= m_settings.rtssLayerEdits.size()) {
+        return;
+    }
+    const float unit = std::max(0.001f, m_layerDragScale);
+    const int nextX = std::clamp(m_layerStartX
+            + static_cast<int>(std::lround((x - m_layerDragOrigin.x) / unit)), -2048, 2048);
+    const int nextY = std::clamp(m_layerStartY
+            + static_cast<int>(std::lround((y - m_layerDragOrigin.y) / unit)), -2048, 2048);
+    RtssLayerEdit& edit = m_settings.rtssLayerEdits[m_layerIndex];
+    if (edit.x != nextX || edit.y != nextY) {
+        edit.x = nextX;
+        edit.y = nextY;
+        repaint();
+        m_onLayerEdit(m_layerIndex, nextX, nextY, false);
+    }
+}
+
+void OverlayWindow::finishLayerDrag()
+{
+    if (!m_layerDragging) {
+        return;
+    }
+    m_layerDragging = false;
+    if (m_onLayerEdit && m_layerIndex < m_settings.rtssLayerEdits.size()) {
+        const RtssLayerEdit& edit = m_settings.rtssLayerEdits[m_layerIndex];
+        m_onLayerEdit(m_layerIndex, edit.x, edit.y, true);
     }
 }
 
@@ -742,7 +814,8 @@ void OverlayWindow::drawScene(float scale)
 
     m_target->BeginDraw();
     m_target->Clear(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.0f));
-    const Rect content = paintOverlay(m_target, painted, m_theme, text, bounds, scale, formats);
+    const Rect content = paintOverlay(m_target, painted, m_theme, text, bounds, scale, formats,
+        &m_rtssLayerBounds, &m_rtssLayerScale);
     m_contentRectD2D = D2D1::RectF(content.left, content.top, content.right, content.bottom);
     m_target->EndDraw();
 }

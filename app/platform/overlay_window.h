@@ -43,7 +43,7 @@ public:
     void toggle(std::string* error = nullptr);
     bool isVisible() const { return m_visible; }
     bool hasVisiblePixels() const;
-    bool isDragging() const { return m_dragging || m_resizing; }
+    bool isDragging() const { return m_dragging || m_resizing || m_layerDragging; }
 
     void repaint();
 
@@ -51,6 +51,7 @@ public:
     // origin_x/y в свободном режиме, offset_x/y в угловом (finished — отпускание).
     void setMoveHandler(std::function<void(int offsetX, int offsetY, bool finished)> handler);
     void setDirectEditHandler(std::function<void(int scale, int padding, int rowGap, bool finished)> handler);
+    void setLayerEditHandler(std::function<void(std::size_t index, int x, int y, bool finished)> handler);
     // Окно приложения: правый клик по оверлею показывает его, чтобы не искать в трее.
     void setOwnerWindow(HWND owner) { m_owner = owner; }
 
@@ -77,6 +78,9 @@ private:
     bool onResizeCorner(int x, int y) const;
     void updateResize(int x, int y);
     void finishResize();
+    int layerAt(int x, int y) const;
+    void updateLayerDrag(int x, int y);
+    void finishLayerDrag();
     void startAnimation(const OverlaySettings& from, bool fadeContent);
     void tickAnimation();
     OverlaySettings animatedSettings() const;
@@ -113,6 +117,15 @@ private:
     // Перетаскивание и плавные переходы.
     std::function<void(int, int, bool)> m_onMove;
     std::function<void(int, int, int, bool)> m_onDirectEdit;
+    std::function<void(std::size_t, int, int, bool)> m_onLayerEdit;
+    std::vector<Rect> m_rtssLayerBounds;
+    float m_rtssLayerScale = 1.0f;
+    bool m_layerDragging = false;
+    std::size_t m_layerIndex = 0;
+    POINT m_layerDragOrigin{};
+    int m_layerStartX = 0;
+    int m_layerStartY = 0;
+    float m_layerDragScale = 1.0f;
     bool m_resizing = false;
     POINT m_resizeOrigin{};
     int m_resizeScale = 100;
