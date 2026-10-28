@@ -25,7 +25,10 @@ enum class ActionKind : std::uint8_t {
     SetTargetHz,
     SetStyle,
     ToggleFollowGameMonitor,
+    CycleOverlayMonitor,
     ToggleFpsSparkline,
+    ToggleMenuScene,
+    ToggleGameProfile,
     SetPosition,
     SetLayout,
     SetOverlaySurface,
@@ -132,6 +135,9 @@ struct AppModel
     bool etwRunning = false;
     bool paused = false;
     bool overlayVisible = false;
+    bool menuScene = false;
+    bool hasGameProfile = false;
+    std::wstring profileGameName;
     // Текст последней ошибки оверлея: показывается в статус-баре вместо подсказок.
     std::wstring overlayError;
     View view = View::Dashboard;

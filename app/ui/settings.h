@@ -234,6 +234,11 @@ bool parseOverlaySurface(std::string_view key, OverlaySurface& surface);
 std::string serializeOverlayRecipeJson(const OverlaySettings& overlay);
 // Импорт только осей и общих цветов; при ошибке overlay остаётся неизменным.
 bool importOverlayRecipeJson(std::string_view json, OverlaySettings& overlay, std::string& error);
+// Поддерживает только однозначно сопоставимые текстовые датчики RTSS OverlayEditor v2.
+bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::string& error);
+void copyOverlayPlacement(OverlaySettings& target, const OverlaySettings& source);
+OverlaySettings overlayForGame(const OverlaySettings& base, const OverlaySettings& profile);
+std::string gameProfileKey(std::wstring_view processName);
 
 std::string_view overlayStyleKey(OverlayStyle style);
 std::string_view overlayPositionKey(OverlayPosition position);

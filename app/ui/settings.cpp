@@ -954,6 +954,135 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
     return true;
 }
 
+bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::string& error)
+{
+    error.clear();
+    if (text.size() > 65536 || text.find('\0') != std::string_view::npos) {
+        error = "Шаблон RTSS слишком большой или содержит двоичные данные";
+        return false;
+    }
+
+    constexpr std::array<std::pair<std::string_view, MetricId>, 13> tags { {
+        { "<fr>", MetricId::Fps },
+        { "%framerate%", MetricId::Fps },
+        { "%frametime%", MetricId::FrameTime },
+        { "%cpu usage%", MetricId::CpuLoad },
+        { "%cpu temperature%", MetricId::CpuTemp },
+        { "%cpu clock%", MetricId::CpuClock },
+        { "%cpu power%", MetricId::CpuPower },
+        { "%gpu1 usage%", MetricId::GpuLoad },
+        { "%gpu1 temperature%", MetricId::GpuTemp },
+        { "%gpu1 clock%", MetricId::GpuClock },
+        { "%gpu1 power%", MetricId::GpuPower },
+        { "%gpu1 memory usage%", MetricId::VramUsed },
+        { "%total ram%", MetricId::RamUsed },
+    } };
+    std::array<bool, kMetricCount> selected { };
+    std::array<std::string, 256> layerTexts { };
+    std::string section;
+    bool version = false;
+    int layers = -1;
+    int matched = 0;
+    while (!text.empty()) {
+        const auto end = text.find('\n');
+        std::string_view line = trim(end == std::string_view::npos ? text : text.substr(0, end));
+        text = end == std::string_view::npos ? std::string_view { } : text.substr(end + 1);
+        if (line.size() > 2048) {
+            error = "Слишком длинная строка шаблона RTSS";
+            return false;
+        }
+        if (line.empty() || line.front() == ';' || line.front() == '#') {
+            continue;
+        }
+        if (line.front() == '[' && line.back() == ']') {
+            section.assign(line.substr(1, line.size() - 2));
+            continue;
+        }
+        const auto equals = line.find('=');
+        if (equals == std::string_view::npos) {
+            continue;
+        }
+        const std::string_view key = trim(line.substr(0, equals));
+        const std::string_view value = trim(line.substr(equals + 1));
+        if (section == "Master" && key == "Implementation") {
+            version = value == "2";
+        } else if (section == "General" && key == "Layers") {
+            layers = parseInt(value, -1);
+        } else if (section.size() > 5 && section.substr(0, 5) == "Layer" && key == "Text") {
+            const std::string_view layerNumber = std::string_view(section).substr(5);
+            const int index = parseInt(layerNumber, -1);
+            if (index < 0 || index >= 256 || std::to_string(index) != layerNumber) {
+                continue;
+            }
+            layerTexts[static_cast<std::size_t>(index)] = value;
+        }
+    }
+    if (!version || layers < 1 || layers > 256) {
+        error = "Неподдерживаемый шаблон RTSS OverlayEditor";
+        return false;
+    }
+    for (int index = 0; index < layers; ++index) {
+        std::string lowered = layerTexts[static_cast<std::size_t>(index)];
+        std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+            [](unsigned char letter) { return static_cast<char>(std::tolower(letter)); });
+        for (const auto& [tag, metric] : tags) {
+            if (lowered.find(tag) != std::string::npos) {
+                const auto slot = static_cast<std::size_t>(metric);
+                matched += selected[slot] ? 0 : 1;
+                selected[slot] = true;
+            }
+        }
+    }
+    if (matched == 0) {
+        error = "В RTSS нет текстовых датчиков, которым соответствует показатель YawaFpsHub";
+        return false;
+    }
+    OverlaySettings imported = overlay;
+    applyOverlayRecipe(imported, OverlayRecipe::Rtss);
+    imported.metrics = selected;
+    overlay = std::move(imported);
+    return true;
+}
+
+void copyOverlayPlacement(OverlaySettings& target, const OverlaySettings& source)
+{
+    target.position = source.position;
+    target.anchorMode = source.anchorMode;
+    target.originX = source.originX;
+    target.originY = source.originY;
+    target.savedMonitorId = source.savedMonitorId;
+    target.monitorOriginX = source.monitorOriginX;
+    target.monitorOriginY = source.monitorOriginY;
+    target.followGameMonitor = source.followGameMonitor;
+    target.offsetX = source.offsetX;
+    target.offsetY = source.offsetY;
+    target.clickThrough = source.clickThrough;
+}
+
+OverlaySettings overlayForGame(const OverlaySettings& base, const OverlaySettings& profile)
+{
+    OverlaySettings result = profile;
+    copyOverlayPlacement(result, base);
+    return result;
+}
+
+std::string gameProfileKey(std::wstring_view processName)
+{
+    if (processName.size() < 5 || processName.size() > 80) {
+        return { };
+    }
+    std::string key;
+    for (wchar_t letter : processName) {
+        if (!((letter >= L'a' && letter <= L'z') || (letter >= L'A' && letter <= L'Z')
+                || (letter >= L'0' && letter <= L'9') || letter == L'_' || letter == L'-'
+                || letter == L'.')) {
+            return { };
+        }
+        key.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(letter))));
+    }
+    return key.ends_with(".exe") ? key : std::string { };
+}
+
 std::string serializeSettings(const Settings& settings)
 {
     std::string text;

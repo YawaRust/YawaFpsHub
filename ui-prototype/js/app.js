@@ -1902,6 +1902,33 @@
       const file = fileInput.files?.[0];
       if (!file) return;
       try {
+        if (file.name.toLowerCase().endsWith(".ovl")) {
+          if (file.size > 65536) throw new Error("Файл RTSS слишком большой");
+          const text = await file.text();
+          if (!/^Implementation=2\s*$/mi.test(text) || !/^Layers=([1-9]\d*)\s*$/mi.test(text)) {
+            throw new Error("Ожидался текстовый шаблон RTSS OverlayEditor v2");
+          }
+          const layers = Number(text.match(/^Layers=(\d+)\s*$/mi)[1]);
+          if (layers > 256) throw new Error("Слишком много слоёв RTSS");
+          const known = new Map([["<fr>", "fps"], ["%framerate%", "fps"],
+            ["%cpu usage%", "cpu"], ["%cpu temperature%", "cpuTemp"],
+            ["%gpu1 usage%", "gpu"], ["%gpu1 temperature%", "gpuTemp"],
+            ["%gpu1 memory usage%", "vramUsed"], ["%total ram%", "ramUsed"]]);
+          const chosen = new Set();
+          const sections = [...text.matchAll(/^\[Layer(\d+)\]\s*$([\s\S]*?)(?=^\[|$(?![\s\S]))/gmi)];
+          for (const [, index, body] of sections) {
+            if (Number(index) >= layers) continue;
+            const line = body.match(/^Text=(.*)$/mi)?.[1]?.trim().toLowerCase();
+            if (!line) continue;
+            for (const [tag, metric] of known) if (line.includes(tag)) chosen.add(metric);
+          }
+          if (!chosen.size) throw new Error("Нет поддерживаемых текстовых датчиков RTSS");
+          gallery.querySelector('[data-recipe="rtss"]').click();
+          for (const [id, entry] of sensorRows) entry.sensor.pinned = chosen.has(id);
+          saveOverlaySensors(); rebuildOverlaySensors(); applySensorFilter(); applyOverlay();
+          toast("Перенесены только знакомые показатели; слои и внешние источники не копируются");
+          return;
+        }
         if (file.size > 16384) throw new Error("Файл рецепта слишком большой (предел 16 КБ)");
         const data = parseOverlayRecipeJson(await file.text());
         const fonts = ["sans", "mono", "condensed", "dense"];
@@ -2043,6 +2070,11 @@
     $("#osdSparkline").addEventListener("change", (event) => {
       overlayState.sparkline = event.target.checked;
       applyOverlay();
+    });
+    $("#osdMenuScene").addEventListener("click", (event) => {
+      const hidden = $("#osdPreview").classList.toggle("is-menu-scene");
+      event.currentTarget.textContent = hidden ? "Вернуть оверлей · Ctrl+F11"
+        : "Меню: скрыть оверлей · Ctrl+F11";
     });
 
     $("#osdLayout").addEventListener("click", (event) => {

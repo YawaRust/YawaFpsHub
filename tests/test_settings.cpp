@@ -800,6 +800,61 @@ namespace {
         rejects(std::string(16385, 'x'));
     }
 
+    void testRtssImportRecognizesOnlyKnownSources()
+    {
+        OverlaySettings settings;
+        settings.originX = 200;
+        settings.savedMonitorId = "display:PRIMARY";
+        const std::string before = "[Master]\nImplementation=2\n[General]\nLayers=3\n"
+                                   "[Layer0]\nText=<FR>\n[Layer1]\nText=%GPU1 usage%\n"
+                                   "[Layer2]\nText=%External source%\n";
+        std::string error;
+        CHECK(importRtssOverlay(before, settings, error));
+        CHECK(settings.style == OverlayStyle::Rtss);
+        CHECK(settings.metrics[static_cast<std::size_t>(MetricId::Fps)]);
+        CHECK(settings.metrics[static_cast<std::size_t>(MetricId::GpuLoad)]);
+        CHECK(!settings.metrics[static_cast<std::size_t>(MetricId::CpuLoad)]);
+        CHECK(settings.savedMonitorId == "display:PRIMARY" && settings.originX == 200);
+        const OverlaySettings snapshot = settings;
+        CHECK(!importRtssOverlay("[Master]\nImplementation=3\n[General]\nLayers=1\n"
+                                 "[Layer0]\nText=<FR>\n",
+            settings, error));
+        CHECK(settings.metrics == snapshot.metrics && settings.style == snapshot.style);
+        CHECK(!importRtssOverlay("[Master]\nImplementation=2\n[General]\nLayers=1\n"
+                                 "[Layer7]\nText=<FR>\n",
+            settings, error));
+        CHECK(!importRtssOverlay(std::string(65537, 'x'), settings, error));
+    }
+
+    void testGameProfileKeepsPersonalPlacement()
+    {
+        OverlaySettings base;
+        base.savedMonitorId = "display:PRIMARY";
+        base.originX = 200;
+        base.followGameMonitor = true;
+        base.clickThrough = true;
+        base.scalePercent = 110;
+        OverlaySettings profile;
+        profile.scalePercent = 145;
+        profile.metrics.fill(false);
+        profile.metrics[static_cast<std::size_t>(MetricId::Fps)] = true;
+        const OverlaySettings applied = overlayForGame(base, profile);
+        CHECK(applied.scalePercent == 145);
+        CHECK(applied.metrics[static_cast<std::size_t>(MetricId::Fps)]);
+        CHECK(!applied.metrics[static_cast<std::size_t>(MetricId::GpuLoad)]);
+        CHECK(applied.savedMonitorId == base.savedMonitorId);
+        CHECK(applied.originX == 200 && applied.followGameMonitor && applied.clickThrough);
+        Settings saved = defaultSettings();
+        saved.overlay = applied;
+        copyOverlayPlacement(saved.overlay, defaultSettings().overlay);
+        CHECK(serializeSettings(saved).find("display:PRIMARY") == std::string::npos);
+        CHECK(!saved.overlay.followGameMonitor && !saved.overlay.clickThrough);
+        CHECK(gameProfileKey(L"Game.EXE") == "game.exe");
+        CHECK(gameProfileKey(L"../game.exe").empty());
+        CHECK(gameProfileKey(L"game:bad.exe").empty());
+        CHECK(gameProfileKey(L"game.txt").empty());
+    }
+
     void testCrlfFile()
     {
         Settings settings;
@@ -834,6 +889,8 @@ void runSettingsTests()
     testLabelLengthIsLimited();
     testKeysAreStable();
     testRecipeMigrationAndAxes();
+    testRtssImportRecognizesOnlyKnownSources();
+    testGameProfileKeepsPersonalPlacement();
     testCrlfFile();
 }
 

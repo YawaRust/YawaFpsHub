@@ -403,9 +403,13 @@ namespace {
         }
         top += 30.0f;
 
-        const Rect follow { inner.left, top, inner.right, top + 27.0f };
+        const Rect follow { inner.left, top, inner.left + 190.0f, top + 27.0f };
         drawChip(renderer, follow, L"На мониторе игры", overlay.followGameMonitor, theme, TextRole::Tiny);
         hits.push_back(UiHit { follow, ActionKind::ToggleFollowGameMonitor, 0 });
+        const Rect monitor { inner.left + 196.0f, top, inner.right, top + 27.0f };
+        drawChip(renderer, monitor, overlay.savedMonitorId.empty() ? L"Выбрать экран →" : L"Другой экран →",
+            !overlay.savedMonitorId.empty(), theme, TextRole::Tiny, isHovered(model, monitor));
+        hits.push_back(UiHit { monitor, ActionKind::CycleOverlayMonitor, 0 });
         top += 32.0f;
 
         renderer.text(L"Вид", Rect { inner.left, top, inner.left + 40.0f, top + 16.0f }, TextRole::Small,
@@ -710,7 +714,8 @@ void drawOverlayEditorQuickControls(
     const OverlaySettings& overlay = model.settings.overlay;
     renderer.text(L"Соберите оверлей", Rect { inner.left, inner.top, inner.right, inner.top + 22.0f },
         TextRole::Heading, theme.text);
-    renderer.text(L"Рецепт выше · слои слева · плашку двигайте на холсте",
+    renderer.text(model.profileGameName.empty() ? L"Рецепт выше · слои слева · плашку двигайте на холсте"
+                                                : L"Игра: " + model.profileGameName,
         Rect { inner.left, inner.top + 22.0f, inner.right, inner.top + 38.0f }, TextRole::Tiny,
         theme.textDim);
 
@@ -735,9 +740,16 @@ void drawOverlayEditorQuickControls(
     drawChip(renderer, spark, L"График FPS", overlay.showSparkline, theme, TextRole::Tiny,
         isHovered(model, spark));
     hits.push_back(UiHit { spark, ActionKind::ToggleFpsSparkline, 0 });
-    renderer.text(L"Точные цвета и параметры — в соседних разделах и инспекторе.",
-        Rect { inner.left, inner.top + 200.0f, inner.right, inner.top + 216.0f }, TextRole::Tiny,
-        theme.textFaint);
+    const Rect profile { inner.left, inner.top + 202.0f, inner.left + 186.0f, inner.top + 226.0f };
+    drawChip(renderer, profile, model.hasGameProfile ? L"Убрать профиль игры" : L"Сохранить для игры",
+        model.hasGameProfile, theme, TextRole::Tiny, isHovered(model, profile));
+    if (!model.profileGameName.empty()) {
+        hits.push_back(UiHit { profile, ActionKind::ToggleGameProfile, 0 });
+    }
+    const Rect scene { inner.left + 192.0f, inner.top + 202.0f, inner.right, inner.top + 226.0f };
+    drawChip(renderer, scene, model.menuScene ? L"Вернуть · Ctrl+F11" : L"Меню: скрыть · Ctrl+F11",
+        model.menuScene, theme, TextRole::Tiny, isHovered(model, scene));
+    hits.push_back(UiHit { scene, ActionKind::ToggleMenuScene, 0 });
     renderer.popClip();
 }
 

@@ -84,6 +84,7 @@ private:
     void toggleVisibilityFromTray();
     // Единая точка включения/выключения оверлея: логирует причину, если показать не удалось.
     void toggleOverlay();
+    void toggleMenuScene();
     void selectGpu(std::size_t index);
     // Служебный ли процесс (dwm.exe, explorer.exe и т.п.). Результат кэшируется:
     // опрос идёт из потока сборщика, а открывать процесс на каждый кадр дорого.
@@ -108,6 +109,10 @@ private:
     EtwFrameSession m_etw;
 
     AppModel m_model;
+    OverlaySettings m_baseOverlay;
+    std::string m_activeGameKey;
+    std::string m_recentGameKey;
+    bool m_profileActive = false;
     std::uint32_t m_recentGamePid = 0;
     HWND m_recentGameWindow = nullptr;
     std::uint64_t m_recentGameAtMs = 0;
@@ -136,6 +141,7 @@ private:
     std::atomic<bool> m_etwRestartRequested{ false };
     // Выбор адаптера применяет только поток опроса: UI не меняет PDH/NVML во время sample().
     std::atomic<std::size_t> m_requestedGpu{ static_cast<std::size_t>(-1) };
+    bool m_sceneWasVisible = false;
     bool m_running = false;
     bool m_trayCreated = false;
     bool m_trackingMouse = false;

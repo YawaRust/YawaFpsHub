@@ -798,13 +798,19 @@
               </label>
             </div>
 
+            <div class="field quick-field">
+              <button class="btn btn--ghost" type="button" disabled title="В демо нет проверенного игрового процесса">Профиль игры: нет активной игры</button>
+              <button id="osdMenuScene" class="btn btn--ghost" type="button">Меню: скрыть оверлей · Ctrl+F11</button>
+            </div>
+
             <div class="field field--monitor quick-field">
               <label class="switch" for="osdFollowGame">
                 <input type="checkbox" id="osdFollowGame">
                 <span class="switch__track"><span class="switch__knob"></span></span>
                 <span>На мониторе игры</span>
               </label>
-              <small>По умолчанию выключено. В демо без второго монитора положение не меняется.</small>
+              <button class="btn btn--ghost" type="button" disabled title="В демо нет второго экрана">Другой экран →</button>
+              <small>В приложении выбор идёт по подключённым мониторам; исчезнувший экран не заменяется автоматически.</small>
             </div>
 
             <div class="field quick-field">
@@ -1047,8 +1053,8 @@
                 <p class="card__sub">16 рецептов · форма, поверхность и шрифт настраиваются независимо</p>
               </div>
               <div class="recipe-transfer">
-                <button class="btn btn--ghost" id="importOsdRecipe" type="button">Импорт JSON</button>
-                <input id="importOsdRecipeFile" type="file" accept=".json,application/json" hidden>
+                <button class="btn btn--ghost" id="importOsdRecipe" type="button">Импорт JSON / .ovl</button>
+                <input id="importOsdRecipeFile" type="file" accept=".json,.ovl,application/json" hidden>
                 <button class="btn btn--ghost" id="exportOsdRecipe" type="button">Экспорт JSON</button>
               </div>
             </header>

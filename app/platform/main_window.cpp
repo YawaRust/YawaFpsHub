@@ -32,6 +32,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cwchar>
 #include <cwctype>
 #include <iterator>
 #include <memory>
@@ -96,6 +97,30 @@ namespace {
     constexpr int kHotkeyWindow = 3;
     constexpr int kHotkeyClickThrough = 4;
     constexpr int kHotkeyEmergencyExit = 5;
+    constexpr int kHotkeyMenuScene = 6;
+
+    std::string gameOverlayPath(std::string_view gameKey)
+    {
+        return dataDirectory() + "\\game-profiles\\" + std::string(gameKey) + ".ini";
+    }
+
+    std::vector<std::pair<std::string, RECT>> overlayMonitors()
+    {
+        std::vector<std::pair<std::string, RECT>> result;
+        EnumDisplayMonitors(
+            nullptr, nullptr,
+            [](HMONITOR monitor, HDC, LPRECT, LPARAM context) -> BOOL {
+                auto& monitors = *reinterpret_cast<std::vector<std::pair<std::string, RECT>>*>(context);
+                MONITORINFOEXW info { };
+                info.cbSize = sizeof(info);
+                if (GetMonitorInfoW(monitor, reinterpret_cast<MONITORINFO*>(&info))) {
+                    monitors.emplace_back(monitorIdentity(info.szDevice), info.rcMonitor);
+                }
+                return TRUE;
+            },
+            reinterpret_cast<LPARAM>(&result));
+        return result;
+    }
 
 } // namespace
 
@@ -193,6 +218,8 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
         m_model.settings = defaultSettings();
         saveSettings();
     }
+
+    m_baseOverlay = m_model.settings.overlay;
 
     // Разрешение и герцовку приложение определяет само: они нужны в подписях и как
     // цель кадра по умолчанию, чтобы бюджет кадра не был заведомо провальным.
@@ -308,6 +335,8 @@ void MainWindow::exportOverlayStyles()
 
 void MainWindow::toggleOverlay()
 {
+    m_model.menuScene = false;
+    m_sceneWasVisible = false;
     std::string error;
     m_overlay.toggle(&error);
     m_model.overlayVisible = m_overlay.isVisible();
@@ -327,6 +356,29 @@ void MainWindow::toggleOverlay()
     if (m_log != nullptr) {
         m_log->info(std::string("оверлей ") + (m_model.overlayVisible ? "включён" : "выключен"));
     }
+}
+
+void MainWindow::toggleMenuScene()
+{
+    if (!m_model.menuScene) {
+        m_sceneWasVisible = m_overlay.isVisible();
+        m_model.menuScene = true;
+        if (m_sceneWasVisible) {
+            m_overlay.hide();
+        }
+    } else {
+        m_model.menuScene = false;
+        if (m_sceneWasVisible) {
+            std::string error;
+            if (!m_overlay.show(&error) && m_log != nullptr) {
+                m_log->warning("возврат оверлея из меню: " + error);
+            }
+        }
+        m_sceneWasVisible = false;
+    }
+    m_model.overlayVisible = m_overlay.isVisible();
+    InvalidateRect(m_window, nullptr, FALSE);
+    m_overlayEditor.refresh();
 }
 
 void MainWindow::setInitialSize(int width, int height)
@@ -891,6 +943,8 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         } else if (wParam == static_cast<WPARAM>(kHotkeyEmergencyExit)) {
             m_quitRequested = true;
             PostMessageW(m_window, WM_CLOSE, 0, 0);
+        } else if (wParam == static_cast<WPARAM>(kHotkeyMenuScene)) {
+            toggleMenuScene();
         } else if (wParam == static_cast<WPARAM>(kHotkeyClickThrough)) {
             m_model.settings.overlay.clickThrough = !m_model.settings.overlay.clickThrough;
             m_overlay.setSettings(m_model.settings.overlay);
@@ -1358,11 +1412,73 @@ void MainWindow::applyAction(const UiHit& hit)
         saveSettings();
         break;
 
+    case ActionKind::CycleOverlayMonitor: {
+        const auto monitors = overlayMonitors();
+        if (monitors.empty()) {
+            break;
+        }
+        auto& placement = m_model.settings.overlay;
+        std::size_t next = 0;
+        for (std::size_t index = 0; index < monitors.size(); ++index) {
+            if (monitors[index].first == placement.savedMonitorId) {
+                next = (index + 1) % monitors.size();
+                break;
+            }
+        }
+        const RECT& chosen = monitors[next].second;
+        const int localX = placement.anchorMode == OverlayAnchorMode::Free ? placement.monitorOriginX : 16;
+        const int localY = placement.anchorMode == OverlayAnchorMode::Free ? placement.monitorOriginY : 16;
+        placement.anchorMode = OverlayAnchorMode::Free;
+        placement.followGameMonitor = false;
+        placement.savedMonitorId = monitors[next].first;
+        placement.monitorOriginX = std::clamp(localX, 0, static_cast<int>(chosen.right - chosen.left - 1));
+        placement.monitorOriginY = std::clamp(localY, 0, static_cast<int>(chosen.bottom - chosen.top - 1));
+        const RECT virtualScreen = overlayVirtualScreen();
+        placement.originX = originFromMonitor(placement.monitorOriginX, chosen.left, virtualScreen.left);
+        placement.originY = originFromMonitor(placement.monitorOriginY, chosen.top, virtualScreen.top);
+        m_overlay.setSettings(placement);
+        saveSettings();
+        break;
+    }
+
     case ActionKind::ToggleFpsSparkline:
         m_model.settings.overlay.showSparkline = !m_model.settings.overlay.showSparkline;
         m_overlay.setSettings(m_model.settings.overlay);
         saveSettings();
         break;
+
+    case ActionKind::ToggleMenuScene:
+        toggleMenuScene();
+        break;
+
+    case ActionKind::ToggleGameProfile: {
+        const auto nowMs = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+                .count());
+        if (m_recentGameKey.empty() || m_recentGameAtMs == 0 || nowMs < m_recentGameAtMs
+            || nowMs - m_recentGameAtMs > 300000) {
+            break;
+        }
+        if (m_profileActive && m_activeGameKey == m_recentGameKey) {
+            const std::string path = gameOverlayPath(m_activeGameKey);
+            if (DeleteFileW(widen(path).c_str()) == FALSE) {
+                MessageBoxW(
+                    m_window, L"Не удалось удалить профиль игры.", L"YawaFpsHub", MB_OK | MB_ICONERROR);
+                break;
+            }
+            m_profileActive = false;
+            m_model.hasGameProfile = false;
+            m_model.settings.overlay = m_baseOverlay;
+        } else {
+            m_activeGameKey = m_recentGameKey;
+            m_profileActive = true;
+            m_model.hasGameProfile = true;
+        }
+        m_overlay.setSettings(m_model.settings.overlay);
+        saveSettings();
+        m_overlayEditor.refresh();
+        break;
+    }
 
     case ActionKind::SetLayout:
         m_model.settings.overlay.layout = static_cast<OverlayLayout>(hit.value);
@@ -1778,43 +1894,57 @@ void MainWindow::applyAction(const UiHit& hit)
         OPENFILENAMEW dialog { };
         dialog.lStructSize = sizeof(dialog);
         dialog.hwndOwner = GetActiveWindow() != nullptr ? GetActiveWindow() : m_window;
-        dialog.lpstrFilter = L"Рецепт JSON (*.json)\0*.json\0\0";
+        dialog.lpstrFilter = L"Рецепт JSON (*.json)\0*.json\0RTSS OverlayEditor (*.ovl)\0*.ovl\0\0";
         dialog.lpstrFile = filename;
         dialog.nMaxFile = MAX_PATH;
         dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
         if (GetOpenFileNameW(&dialog) == FALSE)
             break;
 
-        std::string json;
+        const wchar_t* suffix = std::wcsrchr(filename, L'.');
+        const bool rtss = suffix != nullptr && _wcsicmp(suffix, L".ovl") == 0;
+        std::string content;
         std::string error;
         const HANDLE file = CreateFileW(
             filename, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (file == INVALID_HANDLE_VALUE) {
-            error = "Не удалось открыть рецепт JSON: " + win32ErrorText(GetLastError());
+            error = "Не удалось открыть файл оверлея: " + win32ErrorText(GetLastError());
         } else {
             LARGE_INTEGER length { };
             if (GetFileSizeEx(file, &length) == FALSE || length.QuadPart < 0) {
-                error = "Не удалось определить размер рецепта JSON";
-            } else if (length.QuadPart > 16384) {
-                error = "Файл рецепта слишком большой (предел 16 КБ)";
+                error = "Не удалось определить размер файла оверлея";
+            } else if (length.QuadPart > (rtss ? 65536 : 16384)) {
+                error = "Файл оверлея слишком большой";
             } else {
-                json.resize(static_cast<std::size_t>(length.QuadPart));
+                content.resize(static_cast<std::size_t>(length.QuadPart));
                 DWORD received = 0;
-                if (ReadFile(file, json.data(), static_cast<DWORD>(json.size()), &received, nullptr) == FALSE
-                    || received != static_cast<DWORD>(json.size())) {
-                    error = "Не удалось прочитать рецепт JSON";
+                if (ReadFile(file, content.data(), static_cast<DWORD>(content.size()), &received, nullptr)
+                        == FALSE
+                    || received != static_cast<DWORD>(content.size())) {
+                    error = "Не удалось прочитать файл оверлея";
                 }
             }
             CloseHandle(file);
         }
         OverlaySettings imported = m_model.settings.overlay;
-        if (error.empty())
-            importOverlayRecipeJson(json, imported, error);
+        if (error.empty()) {
+            if (rtss) {
+                importRtssOverlay(content, imported, error);
+            } else {
+                importOverlayRecipeJson(content, imported, error);
+            }
+        }
         if (!error.empty()) {
             if (m_log)
-                m_log->warning("импорт рецепта JSON: " + error);
+                m_log->warning("импорт оверлея: " + error);
             MessageBoxW(dialog.hwndOwner, widen(error).c_str(), L"YawaFpsHub", MB_OK | MB_ICONERROR);
             break;
+        }
+        if (rtss) {
+            MessageBoxW(dialog.hwndOwner,
+                L"Перенесены только распознанные показатели и стиль RTSS. Слои, картинки, цвета и внешние "
+                L"источники не копируются. Недоступные датчики покажут «нет данных».",
+                L"Импорт RTSS", MB_OK | MB_ICONINFORMATION);
         }
         m_model.settings.overlay = std::move(imported);
         m_overlay.setSettings(m_model.settings.overlay);
@@ -1916,8 +2046,23 @@ void MainWindow::applyAction(const UiHit& hit)
 
 void MainWindow::saveSettings()
 {
-    const std::string text = serializeSettings(m_model.settings);
-    if (!writeTextFile(settingsPath(), text) && m_log != nullptr) {
+    if (m_profileActive && !m_activeGameKey.empty()) {
+        copyOverlayPlacement(m_baseOverlay, m_model.settings.overlay);
+        const std::string directory = dataDirectory() + "\\game-profiles";
+        ensureDirectory(directory);
+        const std::string path = gameOverlayPath(m_activeGameKey);
+        Settings profile = defaultSettings();
+        profile.overlay = m_model.settings.overlay;
+        copyOverlayPlacement(profile.overlay, defaultSettings().overlay);
+        if (!writeTextFile(path, serializeSettings(profile)) && m_log != nullptr) {
+            m_log->warning("не удалось записать профиль " + path);
+        }
+    } else {
+        m_baseOverlay = m_model.settings.overlay;
+    }
+    Settings global = m_model.settings;
+    global.overlay = m_baseOverlay;
+    if (!writeTextFile(settingsPath(), serializeSettings(global)) && m_log != nullptr) {
         m_log->warning("не удалось записать " + settingsPath());
     }
 }
@@ -2236,6 +2381,47 @@ void MainWindow::samplingLoop()
 
 void MainWindow::onTick()
 {
+    std::string gameKey;
+    const auto profileNowMs
+        = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+                .count());
+    {
+        std::lock_guard<std::mutex> guard(m_modelMutex);
+        if (m_model.gameProcessId != 0) {
+            gameKey = gameProfileKey(m_model.gameName);
+            if (!gameKey.empty()) {
+                m_recentGameKey = gameKey;
+                m_model.profileGameName = m_model.gameName;
+            }
+        } else if (m_recentGameAtMs == 0 || profileNowMs < m_recentGameAtMs
+            || profileNowMs - m_recentGameAtMs > 300000) {
+            m_recentGameKey.clear();
+            m_model.profileGameName.clear();
+        }
+    }
+    if (gameKey.empty() && m_overlayEditor.isOpen() && m_profileActive) {
+        gameKey = m_activeGameKey;
+    }
+    if (gameKey != m_activeGameKey) {
+        Settings saved;
+        std::string content;
+        std::string error;
+        const bool hasProfile = !gameKey.empty() && readTextFile(gameOverlayPath(gameKey), content)
+            && content.size() <= 65536 && parseSettings(content, saved, error);
+        OverlaySettings resolved;
+        {
+            std::lock_guard<std::mutex> guard(m_modelMutex);
+            m_activeGameKey = gameKey;
+            m_profileActive = hasProfile;
+            m_model.hasGameProfile = hasProfile;
+            m_model.settings.overlay
+                = hasProfile ? overlayForGame(m_baseOverlay, saved.overlay) : m_baseOverlay;
+            resolved = m_model.settings.overlay;
+        }
+        m_overlay.setSettings(resolved);
+        m_overlayEditor.refresh();
+    }
     static const auto started = std::chrono::steady_clock::now();
     const auto now = std::chrono::steady_clock::now();
     std::uint32_t gamePid = 0;
@@ -2367,7 +2553,12 @@ void MainWindow::registerHotkeys()
     UnregisterHotKey(m_window, kHotkeyWindow);
     UnregisterHotKey(m_window, kHotkeyClickThrough);
     UnregisterHotKey(m_window, kHotkeyEmergencyExit);
+    UnregisterHotKey(m_window, kHotkeyMenuScene);
     RegisterHotKey(m_window, kHotkeyEmergencyExit, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, VK_F10);
+    if (RegisterHotKey(m_window, kHotkeyMenuScene, MOD_CONTROL | MOD_NOREPEAT, VK_F11) == FALSE
+        && m_log != nullptr) {
+        m_log->warning("хоткей Ctrl+F11 для сцены меню занят другой программой");
+    }
 
     // Коды из настроек: ноль означает «клавиша отключена». MOD_NOREPEAT не даёт
     // автоповтору удерживаемой клавиши переключать оверлей десятки раз в секунду.

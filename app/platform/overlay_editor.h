@@ -21,6 +21,7 @@ public:
     void close();
     void refresh();
     bool isDragging() const { return m_dragging; }
+    bool isOpen() const { return m_window != nullptr; }
 
 private:
     static LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
