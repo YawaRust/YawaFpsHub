@@ -1084,7 +1084,7 @@ bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::str
     const auto coordinate = [](std::string_view value, int fallback) {
         return std::clamp(parseInt(value, fallback), -512, 2048);
     };
-    const auto color = [](std::string_view encoded, std::uint32_t fallback) {
+    const auto decodeColor = [](std::string_view encoded, std::uint32_t fallback) {
         encoded = encoded.substr(0, encoded.find(','));
         if (encoded.size() != 6 && encoded.size() != 8) {
             return fallback;
@@ -1179,9 +1179,9 @@ bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::str
                 }
             } else if (key == "TextColor") {
                 layerColors[static_cast<std::size_t>(index)] = value;
-                layer.textColor = color(value, 0xFFFFFFFFu);
+                layer.textColor = decodeColor(value, 0xFFFFFFFFu);
             } else if (key == "BgndColor") {
-                layer.backgroundColor = color(value, 0);
+                layer.backgroundColor = decodeColor(value, 0);
                 layer.hasBackground = true;
             } else if (key == "VisibilitySource" && value.size() <= 256) {
                 layer.visibilitySource = value;
