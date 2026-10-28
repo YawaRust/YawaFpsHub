@@ -1080,6 +1080,7 @@
           <b>${disk.name}${disk.driveLetter ? ` · ${disk.driveLetter}` : ""}</b>
           <span>${[disk.interfaceType, disk.mediaType, disk.totalGb ? `${Math.round(disk.totalGb)} ГБ` : "",
             disk.freeGb ? `свободно ${Math.round(disk.freeGb)} ГБ` : "", disk.fileSystem].filter(Boolean).join(" · ")}</span>
+          <span>NVMe SMART: нет данных для этого диска</span>
         </li>`).join("") || '<li><span>нет данных</span></li>';
     }
   }
