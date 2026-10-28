@@ -8,8 +8,8 @@
 
 namespace yawa {
 
-// Экран «Сведения о системе»: железо, Windows как в winver и раскладка планок памяти.
-// Всё собрано без драйверов, поэтому там, где BIOS молчит, честно написано «нет данных».
+// Экран «Сведения о системе»: паспорт из Windows/BIOS и отдельные действующие тайминги UMC.
+// Если аппаратный источник недоступен, вместо таймингов отображается «недоступны».
 void drawSystemView(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area,
     std::vector<UiHit>& hits);
 

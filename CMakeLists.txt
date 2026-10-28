@@ -40,7 +40,12 @@ add_library(yawa_metrics STATIC
     app/metrics/hardware_info.cpp
     app/metrics/smbios_memory.cpp
     app/metrics/bottleneck.cpp
+    app/metrics/diagnosis.cpp
+    app/report/package.cpp
+    app/report/package_reader.cpp
+    app/report/html_report.cpp
     app/ui/settings.cpp
+    app/ui/overlay_recipe_json.cpp
 )
 
 target_include_directories(yawa_metrics PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/app)

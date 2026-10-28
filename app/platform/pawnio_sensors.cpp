@@ -102,6 +102,7 @@ bool PawnioSensors::supportsCpu()
 bool PawnioSensors::initialize(Log& log)
 {
     shutdown();
+    m_failure = SensorFailure::Unknown;
     const auto vendor = cpuid(0);
     char name[13] { };
     std::memcpy(name, &vendor[1], 4);
@@ -113,6 +114,7 @@ bool PawnioSensors::initialize(Log& log)
     m_amd = std::strcmp(name, "AuthenticAMD") == 0;
     const bool intel = std::strcmp(name, "GenuineIntel") == 0 && family == 6;
     if (!supportsCpu()) {
+        m_failure = cpuSensorFailure(false, CpuDeviceFailure::Other);
         log.info("PawnIO: семейство CPU пока не поддержано сборщиком");
         return false;
     }
@@ -120,8 +122,13 @@ bool PawnioSensors::initialize(Log& log)
     m_device = CreateFileW(L"\\\\?\\GLOBALROOT\\Device\\PawnIO", GENERIC_READ | GENERIC_WRITE,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, 0, nullptr);
     if (m_device == INVALID_HANDLE_VALUE) {
-        log.info("PawnIO: " + win32ErrorText(GetLastError())
-            + "; для kernel-датчиков установите --install-sensors и запустите приложение от администратора");
+        const DWORD error = GetLastError();
+        const CpuDeviceFailure reason = error == ERROR_ACCESS_DENIED         ? CpuDeviceFailure::AccessDenied
+            : error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND ? CpuDeviceFailure::Missing
+                                                                             : CpuDeviceFailure::Other;
+        m_failure = cpuSensorFailure(true, reason);
+        log.info("PawnIO: " + win32ErrorText(error)
+            + "; если устройство отсутствует или нет доступа, используйте «Включить» на экране датчиков");
         return false;
     }
     DWORD version = 0;
@@ -176,6 +183,62 @@ bool PawnioSensors::readRegister(bool smn, std::uint32_t address, std::uint64_t&
     return DeviceIoControl(
                m_device, kExecute, &request, sizeof(request), &value, sizeof(value), &written, nullptr)
         && written == sizeof(value);
+}
+
+std::optional<AmdDdr4MemoryDump> PawnioSensors::readMemoryDump()
+{
+    if (!m_amd || m_device == INVALID_HANDLE_VALUE || m_pciMutex == nullptr) {
+        return std::nullopt;
+    }
+    const unsigned signature = cpuid(1)[0];
+    const unsigned family = ((signature >> 8) & 0xf) == 0xf
+        ? ((signature >> 8) & 0xf) + ((signature >> 20) & 0xff)
+        : (signature >> 8) & 0xf;
+    const unsigned model = ((signature >> 4) & 0xf) | ((signature >> 12) & 0xf0);
+    if (!isSupportedAmdDdr4Cpu(family, model) || WaitForSingleObject(m_pciMutex, 20) != WAIT_OBJECT_0) {
+        return std::nullopt;
+    }
+    const auto readDword = [this](std::uint32_t address, std::uint32_t& result) {
+        std::uint64_t raw = 0;
+        if (!readRegister(true, address, raw) || raw > 0xffffffffu) {
+            return false;
+        }
+        result = static_cast<std::uint32_t>(raw);
+        return true;
+    };
+    AmdDdr4MemoryDump dump {};
+    bool valid = true;
+    for (unsigned channel = 0; channel < dump.size(); ++channel) {
+        const std::uint32_t offset = channel << 20;
+        auto& data = dump[channel];
+        if (!readDword(offset | 0x50100, data.config) || !readDword(offset | 0x50df0, data.maxRate)
+            || !readDword(offset | 0x50000, data.dimm0) || !readDword(offset | 0x50008, data.dimm1)) {
+            valid = false;
+            break;
+        }
+        if (!isSupportedAmdDdr4Channel(family, model, data.config, data.maxRate, data.dimm0, data.dimm1)) {
+            continue;
+        }
+        if (!readDword(offset | 0x50204, data.timing0) || !readDword(offset | 0x50208, data.timing1)) {
+            valid = false;
+            break;
+        }
+        data.hasTimings = true;
+    }
+    ReleaseMutex(m_pciMutex);
+    return valid ? std::optional<AmdDdr4MemoryDump>(dump) : std::nullopt;
+}
+
+std::optional<AmdDdr4Timings> PawnioSensors::readMemoryTimings()
+{
+    const auto dump = readMemoryDump();
+    if (!dump)
+        return std::nullopt;
+    const unsigned signature = cpuid(1)[0];
+    const unsigned baseFamily = (signature >> 8) & 0xf;
+    const unsigned family = baseFamily == 0xf ? baseFamily + ((signature >> 20) & 0xff) : baseFamily;
+    const unsigned model = ((signature >> 4) & 0xf) | ((signature >> 12) & 0xf0);
+    return decodeAmdDdr4MemoryDump(*dump, family, model);
 }
 
 CpuHardwareReading PawnioSensors::read()

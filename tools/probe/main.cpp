@@ -96,7 +96,8 @@ void printMachine(const yawa::SystemSensors& sensors, const yawa::MetricStore& s
     std::printf("  RAM: %s\n", yawa::describeMemory(info.memory).c_str());
     const double tck = info.memory.cycleTimeNs();
     if (info.memory.configuredMt > 0.0) {
-        std::printf("       частота по SMBIOS %.0f МТ/с, tCK %.3f нс\n", info.memory.configuredMt, tck);
+        std::printf("       скорость по SMBIOS %.0f МТ/с, расчётный tCK %.3f нс (не замер)\n",
+            info.memory.configuredMt, tck);
     } else {
         std::printf("       частота: нет данных\n");
     }

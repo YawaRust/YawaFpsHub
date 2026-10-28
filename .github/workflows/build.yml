@@ -89,6 +89,13 @@ jobs:
             }
           }
 
+      - name: Просмотр локального пакета через CLI
+        shell: pwsh
+        run: |
+          $exe = (Get-ChildItem -Path .\build -Recurse -Filter YawaFpsHub.exe | Select-Object -First 1).FullName
+          if (-not $exe) { throw "Собранный YawaFpsHub.exe не найден" }
+          python tests/test_report_cli.py --exe $exe
+
       - name: Самопроверка приложения
         shell: pwsh
         run: |
@@ -113,18 +120,32 @@ jobs:
           if (-not (Test-Path $exe)) {
             $fail = "нет YawaFpsHub.exe"
           } else {
+            $startup = [System.Diagnostics.Stopwatch]::StartNew()
             $process = Start-Process -FilePath $exe -ArgumentList "--smoke=22" -PassThru
+            $windowReady = $false
+            for ($i = 0; $i -lt 40; $i++) {
+              $process.Refresh()
+              if ($process.MainWindowHandle -ne [IntPtr]::Zero) { $windowReady = $true; break }
+              if ($process.HasExited) { break }
+              Start-Sleep -Milliseconds 100
+            }
+            $startup.Stop()
+            $diagnostics.Add("до главного окна с запуском процесса: " + $startup.ElapsedMilliseconds + " мс (Windows CI)")
+            if (-not $windowReady -and -not $fail) { $fail = "главное окно не появилось за 4 с" }
             Start-Sleep -Seconds 8
             $process.Refresh()
             $cpuBefore = $process.TotalProcessorTime.TotalSeconds
             $memory = $process.WorkingSet64
             $diagnostics.Add("память: " + [math]::Round($memory / 1MB, 1) + " МБ")
+            if ($memory -gt 60MB -and -not $fail) { $fail = "память в простое больше 60 МиБ" }
             Start-Sleep -Seconds 10
             $process.Refresh()
             $cpuUsed = $process.TotalProcessorTime.TotalSeconds - $cpuBefore
             $cores = [Environment]::ProcessorCount
-            $diagnostics.Add("CPU в простое: " + [math]::Round($cpuUsed / 10.0 * 100 / $cores, 2) + " % от всех ядер")
+            $idleCpuPct = $cpuUsed / 10.0 * 100 / $cores
+            $diagnostics.Add("CPU в простое: " + [math]::Round($idleCpuPct, 2) + " % от всех ядер")
             $diagnostics.Add("CPU на ядро: " + [math]::Round($cpuUsed / 10.0 * 100, 2) + " % одного ядра")
+            if ($idleCpuPct -gt 1.0 -and -not $fail) { $fail = "CPU в простое больше 1 % от всех ядер" }
 
             # Оверлей — отдельное окно: проверяем класс и стили layered/topmost/click-through.
             $overlayFound = $false
@@ -221,33 +242,37 @@ jobs:
             $view = $item.name
             $argumentsList = @("--smoke", "--view=$($item.view)", "--size=1280x800")
             if ($item.extra -ne "") { $argumentsList += $item.extra }
-            $process = Start-Process -FilePath $exe -ArgumentList $argumentsList -PassThru
-            Start-Sleep -Seconds 4
             $shot = $null
-            for ($i = 0; $i -lt 10 -and -not $shot; $i++) {
-              $process.Refresh()
-              $hwnd = $process.MainWindowHandle
-              if ($hwnd -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 500; continue }
-              $rect = New-Object YawaShot+RECT
-              if (-not [YawaShot]::GetWindowRect($hwnd, [ref] $rect)) { Start-Sleep -Milliseconds 500; continue }
-              $width = $rect.Right - $rect.Left
-              $height = $rect.Bottom - $rect.Top
-              if ($width -le 0 -or $height -le 0) { Start-Sleep -Milliseconds 500; continue }
-              $bitmap = New-Object System.Drawing.Bitmap $width, $height
-              $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-              $hdc = $graphics.GetHdc()
-              $ok = [YawaShot]::PrintWindow($hwnd, $hdc, 2)
-              $graphics.ReleaseHdc($hdc)
-              $graphics.Dispose()
-              if ($ok) {
-                $path = "$PWD\screenshot-$view.png"
-                $bitmap.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
-                $shot = $path
+            # Первый запуск окна на холодном Windows-раннере иногда не даёт PrintWindow;
+            # повторяем только отсутствующий кадр, а гейт ниже по-прежнему требует все шесть.
+            for ($attempt = 0; $attempt -lt 2 -and -not $shot; $attempt++) {
+              $process = Start-Process -FilePath $exe -ArgumentList $argumentsList -PassThru
+              Start-Sleep -Seconds 4
+              for ($i = 0; $i -lt 10 -and -not $shot; $i++) {
+                $process.Refresh()
+                $hwnd = $process.MainWindowHandle
+                if ($hwnd -eq [IntPtr]::Zero) { Start-Sleep -Milliseconds 500; continue }
+                $rect = New-Object YawaShot+RECT
+                if (-not [YawaShot]::GetWindowRect($hwnd, [ref] $rect)) { Start-Sleep -Milliseconds 500; continue }
+                $width = $rect.Right - $rect.Left
+                $height = $rect.Bottom - $rect.Top
+                if ($width -le 0 -or $height -le 0) { Start-Sleep -Milliseconds 500; continue }
+                $bitmap = New-Object System.Drawing.Bitmap $width, $height
+                $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+                $hdc = $graphics.GetHdc()
+                $ok = [YawaShot]::PrintWindow($hwnd, $hdc, 2)
+                $graphics.ReleaseHdc($hdc)
+                $graphics.Dispose()
+                if ($ok) {
+                  $path = "$PWD\screenshot-$view.png"
+                  $bitmap.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+                  $shot = $path
+                }
+                $bitmap.Dispose()
+                if (-not $shot) { Start-Sleep -Milliseconds 500 }
               }
-              $bitmap.Dispose()
-              if (-not $shot) { Start-Sleep -Milliseconds 500 }
+              $process.WaitForExit()
             }
-            $process.WaitForExit()
             if ($shot) {
               Write-Output "::notice title=YawaFpsHub::скриншот $view снят"
             } else {
@@ -392,6 +417,33 @@ jobs:
             Start-Process -FilePath $edge -ArgumentList "--headless=new","--disable-gpu","--hide-scrollbars","--no-first-run","--user-data-dir=$tallProfile","--window-size=$demoWidth,2400","--virtual-time-budget=6000","--screenshot=$PWD\$tall",$url -Wait
           }
           Stop-Process -Id $server.Id -Force
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Проверить снимки и собрать пары сравнения
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          Write-Output "::notice title=UI Python::$(python --version)"
+          Write-Output "::notice title=UI stage::установка Pillow"
+          python -m pip install --disable-pip-version-check --only-binary=:all: Pillow==13.0.0
+          if ($LASTEXITCODE -ne 0) { throw "Pillow не установлен для сравнения снимков" }
+          Write-Output "::notice title=UI stage::тесты сравнителя"
+          python -B -m unittest discover -s tests -p test_compare_ui.py -v
+          if ($LASTEXITCODE -ne 0) { throw "Тесты сравнения снимков не прошли" }
+          Write-Output "::notice title=UI stage::проверка реальных снимков"
+          $env:PYTHONIOENCODING = 'utf-8'
+          $python = (Get-Command python).Source
+          $compare = Start-Process -FilePath $python -ArgumentList "-B", "tools/compare_ui.py", "--demo", ".", "--app", ".", "--out", "shots", "--check", "--max-score", "60" -Wait -PassThru -RedirectStandardOutput "ui-stdout.txt" -RedirectStandardError "ui-stderr.txt"
+          Get-Content ui-stdout.txt | ForEach-Object { Write-Output $_ }
+          Get-Content ui-stderr.txt | ForEach-Object { Write-Output $_ }
+          if ($compare.ExitCode -ne 0) {
+            $details = (Get-Content ui-stderr.txt) -join ' | '
+            Write-Output "::error title=UI check::$details"
+            throw "Снимки отсутствуют, пусты или повторяются"
+          }
 
       - name: Лог приложения (диагностика)
         # Логи и снимки публикуются артефактами, без записи в служебные ветки.

@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <utility>
 #include <vector>
 
 namespace yawa {
@@ -53,6 +54,7 @@ void StorageSensors::shutdown()
     }
     std::lock_guard lock(m_mutex);
     m_temperature.reset();
+    m_health.clear();
     m_sampledAt = 0;
 }
 
@@ -60,6 +62,12 @@ std::optional<double> StorageSensors::temperature() const
 {
     std::lock_guard lock(m_mutex);
     return GetTickCount64() - m_sampledAt <= 15000 ? m_temperature : std::nullopt;
+}
+
+std::vector<DiskSmartReading> StorageSensors::health() const
+{
+    std::lock_guard lock(m_mutex);
+    return GetTickCount64() - m_sampledAt <= 15000 ? m_health : std::vector<DiskSmartReading> { };
 }
 
 DWORD WINAPI StorageSensors::worker(void* context)
@@ -71,7 +79,7 @@ DWORD WINAPI StorageSensors::worker(void* context)
     return 0;
 }
 
-bool StorageSensors::query(HANDLE disk, void* buffer, DWORD size, DWORD& written)
+bool StorageSensors::query(HANDLE disk, DWORD controlCode, void* buffer, DWORD size, DWORD& written)
 {
     OVERLAPPED request { };
     request.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -79,9 +87,7 @@ bool StorageSensors::query(HANDLE disk, void* buffer, DWORD size, DWORD& written
         return false;
     }
     written = 0;
-    bool success
-        = DeviceIoControl(disk, IOCTL_STORAGE_QUERY_PROPERTY, buffer, size, buffer, size, nullptr, &request)
-        != FALSE;
+    bool success = DeviceIoControl(disk, controlCode, buffer, size, buffer, size, nullptr, &request) != FALSE;
     if (success) {
         success = GetOverlappedResult(disk, &request, &written, FALSE) != FALSE;
     }
@@ -109,7 +115,7 @@ std::optional<double> StorageSensors::readDisk(HANDLE disk)
     request.query.PropertyId = StorageDeviceTemperatureProperty;
     request.query.QueryType = PropertyStandardQuery;
     DWORD written = 0;
-    if (query(disk, &request, sizeof(request), written)
+    if (query(disk, IOCTL_STORAGE_QUERY_PROPERTY, &request, sizeof(request), written)
         && written >= offsetof(STORAGE_TEMPERATURE_DATA_DESCRIPTOR, TemperatureInfo)) {
         const auto* descriptor = reinterpret_cast<const STORAGE_TEMPERATURE_DATA_DESCRIPTOR*>(&request);
         const std::size_t count = (written - offsetof(STORAGE_TEMPERATURE_DATA_DESCRIPTOR, TemperatureInfo))
@@ -131,13 +137,19 @@ std::optional<double> StorageSensors::readDisk(HANDLE disk)
     if (WaitForSingleObject(m_stop, 0) != WAIT_TIMEOUT) {
         return std::nullopt;
     }
+    const auto health = readNvme(disk, StorageAdapterProtocolSpecificProperty);
+    return health ? health->compositeCelsius : std::nullopt;
+}
+
+std::optional<NvmeSmartHealth> StorageSensors::readNvme(HANDLE disk, DWORD property)
+{
     struct ProtocolQuery
     {
-        DWORD property = StorageAdapterProtocolSpecificProperty;
+        DWORD property;
         DWORD type = PropertyStandardQuery;
         STORAGE_PROTOCOL_SPECIFIC_DATA protocol { };
         std::array<std::byte, 512> log { };
-    } nvme;
+    } nvme { property };
     static_assert(
         offsetof(ProtocolQuery, protocol) == offsetof(STORAGE_PROPERTY_QUERY, AdditionalParameters));
     nvme.protocol.ProtocolType = ProtocolTypeNvme;
@@ -145,7 +157,9 @@ std::optional<double> StorageSensors::readDisk(HANDLE disk)
     nvme.protocol.ProtocolDataRequestValue = 2; // NVMe SMART / Health Information.
     nvme.protocol.ProtocolDataOffset = sizeof(STORAGE_PROTOCOL_SPECIFIC_DATA);
     nvme.protocol.ProtocolDataLength = 512;
-    if (!query(disk, &nvme, sizeof(nvme), written) || written < sizeof(STORAGE_PROTOCOL_DATA_DESCRIPTOR)) {
+    DWORD written = 0;
+    if (!query(disk, IOCTL_STORAGE_QUERY_PROPERTY, &nvme, sizeof(nvme), written)
+        || written < sizeof(STORAGE_PROTOCOL_DATA_DESCRIPTOR)) {
         return std::nullopt;
     }
     const auto* descriptor = reinterpret_cast<const STORAGE_PROTOCOL_DATA_DESCRIPTOR*>(&nvme);
@@ -159,12 +173,13 @@ std::optional<double> StorageSensors::readDisk(HANDLE disk)
         return std::nullopt;
     }
     const auto* bytes = reinterpret_cast<const std::byte*>(&nvme);
-    return nvmeCompositeTemperature({ bytes + base + data.ProtocolDataOffset, data.ProtocolDataLength });
+    return decodeNvmeSmartHealth({ bytes + base + data.ProtocolDataOffset, data.ProtocolDataLength });
 }
 
 void StorageSensors::poll()
 {
     std::optional<double> hottest;
+    std::vector<DiskSmartReading> readings;
     const HDEVINFO devices
         = SetupDiGetClassDevsW(&kDiskInterface, nullptr, nullptr, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
     if (devices == INVALID_HANDLE_VALUE) {
@@ -192,8 +207,18 @@ void StorageSensors::poll()
         if (disk == INVALID_HANDLE_VALUE) {
             continue;
         }
+        STORAGE_DEVICE_NUMBER identity { };
+        DWORD written = 0;
+        const bool identified
+            = query(disk, IOCTL_STORAGE_GET_DEVICE_NUMBER, &identity, sizeof(identity), written)
+            && written >= sizeof(identity) && identity.DeviceType == FILE_DEVICE_DISK
+            && identity.DeviceNumber < 1024;
+        const auto health = identified ? readNvme(disk, StorageDeviceProtocolSpecificProperty) : std::nullopt;
         const auto temperature = readDisk(disk);
         CloseHandle(disk);
+        if (identified && health) {
+            readings.push_back({ identity.DeviceNumber, *health });
+        }
         if (temperature) {
             hottest = hottest ? std::max(*hottest, *temperature) : *temperature;
         }
@@ -201,6 +226,7 @@ void StorageSensors::poll()
     SetupDiDestroyDeviceInfoList(devices);
     std::lock_guard lock(m_mutex);
     m_temperature = hottest;
+    m_health = std::move(readings);
     m_sampledAt = GetTickCount64();
 }
 

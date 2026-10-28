@@ -158,10 +158,15 @@ void testResetClearsState()
 {
     FrameTracker tracker(kQpc);
     tracker.onPresent({ kQpc, 1, 1, 1 });
+    tracker.onPresent({ kQpc + framesToQpc(1.0, 60.0), 1, 1, 1 });
+    CHECK(tracker.summary(60.0).currentFps > 0.0);
     tracker.reset();
 
     CHECK(tracker.streamCount() == 0);
     CHECK(!tracker.hasActiveStream());
+    CHECK(tracker.activeProcessId() == 0);
+    CHECK(tracker.activePresents() == 0);
+    CHECK(tracker.summary(60.0).currentFps == 0.0);
 }
 
 } // namespace

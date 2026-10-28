@@ -11,6 +11,7 @@
 #include <dwrite.h>
 
 #include <functional>
+#include <optional>
 #include <string>
 
 namespace yawa {
@@ -30,6 +31,7 @@ public:
     void destroy();
 
     void setSettings(const OverlaySettings& settings);
+    void setGameMonitor(const RECT* monitor);
     void setAccent(Accent accent);
     void setContent(const MetricStore& store, const FpsSummary& fps, const std::wstring& gpuName);
 
@@ -39,11 +41,12 @@ public:
     void hide();
     void toggle(std::string* error = nullptr);
     bool isVisible() const { return m_visible; }
+    bool isDragging() const { return m_dragging; }
 
     void repaint();
 
-    // Перетаскивание прямо по оверлею: Ctrl + левая кнопка мыши. Приложение получает
-    // новые смещения и сохраняет их в ini (finished == true — отпустили кнопку).
+    // Перетаскивание прямо по оверлею: Ctrl + левая кнопка мыши. Координаты —
+    // origin_x/y в свободном режиме, offset_x/y в угловом (finished — отпускание).
     void setMoveHandler(std::function<void(int offsetX, int offsetY, bool finished)> handler);
     // Окно приложения: правый клик по оверлею показывает его, чтобы не искать в трее.
     void setOwnerWindow(HWND owner) { m_owner = owner; }
@@ -97,6 +100,7 @@ private:
     bool m_visible = false;
     bool m_hasContent = false;
     RECT m_monitorRect{};
+    std::optional<RECT> m_gameMonitor;
     HWND m_owner = nullptr;
 
     // Перетаскивание и плавные переходы.

@@ -476,7 +476,7 @@ void collectDisks(HardwareIdentity& info)
                     RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE, nullptr, EOAC_NONE);
                 IEnumWbemClassObject* enumerator = nullptr;
                 BSTR lang = SysAllocString(L"WQL");
-                BSTR query = SysAllocString(L"SELECT Model, Size, InterfaceType, MediaType FROM Win32_DiskDrive");
+                BSTR query = SysAllocString(L"SELECT Model, Size, Index, InterfaceType, MediaType FROM Win32_DiskDrive");
                 if (lang != nullptr && query != nullptr) {
                     if (SUCCEEDED(services->ExecQuery(lang, query, WBEM_FLAG_FORWARD_ONLY, nullptr, &enumerator))
                         && enumerator != nullptr) {
@@ -490,6 +490,13 @@ void collectDisks(HardwareIdentity& info)
                             DiskIdentity disk;
                             VARIANT value;
                             VariantInit(&value);
+                            if (SUCCEEDED(object->Get(L"Index", 0, &value, nullptr, nullptr))) {
+                                if (value.vt == VT_I4 && value.lVal >= 0 && value.lVal < 1024)
+                                    disk.diskNumber = static_cast<int>(value.lVal);
+                                else if (value.vt == VT_UI4 && value.ulVal < 1024)
+                                    disk.diskNumber = static_cast<int>(value.ulVal);
+                            }
+                            VariantClear(&value);
                             if (SUCCEEDED(object->Get(L"Model", 0, &value, nullptr, nullptr)) && value.vt == VT_BSTR
                                 && value.bstrVal != nullptr) {
                                 disk.name = toUtf8(value.bstrVal);

@@ -26,6 +26,7 @@ class Log;
 // Что реально удалось поднять на этой машине. Остальное приложение честно показывает
 // как «нет данных», а не нулём.
 struct SensorAvailability {
+    SensorFailure cpuHardware = SensorFailure::Unknown;
     bool cpu = false;
     bool cpuClock = false;
     bool cpuTemperature = false;
@@ -58,6 +59,8 @@ public:
 
     bool sample(SystemSnapshot& snapshot, std::uint32_t gamePid = 0);
     const SensorAvailability& availability() const { return m_availability; }
+    const std::optional<AmdDdr4Timings>& memoryTimings() const { return m_memoryTimings; }
+    std::vector<DiskSmartReading> diskHealth() const { return m_storage.health(); }
 
     std::wstring activeGpuName() const;
     std::uint32_t coreCount() const { return m_coreCount; }
@@ -107,6 +110,7 @@ private:
     std::uint32_t m_coreTimeCount = 0;
 
     SensorAvailability m_availability;
+    std::optional<AmdDdr4Timings> m_memoryTimings;
     std::size_t m_activeGpu = 0;
     std::uint32_t m_nominalCpuMhz = 0;
     std::uint32_t m_coreCount = 0;

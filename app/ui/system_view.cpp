@@ -71,7 +71,7 @@ void drawCpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
     const CpuIdentity& cpu = model.hardware.cpu;
-    drawCardHeader(renderer, card, L"Процессор", L"CPUID и GetLogicalProcessorInformationEx", theme);
+    drawCardHeader(renderer, card, L"Процессор", L"модель из процессора, ядра и кэш из Windows", theme);
 
     float top = inner.top + 42.0f;
     renderer.text(clipText(renderer, field(cpu.name), TextRole::Heading, inner.width()),
@@ -107,7 +107,7 @@ void drawGpuCard(Renderer& renderer, const AppModel& model, const Theme& theme, 
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
-    drawCardHeader(renderer, card, L"Видеокарты", L"DXGI и реестр класса Display: список адаптеров и драйвер", theme);
+    drawCardHeader(renderer, card, L"Видеокарты", L"модели и версии драйверов из Windows", theme);
 
     if (model.hardware.gpus.empty()) {
         renderer.text(L"нет данных", Rect{ inner.left, inner.top + 44.0f, inner.right, inner.top + 62.0f },
@@ -150,8 +150,8 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
     const MemoryIdentity& memory = model.hardware.memory;
-    drawCardHeader(renderer, card, L"Память",
-        L"SMBIOS Type 17, резерв WMI · сведения прошивки, не замеры контроллера", theme);
+    drawCardHeader(
+        renderer, card, L"Память", L"сведения прошивки о конфигурации, не измерение таймингов", theme);
 
     float top = inner.top + 42.0f;
     // Конфигурация — заголовок карточки слева: «2×16 ГБ» должно читаться первым.
@@ -168,8 +168,8 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
         }
     }
 
-    const double tck = memory.cycleTimeNs();
-    const std::wstring profile = L"не определяется из SMBIOS";
+    const std::wstring type = memory.type.empty() ? L"нет данных" : wideText(memory.type);
+    const std::wstring profile = L"нет данных о профиле";
 
     std::wstring slots = L"—";
     if (memory.slots > 0) {
@@ -185,9 +185,8 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
 
     // Четыре характеристики в сетке 2×2: в демо карточка памяти именно такая,
     // и в одну колонку они не влезали в узком окне.
-    const std::array<std::pair<std::wstring, std::wstring>, 4> specs{ std::make_pair(L"Частота", speed),
-        { L"Такт tCK", tck > 0.0 ? wideText(formatValue(tck, 3) + " нс") : std::wstring(L"—") },
-        { L"XMP/EXPO", profile }, { L"Слоты", slots } };
+    const std::array<std::pair<std::wstring, std::wstring>, 4> specs { std::make_pair(L"Скорость", speed),
+        { L"Тип памяти", type }, { L"XMP/EXPO", profile }, { L"Слоты", slots } };
     const float half = inner.width() * 0.5f;
     for (std::size_t index = 0; index < specs.size(); ++index) {
         const Rect cell{ inner.left + static_cast<float>(index % 2) * half, top + static_cast<float>(index / 2) * 26.0f,
@@ -203,7 +202,7 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
         if (!module.populated) {
             continue;
         }
-        if (top + 16.0f > inner.bottom) {
+        if (top + 16.0f > inner.bottom - 52.0f) {
             break;
         }
 
@@ -242,20 +241,32 @@ void drawMemoryCard(Renderer& renderer, const AppModel& model, const Theme& them
         top += 18.0f;
     }
 
-    if (top + 30.0f <= inner.bottom) {
-        drawWrappedText(renderer,
-            L"SMBIOS/WMI не сообщают действующие тайминги; tCK рассчитан из частоты. "
-            L"Декодер SPD/контроллера памяти для PawnIO пока не реализован.",
-            Rect { inner.left, inner.bottom - 28.0f, inner.right, inner.bottom }, TextRole::Tiny,
-            theme.textFaint, 12.0f, 2);
+    std::wstring live = L"Сейчас (UMC): недоступны";
+    if (model.memoryTimings) {
+        const AmdDdr4Timings& timings = *model.memoryTimings;
+        live = L"Сейчас (UMC): "
+            + wideText(std::to_string(timings.cl) + "-" + std::to_string(timings.rcdRead) + "-"
+                + std::to_string(timings.rp) + "-" + std::to_string(timings.ras))
+            + L" (CL-RCDRD-RP-RAS)";
     }
+    renderer.text(clipText(renderer, live, TextRole::Small, inner.width()),
+        Rect { inner.left, inner.bottom - 43.0f, inner.right, inner.bottom - 25.0f }, TextRole::Small,
+        model.memoryTimings ? theme.accent : theme.textFaint);
+    renderer.text(model.memoryTimings
+            ? L"AMD DDR4 Matisse/Cezanne · tRCDWR / tRC: "
+                + wideText(std::to_string(model.memoryTimings->rcdWrite) + " / "
+                    + std::to_string(model.memoryTimings->rc))
+                + L" · показания не проверены на железе"
+            : L"SPD — паспорт, не замер. UMC: только поддержанный AMD DDR4 с доступом к PawnIO.",
+        Rect { inner.left, inner.bottom - 20.0f, inner.right, inner.bottom }, TextRole::Tiny,
+        theme.textFaint);
 }
 
 void drawDisplayCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card)
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
-    drawCardHeader(renderer, card, L"Мониторы", L"EnumDisplaySettings и EDID-имя драйвера монитора", theme);
+    drawCardHeader(renderer, card, L"Мониторы", L"параметры и названия мониторов из Windows", theme);
 
     if (model.hardware.displays.empty()) {
         renderer.text(model.displayWidth > 0
@@ -288,11 +299,42 @@ void drawDisplayCard(Renderer& renderer, const AppModel& model, const Theme& the
     }
 }
 
+std::wstring smartSummary(const NvmeSmartHealth& health)
+{
+    std::wstring text = L"NVMe SMART · использовано " + std::to_wstring(health.percentUsed);
+    text += health.percentUsed == 255 ? L"% или больше" : L"%";
+    if (health.availableSparePercent) {
+        text += L" · резерв " + std::to_wstring(*health.availableSparePercent) + L"%";
+    }
+    if (health.dataUnitsWritten) {
+        // NVMe rounds each 512,000-byte unit up: this is an estimate, not exact bytes written.
+        text += L" · записано ~"
+            + wideText(formatValue(static_cast<double>(*health.dataUnitsWritten) * 0.000000512, 2))
+            + L" ТБ";
+    }
+    if (health.compositeCelsius) {
+        text += L" · " + wideText(formatValue(*health.compositeCelsius, 1)) + L" °C";
+    }
+    return text;
+}
+
+std::wstring smartWarnings(const NvmeSmartHealth& health)
+{
+    std::wstring text = L"Ошибки носителя: ";
+    text += health.mediaErrors ? std::to_wstring(*health.mediaErrors) : L"нет данных";
+    text += L" · аварийные остановки: ";
+    text += health.unsafeShutdowns ? std::to_wstring(*health.unsafeShutdowns) : L"нет данных";
+    if (health.criticalWarning != 0) {
+        text += L" · флаги предупреждения: " + std::to_wstring(health.criticalWarning);
+    }
+    return text;
+}
+
 void drawDiskCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card)
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
-    drawCardHeader(renderer, card, L"Диски", L"WMI Win32_DiskDrive и GetDiskFreeSpaceEx: модель, интерфейс и объём", theme);
+    drawCardHeader(renderer, card, L"Диски", L"модель из Windows · SMART только при точном совпадении номера", theme);
 
     if (model.hardware.disks.empty()) {
         renderer.text(L"нет данных",
@@ -302,7 +344,7 @@ void drawDiskCard(Renderer& renderer, const AppModel& model, const Theme& theme,
 
     float top = inner.top + 42.0f;
     for (const DiskIdentity& disk : model.hardware.disks) {
-        if (top + 36.0f > inner.bottom) {
+        if (top + 70.0f > inner.bottom) {
             break;
         }
         const std::wstring title = field(disk.name);
@@ -335,7 +377,18 @@ void drawDiskCard(Renderer& renderer, const AppModel& model, const Theme& theme,
             renderer.text(clipText(renderer, note, TextRole::Tiny, inner.width()),
                 Rect{ inner.left, top + 19.0f, inner.right, top + 33.0f }, TextRole::Tiny, theme.textFaint);
         }
-        top += 42.0f;
+        const NvmeSmartHealth* health = disk.diskNumber >= 0
+            ? nvmeHealthForDisk(model.diskHealth, static_cast<std::uint32_t>(disk.diskNumber)) : nullptr;
+        const std::wstring smart = health ? smartSummary(*health) : L"NVMe SMART: нет данных для этого диска";
+        renderer.text(clipText(renderer, smart, TextRole::Tiny, inner.width()),
+            Rect{ inner.left, top + 37.0f, inner.right, top + 51.0f }, TextRole::Tiny,
+            health ? theme.textDim : theme.textFaint);
+        if (health) {
+            renderer.text(clipText(renderer, smartWarnings(*health), TextRole::Tiny, inner.width()),
+                Rect{ inner.left, top + 54.0f, inner.right, top + 68.0f }, TextRole::Tiny,
+                health->criticalWarning ? theme.accent : theme.textFaint);
+        }
+        top += 76.0f;
     }
 }
 
@@ -368,7 +421,7 @@ void drawSystemView(Renderer& renderer, const AppModel& model, const Theme& them
     drawDisplayCard(renderer, model, theme, columns.span(narrow ? 0 : 8, narrow ? 12 : 4,
         narrow ? memoryTop + memoryHeight + kGap : memoryTop, monitorHeight));
 
-    const float diskHeight = 184.0f;
+    const float diskHeight = 320.0f;
     const float diskTop = memoryTop + memoryHeight + kGap + (narrow ? monitorHeight + kGap : 0.0f);
     drawDiskCard(renderer, model, theme, columns.span(0, 12, diskTop, diskHeight));
 
@@ -376,19 +429,15 @@ void drawSystemView(Renderer& renderer, const AppModel& model, const Theme& them
     const Rect note = columns.span(0, 12, noteTop, area.top + systemHeight(narrow) - 8.0f - noteTop);
     drawCard(renderer, note, theme);
     const Rect inner = note.inset(kCardPadding);
-    drawCardHeader(renderer, note, L"Откуда эти числа",
-        L"реестр, CPUID, SMBIOS, DXGI и EnumDisplaySettings — без драйверов и без сети", theme);
+    drawCardHeader(
+        renderer, note, L"Откуда эти числа", L"сведения Windows, процессора и прошивки · без сети", theme);
     drawWrappedText(renderer,
-        L"Версию Windows берём из CurrentVersion — оттуда же её берёт winver, поэтому карточка и окно «О "
-        L"системе» "
-        L"совпадают. Модель процессора читается прямо из CPUID, ядра и кэш — из "
-        L"GetLogicalProcessorInformationEx. "
-        L"Видеокарты перечисляет DXGI, а версию драйвера добавляет реестр класса Display. Модули памяти и их "
-        L"частоты "
-        L"приложение берёт из таблиц SMBIOS, которые BIOS собирает из SPD: именно так видно «2×16 ГБ», а не "
-        L"только "
-        L"«32 ГБ» суммарно.",
-        Rect { inner.left, inner.top + 40.0f, inner.right, inner.bottom }, TextRole::Small, theme.textDim, 15.0f, 4);
+        L"Версию системы и сведения о дисках получаем из Windows. Модель процессора читаем из самого "
+        L"процессора, данные о ядрах и кэше — из Windows. Список видеокарт и версии драйверов тоже "
+        L"получаем из Windows. Состав модулей памяти и настроенную скорость сообщает прошивка: "
+        L"это сведения о конфигурации, а не измерение текущих таймингов или статуса профиля разгона.",
+        Rect { inner.left, inner.top + 40.0f, inner.right, inner.bottom }, TextRole::Small, theme.textDim,
+        15.0f, 4);
 }
 
 } // namespace yawa

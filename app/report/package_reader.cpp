@@ -1,0 +1,518 @@
+#include "report/package.h"
+#include "report/package_internal.h"
+
+#include <array>
+#include <charconv>
+#include <cmath>
+#include <cstdint>
+#include <string>
+#include <string_view>
+#include <utility>
+
+namespace yawa {
+namespace {
+
+    constexpr std::array<std::string_view, 7> kNames { "manifest.json", "system.json", "session.json",
+        "sensors.csv", "audit.json", "diagnosis.json", "screen.png" };
+    constexpr std::size_t kMaxArchiveBytes = 33u * 1024u * 1024u;
+    constexpr std::size_t kMaxMetadataBytes = 64u * 1024u;
+    constexpr std::size_t kMaxCardBytes = 32u * 1024u * 1024u;
+
+    std::uint16_t read16(std::string_view bytes, std::size_t at)
+    {
+        return static_cast<unsigned char>(bytes[at])
+            | static_cast<std::uint16_t>(static_cast<unsigned char>(bytes[at + 1])) << 8;
+    }
+
+    std::uint32_t read32(std::string_view bytes, std::size_t at)
+    {
+        return read16(bytes, at) | static_cast<std::uint32_t>(read16(bytes, at + 2)) << 16;
+    }
+
+    class ManifestReader
+    {
+    public:
+        explicit ManifestReader(std::string_view text)
+            : m_text(text)
+        {
+        }
+
+        bool take(char symbol)
+        {
+            space();
+            if (m_pos == m_text.size() || m_text[m_pos] != symbol)
+                return false;
+            ++m_pos;
+            return true;
+        }
+
+        bool quoted(std::string_view& result)
+        {
+            if (!take('"'))
+                return false;
+            const std::size_t start = m_pos;
+            while (m_pos < m_text.size() && m_text[m_pos] != '"') {
+                const unsigned char ch = static_cast<unsigned char>(m_text[m_pos++]);
+                if (ch < 0x20 || ch > 0x7e || ch == '\\')
+                    return false;
+            }
+            if (m_pos == m_text.size())
+                return false;
+            result = m_text.substr(start, m_pos++ - start);
+            return true;
+        }
+
+        bool ended()
+        {
+            space();
+            return m_pos == m_text.size();
+        }
+
+    private:
+        void space()
+        {
+            while (m_pos < m_text.size()
+                && (m_text[m_pos] == ' ' || m_text[m_pos] == '\r' || m_text[m_pos] == '\n'
+                    || m_text[m_pos] == '\t'))
+                ++m_pos;
+        }
+        std::string_view m_text;
+        std::size_t m_pos = 0;
+    };
+
+    bool parseManifest(std::string_view json, bool& gameFrameIncluded)
+    {
+        ManifestReader reader(json);
+        if (!reader.take('{'))
+            return false;
+        bool schema = false;
+        bool format = false;
+        bool frame = false;
+        bool first = true;
+        while (true) {
+            if (reader.take('}'))
+                break;
+            if (!first && !reader.take(','))
+                return false;
+            first = false;
+            std::string_view key;
+            if (!reader.quoted(key) || !reader.take(':'))
+                return false;
+            if (key == "schema") {
+                if (schema || !reader.take('1'))
+                    return false;
+                schema = true;
+            } else {
+                std::string_view value;
+                if (!reader.quoted(value))
+                    return false;
+                if (key == "format" && !format && value == "yawa") {
+                    format = true;
+                } else if (key == "game_frame" && !frame && (value == "included" || value == "omitted")) {
+                    gameFrameIncluded = value == "included";
+                    frame = true;
+                } else {
+                    return false;
+                }
+            }
+        }
+        return schema && format && frame && reader.ended();
+    }
+
+    class JsonReader
+    {
+    public:
+        explicit JsonReader(std::string_view text)
+            : m_text(text)
+        {
+        }
+
+        bool valid() { return object(0) && ended(); }
+
+        bool notCollected()
+        {
+            std::string_view key;
+            std::string_view status;
+            return take('{') && quoted(&key) && key == "status" && take(':') && quoted(&status)
+                && status == "not_collected" && take('}') && ended();
+        }
+
+        bool validSession()
+        {
+            if (!take('{'))
+                return false;
+            unsigned seen = 0;
+            std::string_view status;
+            while (!take('}')) {
+                if (seen != 0 && !take(','))
+                    return false;
+                std::string_view key;
+                if (!quoted(&key) || !take(':'))
+                    return false;
+                unsigned field = 0;
+                if (key == "sample_age_ms")
+                    field = 1;
+                else if (key == "fps")
+                    field = 2;
+                else if (key == "game_cpu_pct")
+                    field = 3;
+                else if (key == "game_thread_pct")
+                    field = 4;
+                else if (key == "game_gpu_3d_pct")
+                    field = 5;
+                else if (key != "status")
+                    return false;
+                if ((seen & (1u << field)) != 0)
+                    return false;
+                seen |= 1u << field;
+                if (field == 0) {
+                    if (!quoted(&status))
+                        return false;
+                } else {
+                    space();
+                    const std::size_t start = m_pos;
+                    if (m_pos == m_text.size() || !number()
+                        || !sessionNumber(field, m_text.substr(start, m_pos - start)))
+                        return false;
+                }
+            }
+            return ended()
+                && ((status == "no_game_sample" && seen == 1)
+                    || (status == "instantaneous_only" && (seen & 3u) == 3u));
+        }
+
+    private:
+        bool sessionNumber(unsigned field, std::string_view text)
+        {
+            if (field == 1) {
+                unsigned age = 0;
+                const auto parsed = std::from_chars(text.data(), text.data() + text.size(), age);
+                return parsed.ec == std::errc { } && parsed.ptr == text.data() + text.size() && age <= 2000;
+            }
+            double value = 0;
+            const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value);
+            const double limit = field == 2 ? 100000.0 : 100.0;
+            return parsed.ec == std::errc { } && parsed.ptr == text.data() + text.size()
+                && std::isfinite(value) && (field != 2 || value > 0) && value >= 0 && value <= limit;
+        }
+
+        void space()
+        {
+            while (m_pos < m_text.size()
+                && (m_text[m_pos] == ' ' || m_text[m_pos] == '\n' || m_text[m_pos] == '\r'
+                    || m_text[m_pos] == '\t'))
+                ++m_pos;
+        }
+
+        bool take(char symbol)
+        {
+            space();
+            if (m_pos == m_text.size() || m_text[m_pos] != symbol)
+                return false;
+            ++m_pos;
+            return true;
+        }
+
+        bool ended()
+        {
+            space();
+            return m_pos == m_text.size();
+        }
+
+        bool literal(std::string_view word)
+        {
+            if (m_text.substr(m_pos, word.size()) != word)
+                return false;
+            m_pos += word.size();
+            return true;
+        }
+
+        bool hexQuad(unsigned& value)
+        {
+            if (m_text.size() - m_pos < 4)
+                return false;
+            value = 0;
+            for (int index = 0; index < 4; ++index) {
+                const char digit = m_text[m_pos++];
+                unsigned nibble = 0;
+                if (digit >= '0' && digit <= '9')
+                    nibble = static_cast<unsigned>(digit - '0');
+                else if (digit >= 'a' && digit <= 'f')
+                    nibble = static_cast<unsigned>(digit - 'a' + 10);
+                else if (digit >= 'A' && digit <= 'F')
+                    nibble = static_cast<unsigned>(digit - 'A' + 10);
+                else
+                    return false;
+                value = (value << 4) | nibble;
+            }
+            return true;
+        }
+
+        bool utf8(unsigned char first)
+        {
+            const unsigned count = first >= 0xc2 && first <= 0xdf ? 2u
+                : first >= 0xe0 && first <= 0xef                  ? 3u
+                : first >= 0xf0 && first <= 0xf4                  ? 4u
+                                                                  : 0u;
+            if (count == 0 || m_text.size() - m_pos < count - 1)
+                return false;
+            unsigned codepoint = first & (0x7fu >> count);
+            for (unsigned index = 1; index < count; ++index) {
+                const auto next = static_cast<unsigned char>(m_text[m_pos++]);
+                if ((next & 0xc0u) != 0x80u)
+                    return false;
+                codepoint = (codepoint << 6) | (next & 0x3fu);
+            }
+            const unsigned minimum = count == 2 ? 0x80u : count == 3 ? 0x800u : 0x10000u;
+            return codepoint >= minimum && codepoint <= 0x10ffffu
+                && (codepoint < 0xd800u || codepoint > 0xdfffu);
+        }
+
+        bool quoted(std::string_view* result = nullptr)
+        {
+            if (!take('"'))
+                return false;
+            const std::size_t start = m_pos;
+            bool escapedValue = false;
+            while (m_pos < m_text.size()) {
+                const auto symbol = static_cast<unsigned char>(m_text[m_pos++]);
+                if (symbol == '"') {
+                    if (result != nullptr) {
+                        if (escapedValue)
+                            return false;
+                        *result = m_text.substr(start, m_pos - start - 1);
+                    }
+                    return true;
+                }
+                if (symbol < 0x20u)
+                    return false;
+                if (symbol >= 0x80u) {
+                    if (!utf8(symbol))
+                        return false;
+                } else if (symbol == '\\') {
+                    escapedValue = true;
+                    if (m_pos == m_text.size())
+                        return false;
+                    const char escaped = m_text[m_pos++];
+                    if (escaped == 'u') {
+                        unsigned codepoint = 0;
+                        if (!hexQuad(codepoint))
+                            return false;
+                        if (codepoint >= 0xd800u && codepoint <= 0xdbffu) {
+                            if (m_text.substr(m_pos, 2) != "\\u")
+                                return false;
+                            m_pos += 2;
+                            unsigned low = 0;
+                            if (!hexQuad(low) || low < 0xdc00u || low > 0xdfffu)
+                                return false;
+                        } else if (codepoint >= 0xdc00u && codepoint <= 0xdfffu) {
+                            return false;
+                        }
+                    } else if (escaped != '"' && escaped != '\\' && escaped != '/' && escaped != 'b'
+                        && escaped != 'f' && escaped != 'n' && escaped != 'r' && escaped != 't') {
+                        return false;
+                    }
+                }
+            }
+            return false;
+        }
+
+        bool number()
+        {
+            if (m_text[m_pos] == '-')
+                ++m_pos;
+            if (m_pos == m_text.size())
+                return false;
+            if (m_text[m_pos] == '0') {
+                ++m_pos;
+            } else {
+                if (m_text[m_pos] < '1' || m_text[m_pos] > '9')
+                    return false;
+                while (m_pos < m_text.size() && m_text[m_pos] >= '0' && m_text[m_pos] <= '9')
+                    ++m_pos;
+            }
+            if (m_pos < m_text.size() && m_text[m_pos] == '.') {
+                ++m_pos;
+                if (m_pos == m_text.size() || m_text[m_pos] < '0' || m_text[m_pos] > '9')
+                    return false;
+                while (m_pos < m_text.size() && m_text[m_pos] >= '0' && m_text[m_pos] <= '9')
+                    ++m_pos;
+            }
+            if (m_pos < m_text.size() && (m_text[m_pos] == 'e' || m_text[m_pos] == 'E')) {
+                ++m_pos;
+                if (m_pos < m_text.size() && (m_text[m_pos] == '+' || m_text[m_pos] == '-'))
+                    ++m_pos;
+                if (m_pos == m_text.size() || m_text[m_pos] < '0' || m_text[m_pos] > '9')
+                    return false;
+                while (m_pos < m_text.size() && m_text[m_pos] >= '0' && m_text[m_pos] <= '9')
+                    ++m_pos;
+            }
+            return true;
+        }
+
+        bool value(unsigned depth)
+        {
+            if (depth > 16)
+                return false;
+            space();
+            if (m_pos == m_text.size())
+                return false;
+            const char symbol = m_text[m_pos];
+            if (symbol == '{')
+                return object(depth);
+            if (symbol == '[')
+                return array(depth);
+            if (symbol == '"')
+                return quoted();
+            if (symbol == 't')
+                return literal("true");
+            if (symbol == 'f')
+                return literal("false");
+            if (symbol == 'n')
+                return literal("null");
+            return number();
+        }
+
+        bool object(unsigned depth)
+        {
+            if (!take('{'))
+                return false;
+            if (take('}'))
+                return true;
+            do {
+                if (!quoted() || !take(':') || !value(depth + 1))
+                    return false;
+                if (take('}'))
+                    return true;
+            } while (take(','));
+            return false;
+        }
+
+        bool array(unsigned depth)
+        {
+            if (!take('['))
+                return false;
+            if (take(']'))
+                return true;
+            do {
+                if (!value(depth + 1))
+                    return false;
+                if (take(']'))
+                    return true;
+            } while (take(','));
+            return false;
+        }
+
+        std::string_view m_text;
+        std::size_t m_pos = 0;
+    };
+
+    bool readEntries(std::string_view archive, std::array<std::string_view, 7>& entries, std::string& error)
+    {
+        if (archive.size() < 22 || archive.size() > kMaxArchiveBytes) {
+            error = "Пакет .yawa пуст или превышает 33 МиБ";
+            return false;
+        }
+        const auto footer = archive.size() - 22;
+        const auto central = read32(archive, footer + 16);
+        const auto centralBytes = read32(archive, footer + 12);
+        if (read32(archive, footer) != 0x06054B50u || read16(archive, footer + 4) != 0
+            || read16(archive, footer + 6) != 0 || read16(archive, footer + 8) != kNames.size()
+            || read16(archive, footer + 10) != kNames.size() || read16(archive, footer + 20) != 0
+            || central > footer || centralBytes != footer - central) {
+            error = "Пакет .yawa: неверный каталог ZIP";
+            return false;
+        }
+        std::size_t directory = central;
+        std::size_t local = 0;
+        for (std::size_t index = 0; index < kNames.size(); ++index) {
+            if (directory + 46 > footer || read32(archive, directory) != 0x02014B50u) {
+                error = "Пакет .yawa: повреждён каталог ZIP";
+                return false;
+            }
+            const auto nameBytes = read16(archive, directory + 28);
+            const auto bytes = read32(archive, directory + 24);
+            const auto storedBytes = read32(archive, directory + 20);
+            const auto checksum = read32(archive, directory + 16);
+            const auto name = kNames[index];
+            if (nameBytes != name.size() || read16(archive, directory + 8) != 0
+                || read16(archive, directory + 10) != 0 || storedBytes != bytes
+                || read16(archive, directory + 30) != 0 || read16(archive, directory + 32) != 0
+                || read16(archive, directory + 34) != 0 || read32(archive, directory + 42) != local
+                || directory + 46 + nameBytes > footer || archive.substr(directory + 46, nameBytes) != name
+                || bytes > (index == 6 ? kMaxCardBytes : kMaxMetadataBytes)) {
+                error = "Пакет .yawa: неверная запись " + std::string(name);
+                return false;
+            }
+            directory += 46 + nameBytes;
+            if (local + 30 > central || read32(archive, local) != 0x04034B50u
+                || read16(archive, local + 6) != 0 || read16(archive, local + 8) != 0
+                || read32(archive, local + 14) != checksum || read32(archive, local + 18) != storedBytes
+                || read32(archive, local + 22) != bytes || read16(archive, local + 26) != nameBytes
+                || read16(archive, local + 28) != 0 || local + 30 + nameBytes > central
+                || archive.substr(local + 30, nameBytes) != name) {
+                error = "Пакет .yawa: повреждён файл " + std::string(name);
+                return false;
+            }
+            const auto data = local + 30 + nameBytes;
+            if (bytes > central - data) {
+                error = "Пакет .yawa: файл выходит за границы архива";
+                return false;
+            }
+            entries[index] = archive.substr(data, bytes);
+            if (report_internal::crc32(entries[index]) != checksum) {
+                error = "Пакет .yawa: ошибка CRC файла " + std::string(name);
+                return false;
+            }
+            local = data + bytes;
+        }
+        if (directory != footer || local != central) {
+            error = "Пакет .yawa: лишние данные ZIP";
+            return false;
+        }
+        return true;
+    }
+
+} // namespace
+
+bool readReportPackage(std::string_view archive, ReportPackageContents& contents, std::string& error)
+{
+    error.clear();
+    std::array<std::string_view, 7> entries { };
+    if (!readEntries(archive, entries, error))
+        return false;
+    bool hasFrame = false;
+    if (!parseManifest(entries[0], hasFrame) || !report_internal::validPng(entries[6])) {
+        error = "Пакет .yawa: неподдерживаемая схема или повреждённая PNG-карточка";
+        return false;
+    }
+    // Schema 1's producer writes no sensor rows. Do not pass invented CSV rows to a future viewer.
+    if (entries[3] != "metric,value,unit\n") {
+        error = "Пакет .yawa: неподдерживаемые данные sensors.csv";
+        return false;
+    }
+    for (const std::size_t index : std::array<std::size_t, 4> { 1, 2, 4, 5 }) {
+        if (!JsonReader(entries[index]).valid()) {
+            error = "Пакет .yawa: некорректный JSON в " + std::string(kNames[index]);
+            return false;
+        }
+    }
+    if (!JsonReader(entries[1]).notCollected() || !JsonReader(entries[4]).notCollected()
+        || !JsonReader(entries[2]).validSession()) {
+        error = "Пакет .yawa: неподдерживаемые поля system, audit или session";
+        return false;
+    }
+    ReportPackageContents parsed;
+    parsed.manifestJson = entries[0];
+    parsed.systemJson = entries[1];
+    parsed.sessionJson = entries[2];
+    parsed.sensorsCsv = entries[3];
+    parsed.auditJson = entries[4];
+    parsed.diagnosisJson = entries[5];
+    parsed.cardPng = entries[6];
+    parsed.gameFrameIncluded = hasFrame;
+    contents = std::move(parsed);
+    return true;
+}
+
+} // namespace yawa

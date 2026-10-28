@@ -5,11 +5,15 @@ add_executable(YawaFpsHub WIN32
     metrics/hardware_info.cpp
     metrics/smbios_memory.cpp
     metrics/bottleneck.cpp
+    metrics/diagnosis.cpp
     metrics/metric_store.cpp
     metrics/statistics.cpp
     metrics/system_sampler.cpp
     metrics/overlay_rows.cpp
     metrics/units.cpp
+    report/package.cpp
+    report/package_reader.cpp
+    report/html_report.cpp
     platform/app_paths.cpp
     platform/display_info.cpp
     platform/dxgi_adapters.cpp
@@ -22,7 +26,13 @@ add_executable(YawaFpsHub WIN32
     platform/overlay_window.cpp
     platform/pawnio_sensors.cpp
     platform/pawnio_package.cpp
+    platform/spd_probe_win.cpp
     platform/pdh_query.cpp
+    platform/report_capture_win.cpp
+    platform/report_card_win.cpp
+    platform/report_file_win.cpp
+    platform/report_preview_win.cpp
+    platform/report_viewer_win.cpp
     platform/storage_sensors.cpp
     platform/vendor_gpu_sensors.cpp
     platform/sensors_win.cpp
@@ -37,6 +47,7 @@ add_executable(YawaFpsHub WIN32
     ui/overlay_view.cpp
     ui/sensors_view.cpp
     ui/settings.cpp
+    ui/overlay_recipe_json.cpp
     ui/settings_view.cpp
     ui/system_view.cpp
 )
@@ -50,8 +61,8 @@ if(MSVC)
 endif()
 
 target_include_directories(YawaFpsHub PRIVATE ${CMAKE_SOURCE_DIR}/app)
-target_link_libraries(YawaFpsHub PRIVATE d2d1 dwrite dxgi dwmapi pdh psapi shell32 user32 gdi32 advapi32 ole32
-    oleaut32 wbemuuid windowscodecs bcrypt setupapi newdev wintrust)
+target_link_libraries(YawaFpsHub PRIVATE d2d1 dwrite d3d11 dxgi dwmapi pdh psapi shell32 user32 gdi32 advapi32 ole32
+    oleaut32 wbemuuid windowscodecs bcrypt setupapi newdev wintrust comdlg32)
 # Один exe без зависимостей от установщика Visual C++: рантайм линкуем статически.
 # Без этого YawaFpsHub.exe не запускается на чистой Windows, если там нет VC++ Redistributable.
 if(MSVC)

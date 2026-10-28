@@ -63,6 +63,8 @@ struct DisplayIdentity {
 };
 
 struct DiskIdentity {
+    // WMI Index is the PhysicalDrive number, not the position in this vector.
+    int diskNumber = -1;
     std::string name;
     std::string interfaceType;
     std::string mediaType;

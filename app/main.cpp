@@ -2,13 +2,20 @@
 #include "platform/log.h"
 #include "platform/main_window.h"
 #include "platform/pawnio_package.h"
+#include "platform/pawnio_sensors.h"
+#include "platform/report_file_win.h"
+#include "platform/spd_probe_win.h"
 #include "platform/win_util.h"
+#include "report/html_report.h"
+#include "report/package.h"
 
-#include <windows.h>
 #include <objbase.h>
+#include <shellapi.h>
+#include <windows.h>
 
-#include <string>
 #include <initializer_list>
+#include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -18,6 +25,205 @@
 namespace {
 
 constexpr wchar_t kInstanceMutex[] = L"Global\\YawaFpsHubInstance";
+
+enum class DumpCommand { None, Memory, Spd, Invalid };
+
+struct DumpRequest
+{
+    DumpCommand command = DumpCommand::None;
+    unsigned address = 0;
+};
+
+DumpRequest probeCommand()
+{
+    int count = 0;
+    wchar_t** arguments = CommandLineToArgvW(GetCommandLineW(), &count);
+    if (arguments == nullptr)
+        return { };
+    bool mentionsProbe = false;
+    for (int index = 1; index < count; ++index) {
+        const std::wstring_view arg = arguments[index];
+        mentionsProbe |= arg == L"--probe" || arg == L"--dump=memory" || arg.starts_with(L"--spd");
+    }
+    DumpRequest request;
+    if ((count == 2 && std::wstring_view(arguments[1]) == L"--dump=memory")
+        || (count == 3 && std::wstring_view(arguments[1]) == L"--probe"
+            && std::wstring_view(arguments[2]) == L"--dump=memory")) {
+        request.command = DumpCommand::Memory;
+    } else if (count == 3 && std::wstring_view(arguments[1]) == L"--probe") {
+        const std::wstring_view arg = arguments[2];
+        if (arg.size() == 8 && arg.starts_with(L"--spd=5") && arg[7] >= L'0' && arg[7] <= L'7') {
+            request.command = DumpCommand::Spd;
+            request.address = 0x50u + static_cast<unsigned>(arg[7] - L'0');
+        }
+    }
+    LocalFree(arguments);
+    if (request.command == DumpCommand::None && mentionsProbe)
+        request.command = DumpCommand::Invalid;
+    return request;
+}
+
+struct ReportRequest
+{
+    std::wstring path;
+    std::wstring htmlPath;
+    bool json = false;
+};
+
+// Неизвестные сочетания --report/--json не должны попадать в обычный запуск с UAC.
+std::optional<ReportRequest> reportCommand()
+{
+    int count = 0;
+    wchar_t** arguments = CommandLineToArgvW(GetCommandLineW(), &count);
+    if (arguments == nullptr)
+        return std::nullopt;
+    ReportRequest request;
+    bool hasReport = false;
+    bool hasJson = false;
+    bool hasHtml = false;
+    bool invalid = false;
+    for (int index = 1; index < count; ++index) {
+        const std::wstring_view arg = arguments[index];
+        if (arg.starts_with(L"--report")) {
+            invalid |= hasReport || !arg.starts_with(L"--report=");
+            hasReport = true;
+            if (arg.starts_with(L"--report="))
+                request.path = std::wstring(arg.substr(9));
+        } else if (arg.starts_with(L"--json")) {
+            invalid |= hasJson || arg != L"--json";
+            hasJson = true;
+        } else if (arg.starts_with(L"--html")) {
+            invalid |= hasHtml || !arg.starts_with(L"--html=");
+            hasHtml = true;
+            if (arg.starts_with(L"--html="))
+                request.htmlPath = std::wstring(arg.substr(7));
+        }
+    }
+    LocalFree(arguments);
+    if (!hasReport && !hasJson && !hasHtml)
+        return std::nullopt;
+    request.json = hasJson;
+    if (!hasReport || invalid || (hasJson && hasHtml) || (hasHtml && request.htmlPath.empty())
+        || count != 2 + static_cast<int>(hasJson) + static_cast<int>(hasHtml))
+        request.path.clear();
+    return request;
+}
+
+HANDLE probeOutput()
+{
+    HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE);
+    if ((output == nullptr || output == INVALID_HANDLE_VALUE) && AttachConsole(ATTACH_PARENT_PROCESS))
+        output = GetStdHandle(STD_OUTPUT_HANDLE);
+    return output;
+}
+
+int reportCommandOutput(const ReportRequest& request)
+{
+    HANDLE output = probeOutput();
+    if (output == nullptr || output == INVALID_HANDLE_VALUE)
+        return 2;
+    std::string message;
+    int status = 1;
+    std::string archive;
+    std::string error;
+    if (request.path.empty()) {
+        message = request.json
+            ? "{\"error\":\"usage\"}\n"
+            : "Usage: YawaFpsHub.exe --report=<local-file.yawa> [--json | --html=<local-file.html>]\n";
+        status = 2;
+    } else if (!yawa::readLocalReport(request.path, archive, error)) {
+        message = request.json ? "{\"error\":\"invalid_report\"}\n" : "Report: " + error + "\n";
+    } else {
+        yawa::ReportPackageContents contents;
+        if (yawa::readReportPackage(archive, contents, error)) {
+            if (!request.htmlPath.empty()) {
+                std::string html;
+                if (yawa::buildHtmlReport(contents, html, error)
+                    && yawa::writeLocalHtmlReport(request.htmlPath, html, error)) {
+                    message = "HTML report created. Review the image before sharing.\n";
+                    status = 0;
+                } else {
+                    message = "Report: " + error + "\n";
+                }
+            } else if (request.json) {
+                message = std::string("{\"schema\":1,\"game_frame\":\"")
+                    + (contents.gameFrameIncluded ? "included" : "omitted")
+                    + "\",\"session\":" + contents.sessionJson + "}\n";
+                status = 0;
+            } else {
+                message = std::string(".yawa schema 1: valid\nGame frame: ")
+                    + (contents.gameFrameIncluded ? "included" : "omitted")
+                    + "\nSession: " + contents.sessionJson;
+                if (message.back() != '\n')
+                    message += '\n';
+                status = 0;
+            }
+        } else {
+            message = request.json ? "{\"error\":\"invalid_report\"}\n" : "Report: " + error + "\n";
+        }
+    }
+    DWORD written = 0;
+    return WriteFile(output, message.data(), static_cast<DWORD>(message.size()), &written, nullptr)
+            && written == message.size()
+        ? status
+        : 2;
+}
+
+int memoryDumpCommandOutput()
+{
+    HANDLE output = probeOutput();
+    if (output == nullptr || output == INVALID_HANDLE_VALUE)
+        return 2;
+    yawa::Log unopenedLog;
+    yawa::PawnioSensors sensors;
+    const auto dump = sensors.initialize(unopenedLog) ? sensors.readMemoryDump() : std::nullopt;
+    const std::string text = dump ? yawa::formatAmdDdr4MemoryDump(*dump)
+                                  : "UMC dump unavailable (requires AMD 17h/71h or 19h/50h, accessible "
+                                    "PawnIO and readable DDR4 channels).\n";
+    DWORD written = 0;
+    return WriteFile(output, text.data(), static_cast<DWORD>(text.size()), &written, nullptr)
+            && written == text.size()
+        ? (dump ? 0 : 1)
+        : 2;
+}
+
+int spdProbeCommandOutput(unsigned address)
+{
+    HANDLE output = probeOutput();
+    if (output == nullptr || output == INVALID_HANDLE_VALUE)
+        return 2;
+    yawa::Ddr4SpdProbeResult result { };
+    std::string error;
+    const bool success = yawa::readCezanneDdr4Spd(address, result, error);
+    std::string text;
+    if (success) {
+        text = "DDR4 SPD passport: base CRC valid, minimum tCK "
+            + std::to_string(result.passport.minimumCyclePs) + " ps";
+        if (result.passport.moduleCapacityMiB)
+            text += ", capacity " + std::to_string(*result.passport.moduleCapacityMiB) + " MiB";
+        if (result.partNumber)
+            text += ", module part number (unverified) " + *result.partNumber;
+        text += ".\nXMP 2.0 passport: ";
+        if (result.profiles.empty()) {
+            text += "no signature";
+        } else {
+            for (const auto& profile : result.profiles) {
+                if (profile.number != result.profiles.front().number)
+                    text += "; ";
+                text += "profile " + std::to_string(profile.number) + " minimum tCK "
+                    + std::to_string(profile.minimumCyclePs) + " ps";
+            }
+        }
+        text += ". Active profile: unknown (SPD does not report controller state).\n";
+    } else {
+        text = "SPD probe unavailable: " + error + "\n";
+    }
+    DWORD written = 0;
+    return WriteFile(output, text.data(), static_cast<DWORD>(text.size()), &written, nullptr)
+            && written == text.size()
+        ? (success ? 0 : 1)
+        : 2;
+}
 
 bool anotherInstanceExists()
 {
@@ -55,6 +261,17 @@ void showExistingWindow()
 
 int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
 {
+    const auto report = reportCommand();
+    if (report)
+        return reportCommandOutput(*report);
+    const DumpRequest probe = probeCommand();
+    if (probe.command != DumpCommand::None) {
+        if (probe.command == DumpCommand::Memory)
+            return memoryDumpCommandOutput();
+        if (probe.command == DumpCommand::Spd)
+            return spdProbeCommandOutput(probe.address);
+        return 2;
+    }
     const int sensorCommand = yawa::runSensorCommandLine();
     if (sensorCommand >= 0) {
         return sensorCommand;

@@ -278,9 +278,14 @@ void drawTitleBar(Renderer& renderer, const AppModel& model, const Theme& theme,
 
     renderer.text(L"YawaFpsHub", Rect{ kRailWidth + 20.0f, 8.0f, kRailWidth + 160.0f, 24.0f }, TextRole::Small,
         theme.textDim);
-    renderer.fillCircle(kRailWidth + 22.0f, 30.0f, 2.0f, model.etwRunning ? theme.accent : theme.textFaint);
-    renderer.text(model.etwRunning ? L"мониторинг активен" : L"мониторинг остановлен",
-        Rect{ kRailWidth + 30.0f, 23.0f, kRailWidth + 220.0f, 38.0f }, TextRole::Tiny, theme.textFaint);
+    renderer.fillCircle(
+        kRailWidth + 22.0f, 30.0f, 2.0f, model.etwRunning && !model.paused ? theme.accent : theme.textFaint);
+    const wchar_t* state = model.paused     ? L"опрос на паузе"
+        : model.etwRunning                  ? L"кадры доступны"
+        : model.settings.capture.etwEnabled ? L"кадры недоступны"
+                                            : L"сбор кадров выключен";
+    renderer.text(state, Rect { kRailWidth + 30.0f, 23.0f, kRailWidth + 220.0f, 38.0f }, TextRole::Tiny,
+        theme.textFaint);
 
     drawWindowButtons(renderer, model, theme, hits);
 }
@@ -421,11 +426,17 @@ void drawTopBar(Renderer& renderer, const AppModel& model, const Theme& theme, s
 
     if (showLiveChip) {
         const Rect live{ right - 168.0f, top, right, bottom };
-        renderer.fillRoundRect(live, 10.0f, model.etwRunning ? theme.accentSoft : theme.panelSoft);
-        renderer.fillCircle(live.left + 12.0f, live.centerY(), 3.0f, model.etwRunning ? theme.accent : theme.textFaint);
-        renderer.text(model.etwRunning ? L"ETW · кадры" : L"ETW выключен",
-            Rect{ live.left + 22.0f, live.top, live.right - 6.0f, live.bottom }, TextRole::Tiny,
-            model.etwRunning ? theme.accent : theme.textFaint);
+        const wchar_t* state = model.paused     ? L"Опрос на паузе"
+            : model.etwRunning                  ? L"Кадры доступны"
+            : model.settings.capture.etwEnabled ? L"Кадры недоступны"
+                                                : L"Кадры выключены";
+        renderer.fillRoundRect(
+            live, 10.0f, model.etwRunning && !model.paused ? theme.accentSoft : theme.panelSoft);
+        renderer.fillCircle(live.left + 12.0f, live.centerY(), 3.0f,
+            model.etwRunning && !model.paused ? theme.accent : theme.textFaint);
+        renderer.text(state, Rect { live.left + 22.0f, live.top, live.right - 6.0f, live.bottom },
+            TextRole::Tiny, model.etwRunning && !model.paused ? theme.accent : theme.textFaint);
+        hits.push_back(UiHit { live, ActionKind::SwitchView, static_cast<int>(View::Settings) });
     }
 }
 
@@ -435,12 +446,13 @@ void drawStatusBar(Renderer& renderer, const AppModel& model, const Theme& theme
     renderer.fillRect(Rect{ 0.0f, top, renderer.width(), renderer.height() }, theme.panel.withAlpha(0.85f));
     renderer.drawLine(0.0f, top, renderer.width(), top, theme.line, 1.0f);
 
-    renderer.fillCircle(kRailWidth + 16.0f, top + 14.0f, 3.0f, model.etwRunning ? theme.accent : theme.textFaint);
+    renderer.fillCircle(kRailWidth + 16.0f, top + 14.0f, 3.0f,
+        model.etwRunning && !model.paused ? theme.accent : theme.textFaint);
 
-    std::wstring left = model.etwRunning ? L"ETW-сессия активна · кадры DXGI" : L"ETW выключен · FPS недоступен";
-    if (model.paused) {
-        left += L" · сбор на паузе";
-    }
+    const std::wstring left = model.paused  ? L"Опрос на паузе"
+        : model.etwRunning                  ? L"Кадры доступны · сбор идёт"
+        : model.settings.capture.etwEnabled ? L"Кадры пока недоступны"
+                                            : L"Сбор кадров выключен";
 
     const std::wstring right = L"приложение " + wideMetric(MetricId::SelfCpu, model.store.value(MetricId::SelfCpu))
         + L" · " + wideMetric(MetricId::SelfRam, model.store.value(MetricId::SelfRam))

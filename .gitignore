@@ -8,3 +8,6 @@ out/
 *.log
 ui-prototype/.cache/
 .venv/
+/HWiNFO64.exe
+/PawnIO_setup.exe
+/release_0_2_11.zip

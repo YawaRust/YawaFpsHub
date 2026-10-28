@@ -41,6 +41,8 @@ void testUnits()
 void testNotFinite()
 {
     CHECK(formatValue(std::numeric_limits<double>::quiet_NaN(), 0) == "—");
+    CHECK(formatValue(1e100, 0) == "—"); // Не читать за пределами буфера при snprintf.
+    CHECK(formatValue(std::numeric_limits<double>::max(), 2) == "—");
 }
 
 void testMetricLookup()
