@@ -363,7 +363,7 @@ void OverlayEditor::layout()
         m_y, nullptr, px(408), px(y + (rtss ? 72 : 92)), px(58), px(26), SWP_NOZORDER | SWP_NOACTIVATE);
     SetWindowPos(m_alphaEdit, nullptr, px(472), px(y + 139), px(42), px(24), SWP_NOZORDER | SWP_NOACTIVATE);
     SetWindowPos(
-        m_hexEdit, nullptr, px(112), px(y + 72), px(138), px(rtss ? 26 : 20), SWP_NOZORDER | SWP_NOACTIVATE);
+        m_hexEdit, nullptr, px(112), px(y + 72), px(138), px(rtss ? 26.0f : 20.0f), SWP_NOZORDER | SWP_NOACTIVATE);
     SetWindowPos(
         m_catalogSearch, nullptr, px(width - 380), px(16), px(256), px(26), SWP_NOZORDER | SWP_NOACTIVATE);
 }
