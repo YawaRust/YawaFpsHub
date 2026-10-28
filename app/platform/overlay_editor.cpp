@@ -1904,7 +1904,7 @@ void OverlayEditor::paint()
         ? L"RTSS: " + std::to_wstring(rtss.rtssOmittedLayers) + L" слоёв без связанной метрики"
         : rtss.layout != OverlayLayout::Plates
         ? L"Строка: двигайте весь блок; порядок — в разделе «Строки»"
-        : L"Колесо — зум · Ctrl — выбор · Alt — плашка · Shift — сетка";
+        : L"Угол — размер фона · Колесо — зум · Ctrl — выбор · Alt — плашка";
     const float hintLeft = m_focusCanvas ? m_canvas.left : 20.0f;
     m_renderer.text(clipText(m_renderer, canvasHint, TextRole::Tiny, m_fitButton.left - hintLeft - 8.0f),
         Rect { hintLeft, m_fitButton.top + 1.0f, m_fitButton.left - 4.0f, m_fitButton.bottom - 3.0f },

@@ -1472,7 +1472,9 @@ namespace {
             }
             const std::wstring label = look.uppercase ? upperCase(text.labels[index]) : text.labels[index];
             const std::wstring segment = tracked(label + L" " + text.values[index], look.letterSpacing);
+            painter.beginTextSize(text.ids[index]);
             const float width = painter.measure(segment, role);
+            painter.endTextSize();
             painter.beginRow(text.ids[index], Rect { x, inner.top, x + width + 4.0f, inner.bottom });
             const auto group = overlayColorGroup(text.ids[index]);
             const bool customized = settings.metricColors[static_cast<std::size_t>(text.ids[index])] >= 0
