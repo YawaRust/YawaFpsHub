@@ -64,6 +64,6 @@ std::array<Color, kOverlayColorCount> overlayColorPalette();
 Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, const Theme& theme,
     const OverlayText& text, const Rect& bounds, float scale, const OverlayFormats& formats,
     std::vector<Rect>* rtssLayerBounds = nullptr, float* rtssLayerScale = nullptr,
-    std::vector<OverlayRowBounds>* rowBounds = nullptr);
+    std::vector<OverlayRowBounds>* rowBounds = nullptr, float* rowScale = nullptr);
 
 } // namespace yawa

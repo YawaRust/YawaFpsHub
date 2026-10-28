@@ -295,6 +295,11 @@ OverlayRowPosition moveOverlayRow(OverlayRowPosition start, int deltaX, int delt
     return { start.labelX + dx, start.valueX + dx, std::clamp(start.y + deltaY, 0, 1490) };
 }
 
+OverlayRowOffset moveOverlayRowOffset(OverlayRowOffset start, int deltaX, int deltaY)
+{
+    return { std::clamp(start.x + deltaX, -2048, 2048), std::clamp(start.y + deltaY, -2048, 2048) };
+}
+
 int scaledOverlayOffset(int offset, double sourceExtent, double targetExtent)
 {
     if (sourceExtent <= 0.0 || targetExtent <= 0.0) {
@@ -954,6 +959,18 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                     }
                 }
             }
+        } else if (section == "overlay_style_offsets") {
+            const auto entry = std::find_if(kMetricTable.begin(), kMetricTable.end(),
+                [&key](const MetricInfo& info) { return info.key == key; });
+            const std::size_t comma = value.find(',');
+            if (entry != kMetricTable.end() && comma != std::string_view::npos
+                && value.find(',', comma + 1) == std::string_view::npos) {
+                const int x = parseInt(trim(value.substr(0, comma)), 2049);
+                const int y = parseInt(trim(value.substr(comma + 1)), 2049);
+                if (x >= -2048 && x <= 2048 && y >= -2048 && y <= 2048) {
+                    target.overlay.styleRowOffsets[static_cast<std::size_t>(entry->id)] = { x, y };
+                }
+            }
         } else if (section == "overlay_metric_colors" || section == "overlay_metric_rgba") {
             const auto entry = std::find_if(kMetricTable.begin(), kMetricTable.end(),
                 [&key](const MetricInfo& info) { return info.key == key; });
@@ -1554,6 +1571,14 @@ std::string serializeSettings(const Settings& settings)
         if (pos.y >= 0) {
             text += std::string(metric.key) + " = " + std::to_string(pos.labelX) + ","
                 + std::to_string(pos.valueX) + "," + std::to_string(pos.y) + "\n";
+        }
+    }
+    text += "\n[overlay_style_offsets]\n";
+    for (const MetricInfo& metric : kMetricTable) {
+        const auto& offset = settings.overlay.styleRowOffsets[static_cast<std::size_t>(metric.id)];
+        if (offset.x != 0 || offset.y != 0) {
+            text += std::string(metric.key) + " = " + std::to_string(offset.x) + ","
+                + std::to_string(offset.y) + "\n";
         }
     }
     text += "\n[overlay_metric_colors]\n";

@@ -327,6 +327,17 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
             m_overlayEditor.refresh();
             InvalidateRect(m_window, nullptr, FALSE);
         });
+        m_overlay.setStyledRowEditHandler([this](MetricId id, OverlayRowOffset offset, bool finished) {
+            {
+                std::lock_guard<std::mutex> guard(m_modelMutex);
+                m_model.settings.overlay.styleRowOffsets[static_cast<std::size_t>(id)] = offset;
+            }
+            if (finished) {
+                saveSettings();
+            }
+            m_overlayEditor.refresh();
+            InvalidateRect(m_window, nullptr, FALSE);
+        });
     }
 
     m_model.settingsPath = settingsPath();

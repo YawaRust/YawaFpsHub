@@ -55,6 +55,8 @@ public:
     void setRowEditHandler(
         std::function<void(MetricId id, OverlayRowPosition position, bool finished)> handler);
     void setRowReorderHandler(std::function<void(MetricId moved, MetricId before, bool finished)> handler);
+    void setStyledRowEditHandler(
+        std::function<void(MetricId id, OverlayRowOffset offset, bool finished)> handler);
     // Окно приложения: правый клик по оверлею показывает его, чтобы не искать в трее.
     void setOwnerWindow(HWND owner) { m_owner = owner; }
 
@@ -134,12 +136,16 @@ private:
     float m_layerDragScale = 1.0f;
     std::function<void(MetricId, OverlayRowPosition, bool)> m_onRowEdit;
     std::function<void(MetricId, MetricId, bool)> m_onRowReorder;
+    std::function<void(MetricId, OverlayRowOffset, bool)> m_onStyledRowEdit;
     std::vector<OverlayRowBounds> m_rowBounds;
+    float m_rowUnit = 1.0f;
     bool m_rowDragging = false;
     bool m_rowReordering = false;
     MetricId m_rowDragId = MetricId::Fps;
     POINT m_rowDragOrigin { };
     OverlayRowPosition m_rowStart { };
+    OverlayRowOffset m_styleRowStart { };
+    Rect m_rowStartBounds { };
     float m_rowDragScale = 1.0f;
     bool m_resizing = false;
     POINT m_resizeOrigin{};

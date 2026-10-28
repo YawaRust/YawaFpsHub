@@ -65,8 +65,9 @@ LRESULT CALLBACK OverlayWindow::windowProc(HWND window, UINT message, WPARAM wPa
             const D2D1_RECT_F& area = self->m_contentRectD2D;
             const float fx = static_cast<float>(point.x);
             const float fy = static_cast<float>(point.y);
-            if (area.right > area.left && fx >= area.left - 4.0f && fx <= area.right + 4.0f
-                && fy >= area.top - 4.0f && fy <= area.bottom + 4.0f) {
+            if (self->rowAt(point.x, point.y)
+                || (area.right > area.left && fx >= area.left - 4.0f && fx <= area.right + 4.0f
+                    && fy >= area.top - 4.0f && fy <= area.bottom + 4.0f)) {
                 return HTCLIENT;
             }
         }
@@ -78,11 +79,11 @@ LRESULT CALLBACK OverlayWindow::windowProc(HWND window, UINT message, WPARAM wPa
             GetCursorPos(&cursor);
             ScreenToClient(window, &cursor);
             const D2D1_RECT_F& area = self->m_contentRectD2D;
-            const bool overContent = area.right > area.left
-                && static_cast<float>(cursor.x) >= area.left - 4.0f
-                && static_cast<float>(cursor.x) <= area.right + 4.0f
-                && static_cast<float>(cursor.y) >= area.top - 4.0f
-                && static_cast<float>(cursor.y) <= area.bottom + 4.0f;
+            const bool overContent = self->rowAt(cursor.x, cursor.y).has_value()
+                || (area.right > area.left && static_cast<float>(cursor.x) >= area.left - 4.0f
+                    && static_cast<float>(cursor.x) <= area.right + 4.0f
+                    && static_cast<float>(cursor.y) >= area.top - 4.0f
+                    && static_cast<float>(cursor.y) <= area.bottom + 4.0f);
             if (overContent) {
                 const wchar_t* shape = self->onResizeCorner(cursor.x, cursor.y) ? IDC_SIZENWSE
                     : self->layerAt(cursor.x, cursor.y) >= 0 || self->rowAt(cursor.x, cursor.y).has_value()
@@ -114,23 +115,28 @@ LRESULT CALLBACK OverlayWindow::windowProc(HWND window, UINT message, WPARAM wPa
                 self->m_layerStartX = edit.x;
                 self->m_layerStartY = edit.y;
             } else if (GetKeyState(VK_MENU) >= 0 && self->rowAt(x, y)
-                && (self->m_settings.pixelLayout ? static_cast<bool>(self->m_onRowEdit)
-                                                 : static_cast<bool>(self->m_onRowReorder))) {
+                && (self->m_settings.pixelLayout && self->m_settings.layout == OverlayLayout::Plates
+                        ? static_cast<bool>(self->m_onRowEdit)
+                        : static_cast<bool>(self->m_onStyledRowEdit))) {
                 self->m_rowDragId = *self->rowAt(x, y);
                 self->m_rowDragging = true;
-                self->m_rowReordering = !self->m_settings.pixelLayout;
-                if (!self->m_rowReordering) {
-                    self->m_rowDragOrigin = POINT { x, y };
+                self->m_rowReordering = !self->m_settings.pixelLayout && GetKeyState(VK_SHIFT) < 0
+                    && static_cast<bool>(self->m_onRowReorder);
+                self->m_rowDragOrigin = POINT { x, y };
+                self->m_rowDragScale = std::max(0.001f, self->m_rowUnit);
+                const auto entry = std::find_if(self->m_rowBounds.begin(), self->m_rowBounds.end(),
+                    [self](const OverlayRowBounds& row) { return row.id == self->m_rowDragId; });
+                self->m_rowStartBounds = entry->rect;
+                if (self->m_settings.pixelLayout && self->m_settings.layout == OverlayLayout::Plates) {
                     self->m_rowStart
                         = self->m_settings.rowPositions[static_cast<std::size_t>(self->m_rowDragId)];
-                    self->m_rowDragScale = std::max(
-                        0.001f, (self->m_contentRectD2D.right - self->m_contentRectD2D.left) / 520.0f);
                     if (self->m_rowStart.y < 0) {
-                        const auto entry = std::find_if(self->m_rowBounds.begin(), self->m_rowBounds.end(),
-                            [self](const OverlayRowBounds& row) { return row.id == self->m_rowDragId; });
                         self->m_rowStart.y = static_cast<int>(std::lround(
                             (entry->rect.top - self->m_contentRectD2D.top) / self->m_rowDragScale));
                     }
+                } else {
+                    self->m_styleRowStart
+                        = self->m_settings.styleRowOffsets[static_cast<std::size_t>(self->m_rowDragId)];
                 }
             } else {
                 self->beginDrag(x + static_cast<int>(self->m_monitorRect.left),
@@ -532,6 +538,11 @@ void OverlayWindow::setRowReorderHandler(std::function<void(MetricId, MetricId, 
     m_onRowReorder = std::move(handler);
 }
 
+void OverlayWindow::setStyledRowEditHandler(std::function<void(MetricId, OverlayRowOffset, bool)> handler)
+{
+    m_onStyledRowEdit = std::move(handler);
+}
+
 std::optional<MetricId> OverlayWindow::rowAt(int x, int y) const
 {
     if (m_settings.recipe == OverlayRecipe::Rtss && m_settings.rtssVisual && m_settings.rtssTemplate) {
@@ -561,6 +572,24 @@ void OverlayWindow::updateRowDrag(int x, int y)
     }
     const int dx = static_cast<int>(std::lround((x - m_rowDragOrigin.x) / m_rowDragScale));
     const int dy = static_cast<int>(std::lround((y - m_rowDragOrigin.y) / m_rowDragScale));
+    if (!m_settings.pixelLayout || m_settings.layout != OverlayLayout::Plates) {
+        OverlayRowOffset next = moveOverlayRowOffset(m_styleRowStart, dx, dy);
+        const int minX = static_cast<int>(std::ceil(-m_rowStartBounds.left / m_rowDragScale));
+        const int maxX
+            = static_cast<int>(std::floor((m_bitmapWidth - m_rowStartBounds.right) / m_rowDragScale));
+        const int minY = static_cast<int>(std::ceil(-m_rowStartBounds.top / m_rowDragScale));
+        const int maxY
+            = static_cast<int>(std::floor((m_bitmapHeight - m_rowStartBounds.bottom) / m_rowDragScale));
+        next.x = std::clamp(next.x, m_styleRowStart.x + minX, m_styleRowStart.x + maxX);
+        next.y = std::clamp(next.y, m_styleRowStart.y + minY, m_styleRowStart.y + maxY);
+        auto& current = m_settings.styleRowOffsets[static_cast<std::size_t>(m_rowDragId)];
+        if (current.x != next.x || current.y != next.y) {
+            current = next;
+            repaint();
+            m_onStyledRowEdit(m_rowDragId, next, false);
+        }
+        return;
+    }
     const OverlayRowPosition next = moveOverlayRow(m_rowStart, dx, dy);
     auto& current = m_settings.rowPositions[static_cast<std::size_t>(m_rowDragId)];
     if (current.labelX != next.labelX || current.valueX != next.valueX || current.y != next.y) {
@@ -579,8 +608,13 @@ void OverlayWindow::finishRowDrag()
     if (m_rowReordering) {
         m_rowReordering = false;
         m_onRowReorder(m_rowDragId, m_rowDragId, true);
-    } else if (m_onRowEdit) {
-        m_onRowEdit(m_rowDragId, m_settings.rowPositions[static_cast<std::size_t>(m_rowDragId)], true);
+    } else if (m_settings.pixelLayout && m_settings.layout == OverlayLayout::Plates) {
+        if (m_onRowEdit) {
+            m_onRowEdit(m_rowDragId, m_settings.rowPositions[static_cast<std::size_t>(m_rowDragId)], true);
+        }
+    } else if (m_onStyledRowEdit) {
+        m_onStyledRowEdit(
+            m_rowDragId, m_settings.styleRowOffsets[static_cast<std::size_t>(m_rowDragId)], true);
     }
 }
 
@@ -910,7 +944,7 @@ void OverlayWindow::drawScene(float scale)
     m_target->BeginDraw();
     m_target->Clear(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.0f));
     const Rect content = paintOverlay(m_target, painted, m_theme, text, bounds, scale, formats,
-        &m_rtssLayerBounds, &m_rtssLayerScale, &m_rowBounds);
+        &m_rtssLayerBounds, &m_rtssLayerScale, &m_rowBounds, &m_rowUnit);
     m_contentRectD2D = D2D1::RectF(content.left, content.top, content.right, content.bottom);
     m_target->EndDraw();
 }

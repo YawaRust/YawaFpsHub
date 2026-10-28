@@ -59,6 +59,12 @@ struct OverlayRowPosition
     int y = -1;
 };
 
+struct OverlayRowOffset
+{
+    int x = 0;
+    int y = 0;
+};
+
 struct CaptureSettings
 {
     int intervalMs = 1000;
@@ -184,6 +190,8 @@ struct OverlaySettings
     std::array<MetricId, kMetricCount> order = defaultOverlayOrder();
     bool pixelLayout = false;
     std::array<OverlayRowPosition, kMetricCount> rowPositions { };
+    // Смещения внутри готового стиля не включают попиксельную раскладку и не меняют пресет.
+    std::array<OverlayRowOffset, kMetricCount> styleRowOffsets { };
     std::array<int, kMetricCount> metricColors = defaultOverlayMetricColors(); // -1 — палитра стиля
     std::array<std::optional<std::uint32_t>, kMetricCount> metricRgba { };
     std::array<bool, kMetricCount> customLabelSet { };
@@ -243,6 +251,7 @@ Settings defaultSettings();
 void moveOverlayMetric(OverlaySettings& settings, MetricId moved, MetricId before);
 void enableOverlayPixelLayout(OverlaySettings& settings);
 OverlayRowPosition moveOverlayRow(OverlayRowPosition start, int deltaX, int deltaY);
+OverlayRowOffset moveOverlayRowOffset(OverlayRowOffset start, int deltaX, int deltaY);
 // Перевод смещения между экраном и сценой редактора (обе стороны используют одни размеры).
 int scaledOverlayOffset(int offset, double sourceExtent, double targetExtent);
 void setOverlayMetricLabel(OverlaySettings& settings, MetricId id, std::string label);

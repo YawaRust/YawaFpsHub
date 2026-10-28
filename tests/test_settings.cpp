@@ -441,6 +441,26 @@ namespace {
         CHECK(moveOverlayRow({ 400, 100, 10 }, 999, 0).labelX == 470);
     }
 
+    void testStyledRowOffsetKeepsPresetAndRoundTrips()
+    {
+        Settings settings;
+        CHECK(!settings.overlay.pixelLayout);
+        auto& offset = settings.overlay.styleRowOffsets[static_cast<std::size_t>(MetricId::CpuLoad)];
+        offset = moveOverlayRowOffset(offset, -18, 42);
+        CHECK(offset.x == -18 && offset.y == 42);
+        CHECK(!settings.overlay.pixelLayout);
+        Settings loaded;
+        std::string error;
+        CHECK(parseSettings(serializeSettings(settings), loaded, error));
+        const auto& restored = loaded.overlay.styleRowOffsets[static_cast<std::size_t>(MetricId::CpuLoad)];
+        CHECK(restored.x == -18 && restored.y == 42);
+        CHECK(!loaded.overlay.pixelLayout);
+        CHECK(moveOverlayRowOffset(restored, 5000, -5000).x == 2048);
+        CHECK(moveOverlayRowOffset(restored, 5000, -5000).y == -2048);
+        CHECK(parseSettings("[overlay_style_offsets]\ncpu_load = 3000,0\n", loaded, error));
+        CHECK(loaded.overlay.styleRowOffsets[static_cast<std::size_t>(MetricId::CpuLoad)].x == 0);
+    }
+
     void testOverlayAnchorMigration()
     {
         Settings settings;
@@ -1114,6 +1134,7 @@ void runSettingsTests()
     testUnknownSensorFailureStaysUnknown();
     testCanvasCoordinatesSurviveZoom();
     testDraggedRowKeepsColumnsAndClamps();
+    testStyledRowOffsetKeepsPresetAndRoundTrips();
     testOverlayAnchorMigration();
     testOverlayCustomization();
     testOverlayCustomizationClamps();

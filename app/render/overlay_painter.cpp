@@ -291,21 +291,39 @@ namespace {
             return metrics.widthIncludingTrailingWhitespace;
         }
 
-        void setRowBounds(std::vector<OverlayRowBounds>* bounds, const Rect& frame, float fit)
+        void setRowBounds(const OverlaySettings& settings, std::vector<OverlayRowBounds>* bounds,
+            const Rect& frame, float fit)
         {
+            m_rowOffsets = &settings.styleRowOffsets;
             m_rowBounds = bounds;
             m_frame = frame;
             m_fit = fit;
         }
 
-        void recordRow(MetricId id, const Rect& row)
+        void beginRow(MetricId id, const Rect& row)
         {
+            const auto& offset = (*m_rowOffsets)[static_cast<std::size_t>(id)];
+            const float dx = static_cast<float>(offset.x) * m_scale;
+            const float dy = static_cast<float>(offset.y) * m_scale;
             if (m_rowBounds != nullptr) {
                 m_rowBounds->push_back({ id,
-                    { m_frame.left + (row.left - m_frame.left) * m_fit,
-                        m_frame.top + (row.top - m_frame.top) * m_fit,
-                        m_frame.left + (row.right - m_frame.left) * m_fit,
-                        m_frame.top + (row.bottom - m_frame.top) * m_fit } });
+                    { m_frame.left + (row.left + dx - m_frame.left) * m_fit,
+                        m_frame.top + (row.top + dy - m_frame.top) * m_fit,
+                        m_frame.left + (row.right + dx - m_frame.left) * m_fit,
+                        m_frame.top + (row.bottom + dy - m_frame.top) * m_fit } });
+            }
+            if (offset.x != 0 || offset.y != 0) {
+                m_target->GetTransform(&m_rowTransform);
+                m_target->SetTransform(D2D1::Matrix3x2F::Translation(dx, dy) * m_rowTransform);
+                m_rowTransformed = true;
+            }
+        }
+
+        void endRow()
+        {
+            if (m_rowTransformed) {
+                m_target->SetTransform(m_rowTransform);
+                m_rowTransformed = false;
             }
         }
 
@@ -346,6 +364,9 @@ namespace {
         std::vector<OverlayRowBounds>* m_rowBounds = nullptr;
         Rect m_frame { };
         float m_fit = 1.0f;
+        const std::array<OverlayRowOffset, kMetricCount>* m_rowOffsets = nullptr;
+        D2D1::Matrix3x2F m_rowTransform { };
+        bool m_rowTransformed = false;
     };
 
     // Полный визуальный набор стиля: палитра, форма, типографика. Раньше стили отличались
@@ -619,7 +640,7 @@ namespace {
         const float right = frame.right - look.padding * scale;
 
         if (rowShown(text, 0)) {
-            painter.recordRow(text.ids[0],
+            painter.beginRow(text.ids[0],
                 Rect { frame.left, frame.top + 8.0f * scale, frame.right, frame.top + 62.0f * scale });
             const Rect chip { left, frame.top + 8.0f * scale, left + 66.0f * scale,
                 frame.top + 26.0f * scale };
@@ -635,6 +656,7 @@ namespace {
                 TextRole::Tiny, look.label);
             painter.line(
                 left, frame.top + 64.0f * scale, right, frame.top + 64.0f * scale, look.border, 1.0f, 0.22f);
+            painter.endRow();
         }
 
         float y = frame.top + (rowShown(text, 0) ? 70.0f : 8.0f) * scale;
@@ -642,7 +664,7 @@ namespace {
             if (!rowShown(text, index)) {
                 continue;
             }
-            painter.recordRow(
+            painter.beginRow(
                 text.ids[index], Rect { frame.left, y, frame.right, y + (18.0f + look.rowGap) * scale });
             painter.text(labels[index],
                 Rect { left, y, left + look.labelWidth * scale, y + kRowHeight * scale }, TextRole::Tiny,
@@ -650,6 +672,7 @@ namespace {
             painter.text(values[index],
                 Rect { right - look.valueWidth * scale, y, right, y + kRowHeight * scale }, TextRole::Small,
                 look.rowPalette[index], TextAlign::Right);
+            painter.endRow();
             y += (18.0f + look.rowGap) * scale;
         }
     }
@@ -672,7 +695,7 @@ namespace {
         const float right = frame.right - look.padding * scale;
 
         if (rowShown(text, 0)) {
-            painter.recordRow(text.ids[0],
+            painter.beginRow(text.ids[0],
                 Rect { frame.left, frame.top + 8.0f * scale, frame.right, frame.top + 60.0f * scale });
             painter.text(labels[0],
                 Rect { left, frame.top + 8.0f * scale, left + 120.0f * scale, frame.top + 22.0f * scale },
@@ -687,6 +710,7 @@ namespace {
 
             painter.line(
                 left, frame.top + 60.0f * scale, right, frame.top + 60.0f * scale, look.accent, 1.0f, 0.35f);
+            painter.endRow();
         }
 
         float y = frame.top + (rowShown(text, 0) ? 64.0f : 8.0f) * scale;
@@ -694,7 +718,7 @@ namespace {
             if (!rowShown(text, index)) {
                 continue;
             }
-            painter.recordRow(
+            painter.beginRow(
                 text.ids[index], Rect { frame.left, y, frame.right, y + (18.0f + look.rowGap) * scale });
             painter.fillCircle(left + 2.0f * scale, y + 8.0f * scale, 2.0f * scale, look.rowPalette[index]);
             painter.text(labels[index],
@@ -703,6 +727,7 @@ namespace {
             painter.text(values[index],
                 Rect { right - look.valueWidth * scale, y, right, y + kRowHeight * scale }, TextRole::Small,
                 look.rowPalette[index], TextAlign::Right);
+            painter.endRow();
             y += (18.0f + look.rowGap) * scale;
         }
     }
@@ -722,7 +747,7 @@ namespace {
             if (!rowShown(text, index)) {
                 continue;
             }
-            painter.recordRow(text.ids[index], Rect { frame.left, y, frame.right, y + 19.0f * scale });
+            painter.beginRow(text.ids[index], Rect { frame.left, y, frame.right, y + 19.0f * scale });
             painter.text(labels[index],
                 Rect { frame.left, y, frame.left + look.padding * scale + look.labelWidth * scale,
                     y + kRowHeight * scale },
@@ -731,6 +756,7 @@ namespace {
                 Rect { frame.left + look.padding * scale + look.labelWidth * scale, y, frame.right,
                     y + kRowHeight * scale },
                 TextRole::Mono, look.value);
+            painter.endRow();
             y += 19.0f * scale;
         }
     }
@@ -759,7 +785,7 @@ namespace {
             if (!rowShown(text, index)) {
                 continue;
             }
-            painter.recordRow(text.ids[index],
+            painter.beginRow(text.ids[index],
                 Rect { frame.left, y, frame.right, y + std::min(kRowHeight, 18.0f + look.rowGap) * scale });
             painter.text(L"> " + labels[index],
                 Rect { left, y, left + look.labelWidth * scale, y + kRowHeight * scale }, TextRole::Mono,
@@ -767,6 +793,7 @@ namespace {
             painter.text(tracked(values[index], look.letterSpacing),
                 Rect { right - look.valueWidth * scale, y, right, y + kRowHeight * scale }, TextRole::Mono,
                 look.rowPalette[index], TextAlign::Right);
+            painter.endRow();
             y += (18.0f + look.rowGap) * scale;
         }
     }
@@ -797,7 +824,7 @@ namespace {
         const float right = frame.right - look.padding * scale;
 
         if (rowShown(text, 0)) {
-            painter.recordRow(text.ids[0],
+            painter.beginRow(text.ids[0],
                 Rect { frame.left, frame.top + 8.0f * scale, frame.right, frame.top + 62.0f * scale });
             painter.text(labels[0],
                 Rect { left, frame.top + 8.0f * scale, left + 140.0f * scale, frame.top + 22.0f * scale },
@@ -807,6 +834,7 @@ namespace {
                 TextRole::Display, look.value);
             painter.line(
                 left, frame.top + 62.0f * scale, right, frame.top + 62.0f * scale, look.border, 1.0f, 0.35f);
+            painter.endRow();
         }
 
         float y = frame.top + (rowShown(text, 0) ? 68.0f : 10.0f) * scale;
@@ -814,7 +842,7 @@ namespace {
             if (!rowShown(text, index)) {
                 continue;
             }
-            painter.recordRow(
+            painter.beginRow(
                 text.ids[index], Rect { frame.left, y, frame.right, y + (18.0f + look.rowGap) * scale });
             painter.text(labels[index],
                 Rect { left, y, left + look.labelWidth * scale, y + kRowHeight * scale }, TextRole::Tiny,
@@ -822,6 +850,7 @@ namespace {
             painter.text(values[index],
                 Rect { right - look.valueWidth * scale, y, right, y + kRowHeight * scale }, TextRole::Small,
                 look.rowPalette[index], TextAlign::Right);
+            painter.endRow();
             y += (18.0f + look.rowGap) * scale;
         }
     }
@@ -840,7 +869,7 @@ namespace {
             if (!rowShown(text, index)) {
                 continue;
             }
-            painter.recordRow(text.ids[index],
+            painter.beginRow(text.ids[index],
                 Rect { frame.left, y, frame.right, y + std::min(kRowHeight, 18.0f + look.rowGap) * scale });
             painter.text(labels[index],
                 Rect { frame.left + look.padding * scale, y, frame.left + 86.0f * scale,
@@ -850,6 +879,7 @@ namespace {
                 Rect { frame.right - look.padding * scale - look.valueWidth * scale, y,
                     frame.right - look.padding * scale, y + kRowHeight * scale },
                 TextRole::Small, look.rowPalette[index], TextAlign::Right);
+            painter.endRow();
             y += (18.0f + look.rowGap) * scale;
         }
     }
@@ -879,12 +909,13 @@ namespace {
             const float valueWidth = big ? painter.measure(values[index], TextRole::Value)
                                          : painter.measure(values[index], TextRole::Small);
             const float cellWidth = std::max(labelWidth, valueWidth) + 10.0f * scale;
-            painter.recordRow(text.ids[index], Rect { x, top, x + cellWidth, bottom });
+            painter.beginRow(text.ids[index], Rect { x, top, x + cellWidth, bottom });
 
             painter.text(labels[index], Rect { x, top, x + cellWidth, top + 12.0f * scale }, TextRole::Tiny,
                 look.label);
             painter.text(values[index], Rect { x, top + (big ? 8.0f : 12.0f) * scale, x + cellWidth, bottom },
                 big ? TextRole::Value : TextRole::Small, look.rowPalette[index]);
+            painter.endRow();
             x += cellWidth;
 
             if (look.separators) {
@@ -929,7 +960,7 @@ namespace {
             if (!rowShown(text, index)) {
                 continue;
             }
-            painter.recordRow(text.ids[index],
+            painter.beginRow(text.ids[index],
                 Rect { frame.left, y, frame.right, y + std::min(kRowHeight, 18.0f + look.rowGap) * scale });
             painter.text(labels[index],
                 Rect { left, y, left + look.labelWidth * scale, y + kRowHeight * scale }, TextRole::Mono,
@@ -937,6 +968,7 @@ namespace {
             painter.text(tracked(values[index], look.letterSpacing),
                 Rect { right - look.valueWidth * scale, y, right, y + kRowHeight * scale }, TextRole::Mono,
                 look.rowPalette[index], TextAlign::Right);
+            painter.endRow();
             y += (18.0f + look.rowGap) * scale;
         }
     }
@@ -956,7 +988,7 @@ namespace {
             if (!rowShown(text, index)) {
                 continue;
             }
-            painter.recordRow(text.ids[index], Rect { frame.left, y, frame.right, y + 24.0f * scale });
+            painter.beginRow(text.ids[index], Rect { frame.left, y, frame.right, y + 24.0f * scale });
             painter.text(labels[index], Rect { left, y, right - 90.0f * scale, y + 17.0f * scale },
                 TextRole::Small, look.label);
             painter.text(text.values[index], Rect { right - 90.0f * scale, y, right, y + 17.0f * scale },
@@ -971,6 +1003,7 @@ namespace {
                         Rect { left, barTop, end, track.bottom }, 1.5f * scale, look.rowPalette[index], 0.9f);
                 }
             }
+            painter.endRow();
             y += (30.0f + look.rowGap) * scale;
         }
     }
@@ -1244,7 +1277,7 @@ namespace {
             const std::wstring label = look.uppercase ? upperCase(text.labels[index]) : text.labels[index];
             const std::wstring segment = tracked(label + L" " + text.values[index], look.letterSpacing);
             const float width = painter.measure(segment, role);
-            painter.recordRow(text.ids[index], Rect { x, inner.top, x + width + 4.0f, inner.bottom });
+            painter.beginRow(text.ids[index], Rect { x, inner.top, x + width + 4.0f, inner.bottom });
             const auto group = overlayColorGroup(text.ids[index]);
             const bool customized = settings.metricColors[static_cast<std::size_t>(text.ids[index])] >= 0
                 || settings.metricRgba[static_cast<std::size_t>(text.ids[index])] || settings.valueColor >= 0
@@ -1252,6 +1285,7 @@ namespace {
                 || (group && settings.rowRgba[*group]);
             painter.text(segment, Rect { x, inner.top, x + width + 4.0f, inner.bottom }, role,
                 settings.style == OverlayStyle::Rtss && !customized ? look.accent : look.rowPalette[index]);
+            painter.endRow();
             x += width + separator;
         }
     }
@@ -1337,8 +1371,12 @@ OverlayText makeOverlayText(const OverlaySettings& settings, const MetricStore& 
 
 Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, const Theme& theme,
     const OverlayText& text, const Rect& bounds, float scale, const OverlayFormats& formats,
-    std::vector<Rect>* rtssLayerBounds, float* rtssLayerScale, std::vector<OverlayRowBounds>* rowBounds)
+    std::vector<Rect>* rtssLayerBounds, float* rtssLayerScale, std::vector<OverlayRowBounds>* rowBounds,
+    float* rowScale)
 {
+    if (rowScale != nullptr) {
+        *rowScale = 1.0f;
+    }
     if (rowBounds != nullptr) {
         rowBounds->clear();
     }
@@ -1575,6 +1613,9 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
     // Не обрезаем длинный список границами монитора или предпросмотра.
     const float fit = std::min({ 1.0f, std::max(bounds.width() - 4.0f, 1.0f) / width,
         std::max(bounds.height() - 4.0f, 1.0f) / height });
+    if (rowScale != nullptr) {
+        *rowScale = fit * scale;
+    }
     const float fittedWidth = width * fit;
     const float fittedHeight = height * fit;
 
@@ -1604,9 +1645,7 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
     const Rect frame { left, top, left + width, top + height };
     Painter painter(target, theme, scaled, scale, opacity, chrome, settings.textOutline);
     painter.setBackgroundOpacity(backgroundOpacity);
-    if (!settings.pixelLayout) {
-        painter.setRowBounds(rowBounds, frame, fit);
-    }
+    painter.setRowBounds(settings, rowBounds, frame, fit);
 
     if (settings.pixelLayout && settings.layout == OverlayLayout::Plates && !text.ids.empty()) {
         painter.plate(frame, look.radius * scale, look.background);
