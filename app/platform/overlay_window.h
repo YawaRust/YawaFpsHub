@@ -43,7 +43,10 @@ public:
     void toggle(std::string* error = nullptr);
     bool isVisible() const { return m_visible; }
     bool hasVisiblePixels() const;
-    bool isDragging() const { return m_dragging || m_resizing || m_layerDragging || m_rowDragging; }
+    bool isDragging() const
+    {
+        return m_dragging || m_resizing || m_paddingDragging || m_layerDragging || m_rowDragging;
+    }
 
     void repaint();
 
@@ -81,8 +84,11 @@ private:
     void updateDrag(int screenX, int screenY);
     void endDrag();
     bool onResizeCorner(int x, int y) const;
+    bool onPaddingGrip(int x, int y) const;
     void updateResize(int x, int y);
     void finishResize();
+    void updatePadding(int x, int y);
+    void finishPadding();
     int layerAt(int x, int y) const;
     void updateLayerDrag(int x, int y);
     void finishLayerDrag();
@@ -152,6 +158,10 @@ private:
     int m_resizeScale = 100;
     float m_resizeWidth = 1.0f;
     float m_resizeHeight = 1.0f;
+    bool m_paddingDragging = false;
+    POINT m_paddingOrigin { };
+    int m_paddingStart = 10;
+    bool m_showEditHandles = false;
     bool m_dragging = false;
     POINT m_dragOrigin{};
     int m_dragOffsetX = 0;
