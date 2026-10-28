@@ -695,11 +695,8 @@ void OverlayWindow::updateRowDrag(int x, int y)
         const int minY = static_cast<int>(std::ceil(-m_rowStartBounds.top / m_rowDragScale));
         const int maxY
             = static_cast<int>(std::floor((m_bitmapHeight - m_rowStartBounds.bottom) / m_rowDragScale));
-        // Существующая строка за пределами экрана не должна прыгать при нулевом сдвиге.
-        next.x = std::clamp(
-            next.x, m_styleRowStart.x + std::min(0, minX), m_styleRowStart.x + std::max(0, maxX));
-        next.y = std::clamp(
-            next.y, m_styleRowStart.y + std::min(0, minY), m_styleRowStart.y + std::max(0, maxY));
+        next.x = clampDraggedRow(next.x, m_styleRowStart.x, minX, maxX);
+        next.y = clampDraggedRow(next.y, m_styleRowStart.y, minY, maxY);
         auto& current = m_settings.styleRowOffsets[static_cast<std::size_t>(m_rowDragId)];
         if (current.x != next.x || current.y != next.y) {
             current = next;

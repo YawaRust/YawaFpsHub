@@ -680,11 +680,8 @@ void OverlayEditor::moveStyledRow(int x, int y)
     const int minY = static_cast<int>(std::ceil(-m_styledRowBounds.top / m_canvasRowScale));
     const int maxY = static_cast<int>(
         std::floor((GetSystemMetrics(SM_CYVIRTUALSCREEN) - m_styledRowBounds.bottom) / m_canvasRowScale));
-    // Если стиль изначально выходит за экран, нулевой сдвиг не должен телепортировать строку.
-    next.x
-        = std::clamp(next.x, m_styledRowStart.x + std::min(0, minX), m_styledRowStart.x + std::max(0, maxX));
-    next.y
-        = std::clamp(next.y, m_styledRowStart.y + std::min(0, minY), m_styledRowStart.y + std::max(0, maxY));
+    next.x = clampDraggedRow(next.x, m_styledRowStart.x, minX, maxX);
+    next.y = clampDraggedRow(next.y, m_styledRowStart.y, minY, maxY);
     auto& current = m_model->settings.overlay.styleRowOffsets[static_cast<std::size_t>(m_styledRowId)];
     if (current.x != next.x || current.y != next.y) {
         current = next;

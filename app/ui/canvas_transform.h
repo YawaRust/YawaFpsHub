@@ -79,6 +79,12 @@ inline float alignCanvasEdge(
         - (itemEnd - itemStart) * fraction;
 }
 
+// Не телепортируем строку при нулевом сдвиге, даже если она уже выходит за экран.
+inline int clampDraggedRow(int candidate, int start, int minimumDelta, int maximumDelta)
+{
+    return std::clamp(candidate, start + std::min(0, minimumDelta), start + std::max(0, maximumDelta));
+}
+
 struct CanvasFit
 {
     float zoom = 1.0f;

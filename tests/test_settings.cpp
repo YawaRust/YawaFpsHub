@@ -420,6 +420,11 @@ namespace {
         CHECK(alignCanvasEdge(10.0f, 90.0f, 40.0f, 70.0f, 0) == -30.0f);
         CHECK(alignCanvasEdge(10.0f, 90.0f, 40.0f, 70.0f, 1) == -5.0f);
         CHECK(alignCanvasEdge(10.0f, 90.0f, 40.0f, 70.0f, 2) == 20.0f);
+        CHECK(clampDraggedRow(150, 150, 20, 80) == 150);
+        CHECK(clampDraggedRow(149, 150, 20, 80) == 150);
+        CHECK(clampDraggedRow(152, 150, 20, 80) == 152);
+        CHECK(clampDraggedRow(150, 150, -50, -10) == 150);
+        CHECK(clampDraggedRow(200, 150, -50, -10) == 150);
         // RTSS со смещёнными абсолютными координатами: вписываем слои, не пустоту от (0,0).
         const CanvasFit rtss = fitCanvasContent({ 1420, 680, 1720, 880 }, 356.0f, 200.0f, 1920.0f);
         const CanvasAxis rtssX { 20.0f, rtss.panX, rtss.zoom * 356.0f / 1920.0f };
