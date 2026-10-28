@@ -163,6 +163,12 @@ bool unpackRtssExchange(std::string_view bytes, RtssExchange& exchange, std::str
             parsed.layout.assign(archive.data() + at, dataSize);
         } else {
             ++parsed.resources;
+            std::string extension(name.size() >= 4 ? name.substr(name.size() - 4) : std::string_view { });
+            std::transform(extension.begin(), extension.end(), extension.begin(),
+                [](unsigned char symbol) { return static_cast<char>(std::tolower(symbol)); });
+            if (extension == ".png" && dataSize <= 4 * 1024 * 1024) {
+                parsed.images.emplace_back(std::string(name), std::string(archive.data() + at, dataSize));
+            }
         }
         at += entrySize;
     }

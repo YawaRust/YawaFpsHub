@@ -97,6 +97,8 @@ struct RtssVisualLayer
 
 struct RtssVisualLayout
 {
+    std::string embeddedImage;
+    std::shared_ptr<const std::string> imageBytes;
     std::string fontFace;
     int fontHeight = 13;
     int fontWeight = 400;

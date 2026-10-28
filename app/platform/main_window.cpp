@@ -68,6 +68,48 @@ namespace {
     constexpr DWORD kDwmBorderColor = 34;
     constexpr COLORREF kDwmColorNone = 0xFFFFFFFE;
 
+    void loadRtssSiblingImage(const wchar_t* layoutPath, OverlaySettings& overlay)
+    {
+        if (!overlay.rtssVisual || overlay.rtssVisual->embeddedImage.empty()) {
+            return;
+        }
+        const std::string& name = overlay.rtssVisual->embeddedImage;
+        const int length
+            = MultiByteToWideChar(1251, 0, name.data(), static_cast<int>(name.size()), nullptr, 0);
+        if (length <= 0) {
+            return;
+        }
+        std::wstring wideName(static_cast<std::size_t>(length), L'\0');
+        MultiByteToWideChar(1251, 0, name.data(), static_cast<int>(name.size()), wideName.data(), length);
+        const std::wstring path(layoutPath);
+        const std::size_t slash = path.find_last_of(L"/\\");
+        if (slash == std::wstring::npos) {
+            return;
+        }
+        wideName = path.substr(0, slash + 1) + wideName;
+        const HANDLE file = CreateFileW(wideName.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE) {
+            return;
+        }
+        LARGE_INTEGER size { };
+        std::string image;
+        if (GetFileSizeEx(file, &size) != FALSE && size.QuadPart >= 24 && size.QuadPart <= 4 * 1024 * 1024) {
+            image.resize(static_cast<std::size_t>(size.QuadPart));
+            DWORD received = 0;
+            if (ReadFile(file, image.data(), static_cast<DWORD>(image.size()), &received, nullptr) == FALSE
+                || received != static_cast<DWORD>(image.size()) || !image.starts_with("\x89PNG\r\n\x1A\n")) {
+                image.clear();
+            }
+        }
+        CloseHandle(file);
+        if (!image.empty()) {
+            auto visual = std::make_shared<RtssVisualLayout>(*overlay.rtssVisual);
+            visual->imageBytes = std::make_shared<const std::string>(std::move(image));
+            overlay.rtssVisual = std::move(visual);
+        }
+    }
+
     bool chooseOverlayRgba(HWND owner, std::optional<std::uint32_t>& rgba)
     {
         static COLORREF custom[16] { };
@@ -477,13 +519,17 @@ void MainWindow::setOverlayVisible(bool visible)
     }
 }
 
-bool MainWindow::smokeImportRtss(std::string_view package, std::string& error)
+bool MainWindow::smokeImportRtss(
+    std::string_view package, std::string& error, std::wstring_view path, bool checkImage)
 {
     OverlaySettings imported = m_model.settings.overlay;
     const bool parsed = package.starts_with("0CDU") ? importRtssExchange(package, imported, error)
                                                     : importRtssOverlay(package, imported, error);
     if (!parsed) {
         return false;
+    }
+    if (!package.starts_with("0CDU") && !path.empty()) {
+        loadRtssSiblingImage(std::wstring(path).c_str(), imported);
     }
     imported.opacityPercent = 100;
     m_overlay.setSettings(imported);
@@ -492,6 +538,10 @@ bool MainWindow::smokeImportRtss(std::string_view package, std::string& error)
     }
     if (!m_overlay.hasVisiblePixels()) {
         error = "импорт RTSS создал прозрачный кадр";
+        return false;
+    }
+    if (checkImage && !m_overlay.hasPixelColor(245, 43, 71)) {
+        error = "PNG-атлас RTSS не отрисовал ожидаемый цвет";
         return false;
     }
     if (imported.rtssVisual) {
@@ -2117,7 +2167,9 @@ void MainWindow::applyAction(const UiHit& hit)
             if (exchange) {
                 importRtssExchange(content, imported, error);
             } else if (rtss) {
-                importRtssOverlay(content, imported, error);
+                if (importRtssOverlay(content, imported, error)) {
+                    loadRtssSiblingImage(filename, imported);
+                }
             } else {
                 importOverlayRecipeJson(content, imported, error);
             }
@@ -2142,7 +2194,8 @@ void MainWindow::applyAction(const UiHit& hit)
             const std::wstring notice = L"Это предварительная отрисовка, не копия RTSS 1:1. "
                 + std::to_wstring(imported.rtssOmittedLayers)
                 + L" слоёв без связанной метрики. Фон, обычный текст и координаты "
-                  L"переносятся; графики, сложные теги и картинки ещё не воспроизводятся. "
+                  L"переносятся; графики и сложные теги частичны, PNG-атлас рисуется "
+                  L"только для поддерживаемого тега изображения. "
                   L"Недоступные значения помечены «нет данных». Исходный пакет остаётся "
                   L"для обратного экспорта.\n\nОткрыть этот макет вместо текущего оверлея?";
             if (MessageBoxW(dialog.hwndOwner, notice.c_str(), L"Частичный импорт RTSS",

@@ -151,6 +151,21 @@
 
   let originalRtss = store.read("rtssOriginal") || "";
   let originalOvx = store.read("rtssExchange") || "";
+  let rtssImage = store.read("rtssImage") || "";
+  let rtssImageUrl = "";
+  const setRtssImage = (encoded) => {
+    if (rtssImageUrl) URL.revokeObjectURL(rtssImageUrl);
+    rtssImageUrl = "";
+    rtssImage = encoded;
+    try {
+      const bytes = Uint8Array.from(atob(encoded), (symbol) => symbol.charCodeAt(0));
+      if (bytes.length >= 24 && bytes.length <= 4 * 1024 * 1024
+        && String.fromCharCode(...bytes.slice(0, 8)) === "\x89PNG\r\n\x1a\n") {
+        rtssImageUrl = URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
+      }
+    } catch { rtssImage = ""; }
+  };
+  if (rtssImage) setRtssImage(rtssImage);
   let rtssVisualSource = "";
   let rtssVisual = null;
   try {
@@ -2103,8 +2118,14 @@
       const label = field(body, "Text", "").slice(0, 8192);
       const bg = field(body, "BgndColor", "").split(",")[0];
       if (!label && !bg) continue;
-      const layerWidth = units(number("ExtentX"), false) || Math.max(cellWidth, label.length * cellWidth);
-      const layerHeight = units(number("ExtentY"), true) || cellHeight * number("Size", 100) / 100;
+      const matchedImage = label.match(/^<I=0,0,0,0,(\d+),(\d+)>$/);
+      const imageTag = matchedImage && Number(matchedImage[1]) >= 1
+        && Number(matchedImage[2]) >= 1 && Number(matchedImage[1]) <= 2048
+        && Number(matchedImage[2]) <= 2048 ? matchedImage : null;
+      const layerWidth = units(number("ExtentX"), false) || (imageTag ? Number(imageTag[1]) * zoom
+        : Math.max(cellWidth, label.length * cellWidth));
+      const layerHeight = units(number("ExtentY"), true) || (imageTag ? Number(imageTag[2]) * zoom
+        : cellHeight * number("Size", 100) / 100);
       const origin = Math.max(0, Math.min(8, number("ExtentOrigin")));
       const x = units(number("PositionX"), false) - layerWidth * (origin % 3) / 2;
       const y = units(number("PositionY"), true) - layerHeight * Math.floor(origin / 3) / 2;
@@ -2175,7 +2196,23 @@
       node.style.color = paint(edit.textColor ?? layer.color, "#fff");
       node.style.backgroundColor = paint(layer.bg, "transparent");
       const source = edit.text ?? layer.label;
-      node.textContent = source.replace(/<[^>]*>|%[^%]*%/g, (tag) => {
+      const imageTag = source.match(/^<I=0,0,0,0,(\d+),(\d+)>$/);
+      const imageWidth = imageTag && Number(imageTag[1]);
+      const imageHeight = imageTag && Number(imageTag[2]);
+      if (rtssImageUrl && imageWidth >= 1 && imageWidth <= 2048
+        && imageHeight >= 1 && imageHeight <= 2048) {
+        const picture = document.createElement("img");
+        picture.src = rtssImageUrl;
+        picture.width = imageWidth;
+        picture.height = imageHeight;
+        picture.alt = "";
+        picture.onload = () => {
+          if (picture.naturalWidth < imageWidth || picture.naturalHeight < imageHeight) {
+            node.textContent = "нет данных";
+          }
+        };
+        node.replaceChildren(picture);
+      } else node.textContent = source.replace(/<[^>]*>|%[^%]*%/g, (tag) => {
         const metric = metrics[tag.toLowerCase()];
         if (!metric) return "нет данных";
         if (tag.toLowerCase() !== "<fr>") {
@@ -2275,6 +2312,7 @@
     let cursor = 12;
     let layout = null;
     let resources = 0;
+    const images = new Map();
     for (let index = 0; index < count; ++index) {
       if (cursor + 8 > size) error();
       const entry = archive.getUint32(cursor, true);
@@ -2290,11 +2328,16 @@
       if (name.toLowerCase().endsWith(".ovl")) {
         if (layout || length > 1024 * 1024) error();
         layout = output.slice(cursor, cursor + length);
-      } else resources++;
+      } else {
+        resources++;
+        if (name.toLowerCase().endsWith(".png") && length <= 4 * 1024 * 1024) {
+          images.set(name.toLowerCase(), output.slice(cursor, cursor + length));
+        }
+      }
       cursor += entry;
     }
     if (cursor !== size || !layout?.length) error();
-    return { layout, resources };
+    return { layout, resources, images };
   }
 
   function bindOsdStyles() {
@@ -2360,7 +2403,7 @@
       ? `RTSS: ${rtssOmittedLayers} слоёв без связанной метрики` : "";
     $("#importOsdRecipe").addEventListener("click", () => fileInput.click());
     fileInput.addEventListener("change", async () => {
-      const file = fileInput.files?.[0];
+      const file = [...(fileInput.files || [])].find((entry) => /\.(json|ovl|ovx)$/i.test(entry.name));
       if (!file) return;
       try {
         const isOvx = file.name.toLowerCase().endsWith(".ovx");
@@ -2369,9 +2412,22 @@
             throw new Error("Файл RTSS слишком большой");
           }
           const inputBytes = new Uint8Array(await file.arrayBuffer());
-          const { layout: bytes, resources } = isOvx ? unpackOvx(inputBytes)
-            : { layout: inputBytes, resources: 0 };
+          const { layout: bytes, resources, images } = isOvx ? unpackOvx(inputBytes)
+            : { layout: inputBytes, resources: 0, images: new Map() };
           const text = new TextDecoder("windows-1251").decode(bytes);
+          const settingsBody = text.match(/^\[Settings\]([\s\S]*?)(?=^\[|$(?![\s\S]))/mi)?.[1] || "";
+          const embedded = settingsBody.match(/^EmbeddedImage=(.*)$/mi)?.[1]?.trim() || "";
+          let image = null;
+          if (/^[^/\\:]+\.png$/i.test(embedded) && !embedded.includes("..")) {
+            image = images.get(embedded.toLowerCase()) || null;
+            if (!image && !isOvx) {
+              const sibling = [...fileInput.files].find((entry) =>
+                entry.name.toLowerCase() === embedded.toLowerCase() && entry.size <= 4 * 1024 * 1024);
+              if (sibling) image = new Uint8Array(await sibling.arrayBuffer());
+            }
+          }
+          if (image && (image.length < 24 || image.length > 4 * 1024 * 1024
+            || String.fromCharCode(...image.slice(0, 8)) !== "\x89PNG\r\n\x1a\n")) image = null;
           if (!/^Implementation=2\s*$/mi.test(text) || !/^Layers=([1-9]\d*)\s*$/mi.test(text)) {
             throw new Error("Ожидался текстовый шаблон RTSS OverlayEditor v2");
           }
@@ -2429,7 +2485,10 @@
           }
           if (!window.confirm(`Это предварительная отрисовка, не копия RTSS 1:1. ${omitted} слоёв `
               + "без связанной метрики. Фон, текст и координаты переносятся, "
-              + "графики, сложные теги и картинки пока нет. Открыть макет?")) return;
+              + "графики и сложные теги частичны, PNG-атлас рисуется только для поддерживаемого тега. "
+              + "Для .ovl выберите макет и его PNG одновременно. Открыть макет?")) return;
+          setRtssImage(image ? rtssBase64(image) : "");
+          store.write("rtssImage", rtssImage);
           originalRtss = rtssBase64(bytes);
           originalOvx = isOvx ? rtssBase64(inputBytes) : "";
           overlayState.rtssLayerEdits = {};

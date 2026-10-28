@@ -145,6 +145,8 @@ jobs:
           $exe = (Get-ChildItem -Path .\build -Recurse -Filter YawaFpsHub.exe | Select-Object -First 1).FullName
           $process = Start-Process -FilePath $exe -ArgumentList @("--smoke=2", "--smoke-rtss=tests/fixtures/rtss_visual.ovl") -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Импорт RTSS создал невидимый оверлей (exit $($process.ExitCode))" }
+          $image = Start-Process -FilePath $exe -ArgumentList @("--smoke=2", "--smoke-rtss-image", "--smoke-rtss=tests/fixtures/rtss_image.ovl") -Wait -PassThru
+          if ($image.ExitCode -ne 0) { throw "PNG-атлас RTSS не отрисован (exit $($image.ExitCode))" }
 
       - name: Самопроверка приложения
         shell: pwsh

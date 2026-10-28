@@ -3,11 +3,13 @@
 #include "metrics/sensor_status.h"
 #include "metrics/smbios_memory.h"
 #include "ui/canvas_transform.h"
+#include "ui/rtss_exchange.h"
 #include "ui/settings.h"
 
 #include "test_support.h"
 #include <algorithm>
 #include <charconv>
+#include <memory>
 
 #include <string>
 #include <string_view>
@@ -1022,6 +1024,25 @@ namespace {
         stored.overlay = settings;
         CHECK(parseSettings(serializeSettings(stored), restored, error));
         CHECK(restored.overlay.rtssTemplate && *restored.overlay.rtssTemplate == embedded);
+        const std::string imageLayout = "[Master]\nImplementation=2\n[Settings]\n"
+                                        "EmbeddedImage=atlas.png\n[General]\nLayers=1\n"
+                                        "[Layer0]\nText=<I=0,0,0,0,2,2>\nExtentX=2\nExtentY=2\n";
+        CHECK(importRtssOverlay(imageLayout, settings, error));
+        CHECK(settings.rtssVisual && settings.rtssVisual->embeddedImage == "atlas.png");
+        auto visual = std::make_shared<RtssVisualLayout>(*settings.rtssVisual);
+        const std::string image = "\x89PNG\r\n\x1A\n" + std::string(24, 'x');
+        visual->imageBytes = std::make_shared<const std::string>(image);
+        settings.rtssVisual = std::move(visual);
+        stored.overlay = settings;
+        CHECK(parseSettings(serializeSettings(stored), restored, error));
+        CHECK(restored.overlay.rtssVisual && restored.overlay.rtssVisual->imageBytes
+            && *restored.overlay.rtssVisual->imageBytes == image);
+        CHECK(restored.overlay.rtssTemplate && *restored.overlay.rtssTemplate == imageLayout);
+        const std::string unsafe = "[Master]\nImplementation=2\n[Settings]\n"
+                                   "EmbeddedImage=../atlas.png\n[General]\nLayers=1\n"
+                                   "[Layer0]\nText=<I=0,0,0,0,2,2>\n";
+        CHECK(importRtssOverlay(unsafe, settings, error));
+        CHECK(settings.rtssVisual && settings.rtssVisual->embeddedImage.empty());
     }
 
     void testRtssExchangeKeepsOriginalAndRejectsDamage()
@@ -1045,6 +1066,10 @@ namespace {
         imported.savedMonitorId = "MY_MONITOR";
         std::string error;
         CHECK(importRtssExchange(package, imported, error));
+        RtssExchange unpacked;
+        CHECK(unpackRtssExchange(package, unpacked, error));
+        CHECK(unpacked.images.size() == 1 && unpacked.images[0].first == "logo.png"
+            && unpacked.images[0].second == "\x89PNG\r\n");
         CHECK(imported.rtssTemplate && imported.rtssTemplate->find("Text=<FR>") != std::string::npos);
         CHECK(imported.rtssExchange && *imported.rtssExchange == package);
         CHECK(imported.rtssResources == 1 && imported.rtssOmittedLayers == 1);

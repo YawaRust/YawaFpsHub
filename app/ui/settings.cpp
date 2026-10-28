@@ -88,6 +88,25 @@ namespace {
         { MetricId::RamUsed, "%Total RAM%", "Total RAM", "MB" },
     } };
 
+    void attachRtssImage(OverlaySettings& overlay, const RtssExchange& exchange)
+    {
+        if (!overlay.rtssVisual || overlay.rtssVisual->embeddedImage.empty()) {
+            return;
+        }
+        const std::string& wanted = overlay.rtssVisual->embeddedImage;
+        const auto image = std::find_if(
+            exchange.images.begin(), exchange.images.end(), [&wanted](const auto& file) {
+                return file.first.size() == wanted.size()
+                    && std::equal(file.first.begin(), file.first.end(), wanted.begin(),
+                        [](unsigned char a, unsigned char b) { return std::tolower(a) == std::tolower(b); });
+            });
+        if (image != exchange.images.end()) {
+            auto visual = std::make_shared<RtssVisualLayout>(*overlay.rtssVisual);
+            visual->imageBytes = std::make_shared<const std::string>(image->second);
+            overlay.rtssVisual = std::move(visual);
+        }
+    }
+
     std::string_view trim(std::string_view text)
     {
         while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())) != 0) {
@@ -665,6 +684,7 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
 
     // Рецепт применяется до любых явных полей независимо от порядка строк INI:
     // старые ключи layout/font/background и глазики должны иметь приоритет.
+    std::shared_ptr<const std::string> standaloneImage;
     bool hasRecipe = false;
     bool hasSurface = false;
     bool customSurface = false;
@@ -1002,6 +1022,11 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                         target.overlay.rtssTemplate = std::move(original);
                     }
                 }
+            } else if (key == "image_hex") {
+                std::string decoded = hexDecode(value, 4 * 1024 * 1024);
+                if (!decoded.empty()) {
+                    standaloneImage = std::make_shared<const std::string>(std::move(decoded));
+                }
             } else if (key == "omitted_layers") {
                 target.overlay.rtssOmittedLayers = std::clamp(parseInt(value, 0), 0, 256);
             } else if (key == "resources") {
@@ -1091,6 +1116,12 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
         std::string visualError;
         if (importRtssOverlay(*target.overlay.rtssTemplate, visualSettings, visualError)) {
             target.overlay.rtssVisual = std::move(visualSettings.rtssVisual);
+            if (standaloneImage && !target.overlay.rtssExchange
+                && !target.overlay.rtssVisual->embeddedImage.empty()) {
+                auto visual = std::make_shared<RtssVisualLayout>(*target.overlay.rtssVisual);
+                visual->imageBytes = std::move(standaloneImage);
+                target.overlay.rtssVisual = std::move(visual);
+            }
         } else {
             target.overlay.rtssTemplate.reset();
         }
@@ -1106,6 +1137,8 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
         if (!unpackRtssExchange(*target.overlay.rtssExchange, package, packageError)
             || package.layout != *target.overlay.rtssTemplate) {
             target.overlay.rtssExchange.reset();
+        } else {
+            attachRtssImage(target.overlay, package);
         }
     }
     if (!target.overlay.rtssExchange) {
@@ -1216,6 +1249,15 @@ bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::str
             visual->fontWeight = std::clamp(parseInt(value, 400), 100, 900);
         } else if (section == "Master" && key == "ZoomRatio") {
             visual->zoom = std::clamp(parseInt(value, 1), 1, 8);
+        } else if (section == "Settings" && key == "EmbeddedImage" && value.size() >= 5 && value.size() <= 256
+            && value.find("..") == std::string_view::npos
+            && value.find_first_of("/\\:") == std::string_view::npos) {
+            std::string extension(value.substr(value.size() - 4));
+            std::transform(extension.begin(), extension.end(), extension.begin(),
+                [](unsigned char symbol) { return static_cast<char>(std::tolower(symbol)); });
+            if (extension == ".png") {
+                visual->embeddedImage = value;
+            }
         } else if (section == "General" && key == "Layers") {
             layers = parseInt(value, -1);
             validLayers = layers >= 1 && layers <= 256 && std::to_string(layers) == value;
@@ -1384,6 +1426,7 @@ bool importRtssExchange(std::string_view bytes, OverlaySettings& overlay, std::s
     }
     imported.rtssExchange = std::make_shared<const std::string>(bytes);
     imported.rtssResources = package.resources;
+    attachRtssImage(imported, package);
     overlay = std::move(imported);
     return true;
 }
@@ -1646,6 +1689,11 @@ std::string serializeSettings(const Settings& settings)
         text += "[rtss_original]\n";
         text += "template_hex = " + hexEncode(*settings.overlay.rtssTemplate) + "\n";
         text += "omitted_layers = " + std::to_string(settings.overlay.rtssOmittedLayers) + "\n";
+        if (!settings.overlay.rtssExchange && settings.overlay.rtssVisual
+            && settings.overlay.rtssVisual->imageBytes
+            && settings.overlay.rtssVisual->imageBytes->size() <= 4 * 1024 * 1024) {
+            text += "image_hex = " + hexEncode(*settings.overlay.rtssVisual->imageBytes) + "\n";
+        }
         if (settings.overlay.rtssExchange && settings.overlay.rtssExchange->size() <= kMaxRtssExchangeBytes) {
             text += "exchange_hex = " + hexEncode(*settings.overlay.rtssExchange) + "\n";
             text += "resources = " + std::to_string(settings.overlay.rtssResources) + "\n";

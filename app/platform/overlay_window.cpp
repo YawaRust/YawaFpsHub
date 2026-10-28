@@ -973,6 +973,24 @@ bool OverlayWindow::hasVisiblePixels() const
     return false;
 }
 
+bool OverlayWindow::hasPixelColor(std::uint8_t red, std::uint8_t green, std::uint8_t blue) const
+{
+    if (!m_pixels) {
+        return false;
+    }
+    const auto* pixels = static_cast<const std::uint8_t*>(m_pixels);
+    const std::size_t count = static_cast<std::size_t>(m_bitmapWidth) * m_bitmapHeight;
+    for (std::size_t index = 0; index < count; ++index) {
+        const auto* pixel = pixels + index * 4;
+        if (pixel[3] >= 200 && std::abs(static_cast<int>(pixel[2]) - red) <= 8
+            && std::abs(static_cast<int>(pixel[1]) - green) <= 8
+            && std::abs(static_cast<int>(pixel[0]) - blue) <= 8) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void OverlayWindow::drawScene(float scale)
 {
     OverlayFormats formats{ m_dwrite, m_keyFormat, m_valueFormat, m_smallFormat, m_monoFormat };

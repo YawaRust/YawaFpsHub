@@ -10,6 +10,7 @@
 #include <d2d1.h>
 #include <dwrite.h>
 
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
@@ -43,6 +44,7 @@ public:
     void toggle(std::string* error = nullptr);
     bool isVisible() const { return m_visible; }
     bool hasVisiblePixels() const;
+    bool hasPixelColor(std::uint8_t red, std::uint8_t green, std::uint8_t blue) const;
     bool isDragging() const
     {
         return m_dragging || m_resizing || m_paddingDragging || m_layerDragging || m_rowDragging;

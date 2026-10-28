@@ -1,8 +1,11 @@
 #include "render/overlay_painter.h"
 #include "metrics/overlay_rows.h"
 
+#include <wincodec.h>
+
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cmath>
 #include <cstdio>
 #include <cwctype>
@@ -1077,12 +1080,113 @@ namespace {
         return result;
     }
 
+    struct RtssRaster
+    {
+        std::weak_ptr<const std::string> source;
+        std::vector<std::uint8_t> pixels;
+        UINT width = 0;
+        UINT height = 0;
+    };
+
+    const RtssRaster* rtssRaster(const RtssVisualLayout& layout)
+    {
+        if (!layout.imageBytes || layout.imageBytes->size() < 24
+            || layout.imageBytes->size() > 4 * 1024 * 1024
+            || !layout.imageBytes->starts_with("\x89PNG\r\n\x1A\n")) {
+            return nullptr;
+        }
+        static std::vector<RtssRaster> cache;
+        cache.erase(std::remove_if(cache.begin(), cache.end(),
+                        [](const RtssRaster& raster) { return raster.source.expired(); }),
+            cache.end());
+        for (const RtssRaster& raster : cache) {
+            if (raster.source.lock() == layout.imageBytes) {
+                return raster.pixels.empty() ? nullptr : &raster;
+            }
+        }
+        if (cache.size() == 3) {
+            cache.erase(cache.begin());
+        }
+        cache.emplace_back();
+        RtssRaster& raster = cache.back();
+        raster.source = layout.imageBytes;
+        std::vector<BYTE> input(layout.imageBytes->begin(), layout.imageBytes->end());
+        IWICImagingFactory* factory = nullptr;
+        IWICStream* stream = nullptr;
+        IWICBitmapDecoder* decoder = nullptr;
+        IWICBitmapFrameDecode* frame = nullptr;
+        IWICFormatConverter* converter = nullptr;
+        do {
+            if (FAILED(CoCreateInstance(
+                    CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory)))
+                || FAILED(factory->CreateStream(&stream))
+                || FAILED(stream->InitializeFromMemory(input.data(), static_cast<DWORD>(input.size())))
+                || FAILED(
+                    factory->CreateDecoderFromStream(stream, nullptr, WICDecodeMetadataCacheOnLoad, &decoder))
+                || FAILED(decoder->GetFrame(0, &frame))
+                || FAILED(frame->GetSize(&raster.width, &raster.height)) || raster.width == 0
+                || raster.height == 0 || raster.width > 2048 || raster.height > 2048
+                || FAILED(factory->CreateFormatConverter(&converter))
+                || FAILED(converter->Initialize(frame, GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone,
+                    nullptr, 0.0, WICBitmapPaletteTypeCustom))) {
+                break;
+            }
+            raster.pixels.resize(static_cast<std::size_t>(raster.width) * raster.height * 4);
+            if (FAILED(converter->CopyPixels(nullptr, raster.width * 4,
+                    static_cast<UINT>(raster.pixels.size()), raster.pixels.data()))) {
+                raster.pixels.clear();
+            }
+        } while (false);
+        if (converter)
+            converter->Release();
+        if (frame)
+            frame->Release();
+        if (decoder)
+            decoder->Release();
+        if (stream)
+            stream->Release();
+        if (factory)
+            factory->Release();
+        return raster.pixels.empty() ? nullptr : &raster;
+    }
+
+    bool rtssImageRect(std::string_view source, const RtssRaster& raster, D2D1_RECT_F& crop)
+    {
+        if (!source.starts_with("<I=") || !source.ends_with('>')) {
+            return false;
+        }
+        source.remove_prefix(3);
+        source.remove_suffix(1);
+        std::array<unsigned int, 6> fields { };
+        for (std::size_t index = 0; index < fields.size(); ++index) {
+            const std::size_t comma = source.find(',');
+            const std::string_view entry = source.substr(0, comma);
+            const auto result = std::from_chars(entry.data(), entry.data() + entry.size(), fields[index]);
+            if (result.ec != std::errc { } || result.ptr != entry.data() + entry.size()
+                || (index < 5 && comma == std::string_view::npos)
+                || (index == 5 && comma != std::string_view::npos)) {
+                return false;
+            }
+            if (index < 5) {
+                source.remove_prefix(comma + 1);
+            }
+        }
+        if (fields[0] || fields[1] || fields[2] || fields[3] || fields[4] == 0 || fields[5] == 0
+            || fields[4] > raster.width || fields[5] > raster.height) {
+            return false;
+        }
+        crop = D2D1::RectF(0.0f, 0.0f, static_cast<float>(fields[4]), static_cast<float>(fields[5]));
+        return true;
+    }
+
     struct RtssPlacement
     {
         Rect rect;
         std::wstring text;
+        D2D1_RECT_F imageCrop { };
         int graph = -1;
         bool fillGraph = false;
+        bool image = false;
     };
 
     Rect drawRtssVisual(ID2D1RenderTarget* target, const RtssVisualLayout& layout, const OverlayText& values,
@@ -1092,6 +1196,7 @@ namespace {
         if (layerBounds != nullptr) {
             layerBounds->assign(layout.layers.size(), {});
         }
+        const RtssRaster* image = rtssRaster(layout);
         const float zoom = static_cast<float>(layout.zoom) * scale;
         const float cellHeight = static_cast<float>(layout.fontHeight) * zoom;
         const float cellWidth = cellHeight * 0.61f;
@@ -1108,7 +1213,11 @@ namespace {
             const RtssLayerEdit& edit = settings.rtssLayerEdits[index];
             const std::string_view source
                 = edit.text ? std::string_view(*edit.text) : std::string_view(layer.text);
-            std::wstring text = rtssText(layout, source, values, edit.text.has_value());
+            D2D1_RECT_F imageCrop { };
+            const bool imageTag = source.starts_with("<I=");
+            const bool imageReady = imageTag && image && rtssImageRect(source, *image, imageCrop);
+            std::wstring text = imageTag ? (imageReady ? L"" : L"нет данных")
+                                         : rtssText(layout, source, values, edit.text.has_value());
             int graph = -1;
             const bool fillGraph = source.ends_with(",81>");
             if (source.ends_with(",80>") || source.ends_with(",10>") || fillGraph) {
@@ -1137,27 +1246,31 @@ namespace {
                     text = L"нет данных";
                 }
             }
-            if (!edit.visible || (text.empty() && graph < 0 && !layer.hasBackground)) {
+            if (!edit.visible || (text.empty() && graph < 0 && !layer.hasBackground && !imageReady)) {
                 placed.push_back({ });
                 continue;
             }
             const int size = edit.size == 0 ? layer.size : edit.size;
             const float textWidth = static_cast<float>(text.size()) * cellWidth * size / 100.0f;
-            const float nominalWidth
-                = layer.width == 0 ? std::max(textWidth, cellWidth) : units(layer.width, false);
+            const float nominalWidth = layer.width == 0
+                ? (imageReady ? imageCrop.right * zoom : std::max(textWidth, cellWidth))
+                : units(layer.width, false);
             // Не обрезаем «нет данных» или текст, явно изменённый пользователем.
             const float width = text.find(L"нет данных") != std::wstring::npos || edit.text || edit.size != 0
                 ? std::max(nominalWidth, textWidth)
                 : nominalWidth;
-            const float nominalHeight
-                = layer.height == 0 ? cellHeight * size / 100.0f : units(layer.height, true);
-            const float height
-                = edit.size != 0 ? std::max(nominalHeight, cellHeight * size / 100.0f) : nominalHeight;
+            const float nominalHeight = layer.height == 0
+                ? (imageReady ? imageCrop.bottom * zoom : cellHeight * size / 100.0f)
+                : units(layer.height, true);
+            const float height = edit.size != 0 && !imageReady
+                ? std::max(nominalHeight, cellHeight * size / 100.0f)
+                : nominalHeight;
             float x = units(layer.x, false) + static_cast<float>(edit.x) * zoom;
             float y = units(layer.y, true) + static_cast<float>(edit.y) * zoom;
             x -= width * static_cast<float>(layer.origin % 3) / 2.0f;
             y -= height * static_cast<float>(layer.origin / 3) / 2.0f;
-            placed.push_back({ Rect { x, y, x + width, y + height }, text, graph, fillGraph });
+            placed.push_back(
+                { Rect { x, y, x + width, y + height }, text, imageCrop, graph, fillGraph, imageReady });
             right = std::max(right, x + width);
             bottom = std::max(bottom, y + height);
         }
@@ -1187,6 +1300,13 @@ namespace {
         const float top = std::clamp(anchorY, bounds.top, std::max(bounds.top, bounds.bottom - height));
 
         const std::wstring family = layout.fontFace.empty() ? L"Consolas" : rtssWide(layout.fontFace);
+        ID2D1Bitmap* bitmap = nullptr;
+        if (image) {
+            const auto properties = D2D1::BitmapProperties(
+                D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+            target->CreateBitmap(D2D1::SizeU(image->width, image->height), image->pixels.data(),
+                image->width * 4, &properties, &bitmap);
+        }
         std::array<IDWriteTextFormat*, 401> fonts { };
         D2D1::Matrix3x2F oldTransform;
         target->GetTransform(&oldTransform);
@@ -1215,6 +1335,13 @@ namespace {
                     target->FillRectangle(rect, brush);
                     brush->Release();
                 }
+            }
+            if (placement.image) {
+                if (bitmap) {
+                    target->DrawBitmap(
+                        bitmap, &rect, opacity, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, &placement.imageCrop);
+                }
+                continue;
             }
             if (placement.graph >= 0) {
                 const auto& history = values.rtssGraphHistory[static_cast<std::size_t>(placement.graph)];
@@ -1268,6 +1395,9 @@ namespace {
             }
         }
         target->SetTransform(oldTransform);
+        if (bitmap) {
+            bitmap->Release();
+        }
         for (IDWriteTextFormat* format : fonts) {
             if (format != nullptr) {
                 format->Release();
