@@ -52,6 +52,7 @@ enum class ActionKind : std::uint8_t {
     ExportOverlayRecipe,
     ImportOverlayRecipe,
     CreateDiagnosticReport,
+    OpenDiagnosticReport,
     SetSensorFilter,
     ClearLabel,
     ResetOverlayPlacement,

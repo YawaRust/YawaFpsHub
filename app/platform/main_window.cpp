@@ -6,8 +6,11 @@
 #include "platform/hardware_info_win.h"
 #include "platform/overlay_monitor.h"
 #include "platform/pawnio_package.h"
+#include "platform/report_file_win.h"
 #include "platform/report_preview_win.h"
+#include "platform/report_viewer_win.h"
 #include "platform/win_util.h"
+#include "report/package.h"
 #include "render/overlay_painter.h"
 #include "ui/bottleneck_view.h"
 #include "ui/canvas_transform.h"
@@ -1730,6 +1733,29 @@ void MainWindow::applyAction(const UiHit& hit)
             if (m_log)
                 m_log->warning("диагностическая карточка: " + error);
             MessageBoxW(m_window, widen(error).c_str(), L"YawaFpsHub", MB_OK | MB_ICONERROR);
+        }
+        break;
+    }
+
+    case ActionKind::OpenDiagnosticReport: {
+        wchar_t filename[MAX_PATH] { };
+        OPENFILENAMEW dialog { };
+        dialog.lStructSize = sizeof(dialog);
+        dialog.hwndOwner = m_window;
+        dialog.lpstrFilter = L"Пакет Yawa (*.yawa)\0*.yawa\0\0";
+        dialog.lpstrFile = filename;
+        dialog.nMaxFile = MAX_PATH;
+        dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+        if (GetOpenFileNameW(&dialog) == FALSE)
+            break;
+        std::string archive;
+        std::string error;
+        ReportPackageContents contents;
+        if (!readLocalReport(filename, archive, error) || !readReportPackage(archive, contents, error)
+            || !showReportPackageViewer(m_window, contents, error)) {
+            if (m_log)
+                m_log->warning("просмотр .yawa: " + error);
+            MessageBoxW(m_window, widen(error).c_str(), L"Пакет .yawa", MB_OK | MB_ICONERROR);
         }
         break;
     }

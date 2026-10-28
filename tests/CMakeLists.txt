@@ -29,8 +29,9 @@ if(WIN32)
     add_executable(report_card_win_tests
         ../app/platform/report_card_win_test.cpp
         ../app/platform/report_card_win.cpp
+        ../app/platform/report_viewer_win.cpp
         ../app/platform/win_util.cpp)
-    target_link_libraries(report_card_win_tests PRIVATE yawa_metrics d2d1 dwrite windowscodecs ole32)
+    target_link_libraries(report_card_win_tests PRIVATE yawa_metrics d2d1 dwrite windowscodecs ole32 user32 gdi32)
     target_include_directories(report_card_win_tests PRIVATE ${PROJECT_SOURCE_DIR}/app)
     target_compile_definitions(report_card_win_tests PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
     add_test(NAME report_card_win_tests COMMAND report_card_win_tests)

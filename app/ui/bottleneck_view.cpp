@@ -321,8 +321,12 @@ namespace {
         renderer.fillRoundRect(button, 6.0f, theme.accentSoft);
         renderer.text(L"Создать снимок…", button, TextRole::Small, theme.accent, TextAlign::Center);
         hits.push_back(UiHit { button, ActionKind::CreateDiagnosticReport, 0 });
-        renderer.text(L"PNG/.yawa создаются только после предпросмотра; кадр игры не включён.",
-            Rect { inner.left, inner.bottom - 19.0f, button.left - 12.0f, inner.bottom }, TextRole::Tiny,
+        const Rect open { button.left - 171.0f, button.top, button.left - 10.0f, button.bottom };
+        renderer.fillRoundRect(open, 6.0f, theme.panelSoft);
+        renderer.text(L"Открыть .yawa…", open, TextRole::Small, theme.text, TextAlign::Center);
+        hits.push_back(UiHit { open, ActionKind::OpenDiagnosticReport, 0 });
+        renderer.text(L"Создание — после предпросмотра · просмотр — только локально",
+            Rect { inner.left, inner.bottom - 19.0f, open.left - 12.0f, inner.bottom }, TextRole::Tiny,
             theme.textFaint);
     }
 

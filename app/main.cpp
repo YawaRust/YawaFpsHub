@@ -3,6 +3,7 @@
 #include "platform/main_window.h"
 #include "platform/pawnio_package.h"
 #include "platform/pawnio_sensors.h"
+#include "platform/report_file_win.h"
 #include "platform/spd_probe_win.h"
 #include "platform/win_util.h"
 #include "report/package.h"
@@ -107,36 +108,6 @@ HANDLE probeOutput()
     return output;
 }
 
-bool readLocalReport(std::wstring_view path, std::string& archive, std::string& error)
-{
-    if (path.starts_with(L"\\\\") || path.starts_with(L"//")) {
-        error = "network paths are not accepted";
-        return false;
-    }
-    const HANDLE file = CreateFileW(std::wstring(path).c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
-        OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (file == INVALID_HANDLE_VALUE) {
-        error = "cannot open " + yawa::narrow(path);
-        return false;
-    }
-    LARGE_INTEGER length { };
-    constexpr LONGLONG kMaxArchiveBytes = 33LL * 1024 * 1024;
-    const bool sized
-        = GetFileSizeEx(file, &length) && length.QuadPart > 0 && length.QuadPart <= kMaxArchiveBytes;
-    DWORD received = 0;
-    if (sized) {
-        archive.resize(static_cast<std::size_t>(length.QuadPart));
-        if (!ReadFile(file, archive.data(), static_cast<DWORD>(archive.size()), &received, nullptr)
-            || received != archive.size()) {
-            error = "file could not be read completely";
-        }
-    } else {
-        error = "file is empty, unreadable or larger than 33 MiB";
-    }
-    CloseHandle(file);
-    return error.empty();
-}
-
 int reportCommandOutput(const ReportRequest& request)
 {
     HANDLE output = probeOutput();
@@ -150,7 +121,7 @@ int reportCommandOutput(const ReportRequest& request)
         message = request.json ? "{\"error\":\"usage\"}\n"
                                : "Usage: YawaFpsHub.exe --report=<local-file.yawa> [--json]\n";
         status = 2;
-    } else if (!readLocalReport(request.path, archive, error)) {
+    } else if (!yawa::readLocalReport(request.path, archive, error)) {
         message = request.json ? "{\"error\":\"invalid_report\"}\n" : "Report: " + error + "\n";
     } else {
         yawa::ReportPackageContents contents;

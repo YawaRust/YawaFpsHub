@@ -1,4 +1,6 @@
 #include "platform/report_card_win.h"
+#include "platform/report_viewer_win.h"
+#include "report/package.h"
 
 #include <objbase.h>
 #include <windows.h>
@@ -66,6 +68,24 @@ int main()
         ok = check(pixelEquals(visible, masked, 1500, 450), "Mask must not affect report text") && ok;
         ok = check(masked.png.size() >= 8 && masked.png.substr(0, 8) == "\x89PNG\r\n\x1a\n",
                  "Masked PNG signature")
+            && ok;
+        std::string package;
+        yawa::ReportPackageContents read;
+        yawa::ReportViewedCard reopened;
+        bool valid = yawa::buildReportPackage({ input, masked.png, true }, package, error);
+        ok = check(valid, "Create masked package: " + error) && ok;
+        valid = yawa::readReportPackage(package, read, error);
+        ok = check(valid && read.gameFrameIncluded, "Read masked package: " + error) && ok;
+        valid = yawa::decodeReportCardPng(read.cardPng, reopened, error);
+        ok = check(valid, "Decode saved PNG: " + error) && ok;
+        if (valid) {
+            ok = check(reopened.width == 1920 && reopened.height == 1080, "Decoded card dimensions") && ok;
+            ok = check(reopened.bgra == masked.bgra, "Saved and reopened card pixels must match") && ok;
+        }
+        const auto originalWidth = reopened.width;
+        ok = check(
+                 !yawa::decodeReportCardPng("not a png", reopened, error) && reopened.width == originalWidth,
+                 "Invalid PNG must leave the viewer image unchanged")
             && ok;
     }
     CoUninitialize();
