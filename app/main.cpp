@@ -6,6 +6,7 @@
 #include "platform/report_file_win.h"
 #include "platform/spd_probe_win.h"
 #include "platform/win_util.h"
+#include "report/html_report.h"
 #include "report/package.h"
 
 #include <objbase.h>
@@ -65,6 +66,7 @@ DumpRequest probeCommand()
 struct ReportRequest
 {
     std::wstring path;
+    std::wstring htmlPath;
     bool json = false;
 };
 
@@ -78,6 +80,7 @@ std::optional<ReportRequest> reportCommand()
     ReportRequest request;
     bool hasReport = false;
     bool hasJson = false;
+    bool hasHtml = false;
     bool invalid = false;
     for (int index = 1; index < count; ++index) {
         const std::wstring_view arg = arguments[index];
@@ -89,13 +92,19 @@ std::optional<ReportRequest> reportCommand()
         } else if (arg.starts_with(L"--json")) {
             invalid |= hasJson || arg != L"--json";
             hasJson = true;
+        } else if (arg.starts_with(L"--html")) {
+            invalid |= hasHtml || !arg.starts_with(L"--html=");
+            hasHtml = true;
+            if (arg.starts_with(L"--html="))
+                request.htmlPath = std::wstring(arg.substr(7));
         }
     }
     LocalFree(arguments);
-    if (!hasReport && !hasJson)
+    if (!hasReport && !hasJson && !hasHtml)
         return std::nullopt;
     request.json = hasJson;
-    if (!hasReport || invalid || count != 2 + static_cast<int>(hasJson))
+    if (!hasReport || invalid || (hasJson && hasHtml) || (hasHtml && request.htmlPath.empty())
+        || count != 2 + static_cast<int>(hasJson) + static_cast<int>(hasHtml))
         request.path.clear();
     return request;
 }
@@ -118,26 +127,37 @@ int reportCommandOutput(const ReportRequest& request)
     std::string archive;
     std::string error;
     if (request.path.empty()) {
-        message = request.json ? "{\"error\":\"usage\"}\n"
-                               : "Usage: YawaFpsHub.exe --report=<local-file.yawa> [--json]\n";
+        message = request.json
+            ? "{\"error\":\"usage\"}\n"
+            : "Usage: YawaFpsHub.exe --report=<local-file.yawa> [--json | --html=<local-file.html>]\n";
         status = 2;
     } else if (!yawa::readLocalReport(request.path, archive, error)) {
         message = request.json ? "{\"error\":\"invalid_report\"}\n" : "Report: " + error + "\n";
     } else {
         yawa::ReportPackageContents contents;
         if (yawa::readReportPackage(archive, contents, error)) {
-            if (request.json) {
+            if (!request.htmlPath.empty()) {
+                std::string html;
+                if (yawa::buildHtmlReport(contents, html, error)
+                    && yawa::writeLocalHtmlReport(request.htmlPath, html, error)) {
+                    message = "HTML report created. Review the image before sharing.\n";
+                    status = 0;
+                } else {
+                    message = "Report: " + error + "\n";
+                }
+            } else if (request.json) {
                 message = std::string("{\"schema\":1,\"game_frame\":\"")
                     + (contents.gameFrameIncluded ? "included" : "omitted")
                     + "\",\"session\":" + contents.sessionJson + "}\n";
+                status = 0;
             } else {
                 message = std::string(".yawa schema 1: valid\nGame frame: ")
                     + (contents.gameFrameIncluded ? "included" : "omitted")
                     + "\nSession: " + contents.sessionJson;
                 if (message.back() != '\n')
                     message += '\n';
+                status = 0;
             }
-            status = 0;
         } else {
             message = request.json ? "{\"error\":\"invalid_report\"}\n" : "Report: " + error + "\n";
         }

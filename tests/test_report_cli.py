@@ -1,7 +1,9 @@
 """Windows CLI smoke: a valid local archive and three fail-closed inputs."""
 
 import argparse
+import base64
 import json
+import re
 import subprocess
 import tempfile
 import zipfile
@@ -54,11 +56,28 @@ def main() -> None:
         }
         reverse = json.loads(invoke(args.exe, ["--json", f"--report={package}"], 0, '"schema":1'))
         assert reverse == parsed
+        html_path = Path(directory) / "offline report.html"
+        invoke(args.exe, [f"--report={package}", f"--html={html_path}"], 0,
+               "HTML report created")
+        html = html_path.read_text(encoding="utf-8")
+        embedded = re.search(r'src="data:image/png;base64,([A-Za-z0-9+/=]+)"', html)
+        assert embedded and base64.b64decode(embedded.group(1)) == PNG
+        assert "default-src 'none'" in html and "<script" not in html
+        assert "http://" not in html and "https://" not in html
+        invoke(args.exe, [f"--report={package}", f"--html={html_path}"], 1,
+               "уже существует")
+        assert html_path.read_text(encoding="utf-8") == html
         broken = Path(directory) / "broken.yawa"
         broken.write_bytes(package.read_bytes().replace(b"no_game_sample", b"xo_game_sample"))
         invoke(args.exe, f"--report={broken}", 1, "Report:")
         assert json.loads(invoke(args.exe, [f"--report={broken}", "--json"],
                                  1, '"error":"invalid_report"')) == {"error": "invalid_report"}
+        invalid_html = Path(directory) / "invalid.html"
+        invoke(args.exe, [f"--report={broken}", f"--html={invalid_html}"], 1, "Report:")
+        assert not invalid_html.exists()
+        invoke(args.exe, [f"--report={package}", "--json", f"--html={invalid_html}"],
+               2, "Usage:")
+        assert not invalid_html.exists()
         invoke(args.exe, f"--report={Path(directory) / 'missing.yawa'}", 1, "cannot open")
         invoke(args.exe, r"--report=\\server\share\report.yawa", 1, "network paths")
         invoke(args.exe, "--report", 2, "Usage:")

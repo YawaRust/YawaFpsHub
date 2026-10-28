@@ -13,6 +13,7 @@ add_executable(YawaFpsHub WIN32
     metrics/units.cpp
     report/package.cpp
     report/package_reader.cpp
+    report/html_report.cpp
     platform/app_paths.cpp
     platform/display_info.cpp
     platform/dxgi_adapters.cpp

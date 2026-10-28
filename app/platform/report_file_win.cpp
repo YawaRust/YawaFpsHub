@@ -44,4 +44,46 @@ bool readLocalReport(std::wstring_view path, std::string& archive, std::string& 
     return error.empty();
 }
 
+bool writeLocalHtmlReport(std::wstring_view path, std::string_view html, std::string& error)
+{
+    error.clear();
+    if (path.empty() || path.starts_with(L"\\\\") || path.starts_with(L"//") || html.empty()
+        || html.size() > 50u * 1024u * 1024u) {
+        error = "HTML-отчёт: неверный локальный путь или размер файла";
+        return false;
+    }
+    const std::wstring target(path);
+    wchar_t directory[MAX_PATH] { };
+    wchar_t* basename = nullptr;
+    const DWORD length = GetFullPathNameW(target.c_str(), MAX_PATH, directory, &basename);
+    if (length == 0 || length >= MAX_PATH || basename == nullptr) {
+        error = "HTML-отчёт: путь слишком длинный или недоступен";
+        return false;
+    }
+    *basename = L'\0';
+    wchar_t temporary[MAX_PATH] { };
+    if (GetTempFileNameW(directory, L"YWH", 0, temporary) == 0) {
+        error = "HTML-отчёт: не удалось создать временный файл";
+        return false;
+    }
+    HANDLE file
+        = CreateFileW(temporary, GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        DeleteFileW(temporary);
+        error = "HTML-отчёт: временный файл недоступен";
+        return false;
+    }
+    DWORD written = 0;
+    const bool complete = WriteFile(file, html.data(), static_cast<DWORD>(html.size()), &written, nullptr)
+        && written == html.size() && FlushFileBuffers(file) != FALSE;
+    const bool closed = CloseHandle(file) != FALSE;
+    const bool moved
+        = complete && closed && MoveFileExW(temporary, target.c_str(), MOVEFILE_WRITE_THROUGH) != FALSE;
+    if (!moved) {
+        DeleteFileW(temporary);
+        error = "HTML-отчёт: не удалось записать файл (возможно, он уже существует): " + narrow(path);
+    }
+    return moved;
+}
+
 } // namespace yawa

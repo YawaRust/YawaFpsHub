@@ -43,6 +43,7 @@ add_library(yawa_metrics STATIC
     app/metrics/diagnosis.cpp
     app/report/package.cpp
     app/report/package_reader.cpp
+    app/report/html_report.cpp
     app/ui/settings.cpp
     app/ui/overlay_recipe_json.cpp
 )

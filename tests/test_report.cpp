@@ -1,4 +1,5 @@
 #include "metrics/report_frame.h"
+#include "report/html_report.h"
 #include "report/package.h"
 #include "report/package_internal.h"
 #include "test_support.h"
@@ -179,6 +180,27 @@ void runReportTests()
     CHECK(read.cardPng == png);
     CHECK(read.sessionJson.find("\"fps\":120") != std::string::npos);
     CHECK(!read.gameFrameIncluded);
+    std::string html = "unchanged";
+    CHECK(buildHtmlReport(read, html, error));
+    CHECK(error.empty());
+    CHECK(html.find("data:image/png;base64,iVBORw0KGgo") != std::string::npos);
+    CHECK(html.find("default-src 'none'") != std::string::npos);
+    CHECK(html.find("<script") == std::string::npos);
+    const std::string originalHtml = html;
+    auto untrusted = read;
+    untrusted.sessionJson = "<script>alert('x')&\"</script>";
+    CHECK(buildHtmlReport(untrusted, html, error));
+    CHECK(html.find("<script") == std::string::npos);
+    CHECK(html.find("&lt;script&gt;") != std::string::npos);
+    CHECK(html.find("&#39;") != std::string::npos);
+    CHECK(html.find("&amp;") != std::string::npos);
+    CHECK(html.find("&quot;") != std::string::npos);
+    CHECK(html != originalHtml);
+    const std::string escapedHtml = html;
+    untrusted.cardPng = "bad png";
+    CHECK(!buildHtmlReport(untrusted, html, error));
+    CHECK(!error.empty());
+    CHECK(html == escapedHtml);
     const std::string original = read.cardPng;
     std::string broken = output;
     broken[30] = 'x'; // имя первой записи нельзя переименовать даже внутри ZIP.
