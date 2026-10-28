@@ -711,10 +711,14 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
         int width = suggested->right - suggested->left;
         int height = suggested->bottom - suggested->top;
         if (GetMonitorInfoW(monitor, &work)) {
-            width = std::min(width, work.rcWork.right - work.rcWork.left);
-            height = std::min(height, work.rcWork.bottom - work.rcWork.top);
-            x = std::clamp(x, work.rcWork.left, work.rcWork.right - width);
-            y = std::clamp(y, work.rcWork.top, work.rcWork.bottom - height);
+            const int left = static_cast<int>(work.rcWork.left);
+            const int top = static_cast<int>(work.rcWork.top);
+            const int right = static_cast<int>(work.rcWork.right);
+            const int bottom = static_cast<int>(work.rcWork.bottom);
+            width = std::min(width, right - left);
+            height = std::min(height, bottom - top);
+            x = std::clamp(x, left, right - width);
+            y = std::clamp(y, top, bottom - height);
         }
         SetWindowPos(m_window, nullptr, x, y, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
         m_hdrDisplay = hdrAtWindow(m_window);
