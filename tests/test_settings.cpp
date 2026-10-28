@@ -892,6 +892,21 @@ namespace {
             && restored.overlay.rtssLayerEdits[1].x == 0);
     }
 
+    void testRtssGraphUsesLocalHistoryWithoutFabricatedSource()
+    {
+        const std::string source = "[Master]\nImplementation=2\n[General]\nLayers=1\n"
+                                   "[Layer0]\nName=Frametime graph\nText=<G=Frametime,0,0,1,33,0,80>\n"
+                                   "ExtentX=-32\nExtentY=-4\n";
+        OverlaySettings imported;
+        std::string error;
+        CHECK(importRtssOverlay(source, imported, error));
+        CHECK(imported.rtssVisual && imported.rtssVisual->layers.size() == 1);
+        CHECK(imported.rtssVisual->layers[0].text == "<G=Frametime,0,0,1,33,0,80>");
+        CHECK(imported.rtssOmittedLayers == 0);
+        CHECK(!imported.metrics[static_cast<std::size_t>(MetricId::FrameTime)]);
+        CHECK(imported.rtssTemplate && *imported.rtssTemplate == source);
+    }
+
     void testRtssExternalProviderCannotImpersonateHal()
     {
         const std::string source = "[Master]\nImplementation=2\n[General]\nSources=2\nLayers=3\n"
@@ -1090,6 +1105,7 @@ void runSettingsTests()
     testRecipeMigrationAndAxes();
     testRtssImportRecognizesOnlyKnownSources();
     testRtssVisualLayersPersistWithoutExternalProvider();
+    testRtssGraphUsesLocalHistoryWithoutFabricatedSource();
     testRtssExternalProviderCannotImpersonateHal();
     testRtssExchangeKeepsOriginalAndRejectsDamage();
     testRtssExportKeepsSupportedOrderAndColor();

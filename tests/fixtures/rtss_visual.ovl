@@ -6,7 +6,7 @@ FontWeight=700
 ZoomRatio=1
 [General]
 Sources=1
-Layers=3
+Layers=4
 [Source0]
 Name=CPU temperature
 Provider=HWiNFO
@@ -35,3 +35,11 @@ PositionY=-4
 ExtentX=-24
 ExtentY=-2
 TextColor=FFFFFFFF
+[Layer3]
+Name=Frametime graph
+Text=<G=Frametime,0,0,1,33,0,80>
+PositionX=0
+PositionY=-7
+ExtentX=-35
+ExtentY=-4
+TextColor=FFFF8080

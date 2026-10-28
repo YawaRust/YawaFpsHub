@@ -2092,6 +2092,29 @@
         }
         return osd.querySelector(`[data-metric="${metric}"]`)?.textContent?.trim() || "нет данных";
       }).replace(/\\[nrtb]/g, " ");
+      const graph = layer.label.match(/^<G=(Frametime|Framerate 1% Low),.*,(80|81)>$/);
+      if (graph) {
+        const history = lastSnapshot?.sensors.get(graph[1] === "Frametime" ? "frameMs" : "fpsLow1")?.history
+          ?.slice(-32);
+        if (history?.length >= 2 && history.every((value) => Number.isFinite(value) && value > 0)) {
+          const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+          svg.setAttribute("viewBox", `0 0 ${layer.width} ${layer.height}`);
+          svg.setAttribute("width", String(layer.width));
+          svg.setAttribute("height", String(layer.height));
+          const ceiling = Math.max(graph[1] === "Frametime" ? 33 : 1, ...history);
+          const points = history.map((value, index) =>
+            `${index * layer.width / (history.length - 1)},${layer.height *
+              (1 - Math.min(1, value / ceiling))}`).join(" ");
+          const shape = document.createElementNS("http://www.w3.org/2000/svg",
+            graph[2] === "81" ? "polygon" : "polyline");
+          shape.setAttribute("points", graph[2] === "81"
+            ? `0,${layer.height} ${points} ${layer.width},${layer.height}` : points);
+          shape.setAttribute(graph[2] === "81" ? "fill" : "stroke", paint(layer.color, "#fff"));
+          if (graph[2] === "80") shape.setAttribute("fill", "none");
+          svg.append(shape);
+          node.replaceChildren(svg);
+        }
+      }
       canvas.append(node);
     }
     osd.append(canvas);

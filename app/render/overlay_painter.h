@@ -20,6 +20,8 @@ struct OverlayText {
     // Только показатели с определённой шкалой 0–100%; -1 означает «нет шкалы».
     std::vector<float> gaugeFill;
     std::vector<float> sparklineHistory;
+    // Только реальные значения локальных датчиков; графики чужих провайдеров не синтезируются.
+    std::array<std::vector<float>, 2> rtssGraphHistory;
 };
 
 struct OverlayFormats {

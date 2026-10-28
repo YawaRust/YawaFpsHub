@@ -1259,7 +1259,10 @@ bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::str
         std::string lowered = layerTexts[static_cast<std::size_t>(index)];
         std::transform(lowered.begin(), lowered.end(), lowered.begin(),
             [](unsigned char letter) { return static_cast<char>(std::tolower(letter)); });
-        bool recognized = false;
+        const auto& layer = visual->layers[static_cast<std::size_t>(index)];
+        bool recognized = (layer.text.starts_with("<G=Frametime,")
+            || layer.text.starts_with("<G=Framerate 1% Low,"))
+            && (layer.text.ends_with(",80>") || layer.text.ends_with(",81>"));
         for (const RtssMetric& source : kRtssMetrics) {
             std::string tag(source.tag);
             std::transform(tag.begin(), tag.end(), tag.begin(),

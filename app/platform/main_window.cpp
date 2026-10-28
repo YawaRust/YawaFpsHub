@@ -463,6 +463,21 @@ bool MainWindow::smokeImportRtss(std::string_view package, std::string& error)
         return false;
     }
     if (imported.rtssVisual) {
+        const auto& layers = imported.rtssVisual->layers;
+        if (std::any_of(layers.begin(), layers.end(), [](const RtssVisualLayer& layer) {
+                return layer.text.starts_with("<G=Frametime,");
+            })) {
+            MetricStore samples;
+            for (int index = 0; index < 32; ++index) {
+                samples.set(MetricId::FrameTime, 8.0 + index % 9);
+            }
+            m_overlay.setContent(samples, FpsSummary{}, L"");
+            m_overlay.repaint();
+            if (!m_overlay.hasVisiblePixels()) {
+                error = "RTSS-график с локальными данными не отрисован";
+                return false;
+            }
+        }
         OverlaySettings hidden = imported;
         for (std::size_t index = 0; index < hidden.rtssVisual->layers.size(); ++index) {
             hidden.rtssLayerEdits[index].visible = false;

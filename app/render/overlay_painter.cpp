@@ -1005,6 +1005,8 @@ namespace {
     {
         Rect rect;
         std::wstring text;
+        int graph = -1;
+        bool fillGraph = false;
     };
 
     Rect drawRtssVisual(ID2D1RenderTarget* target, const RtssVisualLayout& layout, const OverlayText& values,
@@ -1028,8 +1030,27 @@ namespace {
         for (std::size_t index = 0; index < layout.layers.size(); ++index) {
             const RtssVisualLayer& layer = layout.layers[index];
             const RtssLayerEdit& edit = settings.rtssLayerEdits[index];
-            const std::wstring text = rtssText(layout, layer.text, values);
-            if (!edit.visible || (text.empty() && !layer.hasBackground)) {
+            std::wstring text = rtssText(layout, layer.text, values);
+            int graph = -1;
+            const bool fillGraph = layer.text.ends_with(",81>");
+            if (layer.text.ends_with(",80>") || fillGraph) {
+                if (layer.text.starts_with("<G=Frametime,")) {
+                    graph = 0;
+                } else if (layer.text.starts_with("<G=Framerate 1% Low,")) {
+                    graph = 1;
+                }
+            }
+            if (graph >= 0) {
+                const auto& history = values.rtssGraphHistory[static_cast<std::size_t>(graph)];
+                if (history.size() >= 2 && std::all_of(history.begin(), history.end(),
+                        [](float value) { return std::isfinite(value) && value > 0.0f; })) {
+                    text.clear();
+                } else {
+                    graph = -1; // Нет реальных кадров: не рисуем искусственную кривую.
+                    text = L"нет данных";
+                }
+            }
+            if (!edit.visible || (text.empty() && graph < 0 && !layer.hasBackground)) {
                 placed.push_back({ });
                 continue;
             }
@@ -1046,7 +1067,7 @@ namespace {
             float y = units(layer.y, true) + static_cast<float>(edit.y) * zoom;
             x -= width * static_cast<float>(layer.origin % 3) / 2.0f;
             y -= height * static_cast<float>(layer.origin / 3) / 2.0f;
-            placed.push_back({ Rect { x, y, x + width, y + height }, text });
+            placed.push_back({ Rect { x, y, x + width, y + height }, text, graph, fillGraph });
             right = std::max(right, x + width);
             bottom = std::max(bottom, y + height);
         }
@@ -1101,6 +1122,32 @@ namespace {
                     target->FillRectangle(rect, brush);
                     brush->Release();
                 }
+            }
+            if (placement.graph >= 0) {
+                const auto& history = values.rtssGraphHistory[static_cast<std::size_t>(placement.graph)];
+                const auto highest = std::max_element(history.begin(), history.end());
+                const float ceiling = std::max(placement.graph == 0 ? 33.0f : 1.0f, *highest);
+                ID2D1SolidColorBrush* brush = nullptr;
+                if (SUCCEEDED(target->CreateSolidColorBrush(toD2D(fromRgba(layer.textColor), opacity), &brush))) {
+                    const auto point = [&](std::size_t sample) {
+                        const float x = rect.left + (rect.right - rect.left)
+                            * static_cast<float>(sample) / static_cast<float>(history.size() - 1);
+                        const float fraction = std::clamp(history[sample] / ceiling, 0.0f, 1.0f);
+                        return D2D1::Point2F(x, rect.bottom - fraction * (rect.bottom - rect.top));
+                    };
+                    for (std::size_t sample = 1; sample < history.size(); ++sample) {
+                        const D2D1_POINT_2F from = point(sample - 1);
+                        const D2D1_POINT_2F to = point(sample);
+                        if (placement.fillGraph) {
+                            target->FillRectangle(D2D1::RectF(from.x, std::min(from.y, to.y),
+                                std::max(from.x + 1.0f, to.x), rect.bottom), brush);
+                        } else {
+                            target->DrawLine(from, to, brush, std::max(1.0f, zoom));
+                        }
+                    }
+                    brush->Release();
+                }
+                continue;
             }
             if (placement.text.empty()) {
                 continue;
@@ -1214,6 +1261,18 @@ std::array<Color, kOverlayColorCount> overlayColorPalette()
 OverlayText makeOverlayText(const OverlaySettings& settings, const MetricStore& store)
 {
     OverlayText text;
+    if (settings.recipe == OverlayRecipe::Rtss && settings.rtssTemplate && settings.rtssVisual) {
+        const std::array<MetricId, 2> graphMetrics { MetricId::FrameTime, MetricId::Low1Fps };
+        for (std::size_t index = 0; index < graphMetrics.size(); ++index) {
+            if (!store.hasValue(graphMetrics[index])) {
+                continue;
+            }
+            std::array<float, 32> history { };
+            const std::size_t count = store.copyHistory(graphMetrics[index], history.data(), history.size());
+            text.rtssGraphHistory[index].assign(history.begin(),
+                history.begin() + static_cast<std::ptrdiff_t>(count));
+        }
+    }
     if (settings.showSparkline && store.hasValue(settings.sparklineMetric)) {
         std::array<float, 32> history { };
         const std::size_t count = store.copyHistory(settings.sparklineMetric, history.data(), history.size());
