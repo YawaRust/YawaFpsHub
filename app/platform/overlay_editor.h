@@ -1,5 +1,6 @@
 #pragma once
 
+#include "render/overlay_painter.h"
 #include "ui/app_model.h"
 
 #include <windows.h>
@@ -20,7 +21,7 @@ public:
         std::function<void(bool)> onChange);
     void close();
     void refresh();
-    bool isDragging() const { return m_dragging; }
+    bool isDragging() const { return m_dragging || m_styledRowDragging; }
     bool isOpen() const { return m_window != nullptr; }
 
 private:
@@ -34,6 +35,7 @@ private:
     float canvasScale() const;
     std::size_t rtssLayerCount() const;
     void moveRtssLayer(int x, int y);
+    void moveStyledRow(int x, int y);
     int logicalCoordinate(int pixels) const;
     Rect plateOnCanvas() const;
     Rect scaleGrip() const;
@@ -96,6 +98,13 @@ private:
     std::vector<MetricId> m_hiddenLayers;
     std::vector<Rect> m_rtssLayerRects;
     float m_rtssLayerScale = 1.0f;
+    std::vector<OverlayRowBounds> m_canvasRowBounds;
+    float m_canvasRowScale = 1.0f;
+    bool m_styledRowDragging = false;
+    MetricId m_styledRowId = MetricId::Fps;
+    OverlayRowOffset m_styledRowStart { };
+    Rect m_styledRowBounds { };
+    float m_styledRowUnit = 1.0f;
     int m_rtssSelected = -1;
     bool m_rtssDragging = false;
     bool m_scaleDragging = false;

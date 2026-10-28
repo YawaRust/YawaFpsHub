@@ -251,8 +251,10 @@ bool OverlayEditor::open(HWND owner, HINSTANCE instance, AppModel& model, const 
     m_section = 0;
     m_hiddenLayers.clear();
     m_rtssLayerRects.clear();
+    m_canvasRowBounds.clear();
     m_rtssSelected = -1;
     m_rtssDragging = false;
+    m_styledRowDragging = false;
     m_samplingColor = false;
     m_undo.clear();
     m_redo.clear();
@@ -454,7 +456,8 @@ void OverlayEditor::recordHistory()
 
 void OverlayEditor::restoreHistory(bool redo)
 {
-    if (m_dragging || m_panning || m_rtssDragging || m_scaleDragging || m_paddingDragging) {
+    if (m_dragging || m_panning || m_rtssDragging || m_styledRowDragging || m_scaleDragging
+        || m_paddingDragging) {
         return;
     }
     auto& source = redo ? m_redo : m_undo;
@@ -535,6 +538,26 @@ void OverlayEditor::moveRtssLayer(int x, int y)
     if (edit.x != newX || edit.y != newY) {
         edit.x = newX;
         edit.y = newY;
+        changed(false);
+    }
+}
+
+void OverlayEditor::moveStyledRow(int x, int y)
+{
+    const int dx = static_cast<int>(std::lround((x - m_dragStartX) / m_styledRowUnit));
+    const int dy = static_cast<int>(std::lround((y - m_dragStartY) / m_styledRowUnit));
+    OverlayRowOffset next = moveOverlayRowOffset(m_styledRowStart, dx, dy);
+    const int minX = static_cast<int>(std::ceil(-m_styledRowBounds.left / m_canvasRowScale));
+    const int maxX = static_cast<int>(
+        std::floor((GetSystemMetrics(SM_CXVIRTUALSCREEN) - m_styledRowBounds.right) / m_canvasRowScale));
+    const int minY = static_cast<int>(std::ceil(-m_styledRowBounds.top / m_canvasRowScale));
+    const int maxY = static_cast<int>(
+        std::floor((GetSystemMetrics(SM_CYVIRTUALSCREEN) - m_styledRowBounds.bottom) / m_canvasRowScale));
+    next.x = std::clamp(next.x, m_styledRowStart.x + minX, m_styledRowStart.x + maxX);
+    next.y = std::clamp(next.y, m_styledRowStart.y + minY, m_styledRowStart.y + maxY);
+    auto& current = m_model->settings.overlay.styleRowOffsets[static_cast<std::size_t>(m_styledRowId)];
+    if (current.x != next.x || current.y != next.y) {
+        current = next;
         changed(false);
     }
 }
@@ -769,6 +792,19 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
                             static_cast<float>(cursor.x), static_cast<float>(cursor.y)))) {
                     SetCursor(LoadCursorW(nullptr, IDC_SIZENWSE));
                     return TRUE;
+                }
+                if (m_canvas.contains(static_cast<float>(cursor.x), static_cast<float>(cursor.y))
+                    && !m_model->settings.overlay.pixelLayout && GetKeyState(VK_MENU) >= 0) {
+                    const CanvasAxis horizontal { m_canvas.left, m_panX, canvasScale() };
+                    const CanvasAxis vertical { m_canvas.top, m_panY, canvasScale() };
+                    for (const auto& row : m_canvasRowBounds) {
+                        if (Rect { horizontal.toCanvas(row.rect.left), vertical.toCanvas(row.rect.top),
+                                horizontal.toCanvas(row.rect.right), vertical.toCanvas(row.rect.bottom) }
+                                .contains(static_cast<float>(cursor.x), static_cast<float>(cursor.y))) {
+                            SetCursor(LoadCursorW(nullptr, IDC_HAND));
+                            return TRUE;
+                        }
+                    }
                 }
                 if (m_canvas.contains(static_cast<float>(cursor.x), static_cast<float>(cursor.y))
                     && (GetKeyState(VK_SPACE) < 0 || m_panning
@@ -1258,6 +1294,29 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
                     return 0;
                 }
             }
+            if (GetKeyState(VK_MENU) >= 0
+                && (!m_model->settings.overlay.pixelLayout
+                    || m_model->settings.overlay.layout != OverlayLayout::Plates)) {
+                for (auto it = m_canvasRowBounds.rbegin(); it != m_canvasRowBounds.rend(); ++it) {
+                    const Rect onCanvas { horizontal.toCanvas(it->rect.left), vertical.toCanvas(it->rect.top),
+                        horizontal.toCanvas(it->rect.right), vertical.toCanvas(it->rect.bottom) };
+                    if (!onCanvas.contains(static_cast<float>(x), static_cast<float>(y))) {
+                        continue;
+                    }
+                    select(it->id, false);
+                    m_styledRowDragging = true;
+                    m_styledRowId = it->id;
+                    m_styledRowStart
+                        = m_model->settings.overlay.styleRowOffsets[static_cast<std::size_t>(it->id)];
+                    m_styledRowBounds = it->rect;
+                    m_styledRowUnit = std::max(0.001f, canvasScale() * m_canvasRowScale);
+                    m_dragStartX = x;
+                    m_dragStartY = y;
+                    SetFocus(m_window);
+                    SetCapture(m_window);
+                    return 0;
+                }
+            }
             const Rect plate = plateOnCanvas();
             if (m_model->settings.overlay.layout != OverlayLayout::Plates
                 && plate.contains(static_cast<float>(x), static_cast<float>(y))) {
@@ -1395,6 +1454,8 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
         const int y = logicalCoordinate(GET_Y_LPARAM(lParam));
         if (m_rtssDragging) {
             moveRtssLayer(x, y);
+        } else if (m_styledRowDragging) {
+            moveStyledRow(x, y);
         } else if (m_scaleDragging || m_paddingDragging) {
             moveGrip(x, y);
         } else if (m_panning) {
@@ -1424,6 +1485,13 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
             if (m_rtssDragging) {
                 moveRtssLayer(x, y);
                 m_rtssDragging = false;
+                changed(true);
+                ReleaseCapture();
+                return 0;
+            }
+            if (m_styledRowDragging) {
+                moveStyledRow(x, y);
+                m_styledRowDragging = false;
                 changed(true);
                 ReleaseCapture();
                 return 0;
@@ -1460,8 +1528,8 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
         break;
     }
     case WM_CAPTURECHANGED:
-        if (m_rtssDragging || m_scaleDragging || m_paddingDragging) {
-            m_rtssDragging = m_scaleDragging = m_paddingDragging = false;
+        if (m_rtssDragging || m_styledRowDragging || m_scaleDragging || m_paddingDragging) {
+            m_rtssDragging = m_styledRowDragging = m_scaleDragging = m_paddingDragging = false;
             changed(true);
         }
         return 0;
@@ -1654,8 +1722,8 @@ void OverlayEditor::paint()
     const Rect screen { 0.0f, 0.0f, static_cast<float>(GetSystemMetrics(SM_CXVIRTUALSCREEN)),
         static_cast<float>(GetSystemMetrics(SM_CYVIRTUALSCREEN)) };
     m_screenPlate = paintOverlay(target, m_model->settings.overlay, theme, text, screen,
-        static_cast<float>(m_model->settings.overlay.scalePercent) / 100.0f, formats,
-        &m_rtssLayerRects, &m_rtssLayerScale);
+        static_cast<float>(m_model->settings.overlay.scalePercent) / 100.0f, formats, &m_rtssLayerRects,
+        &m_rtssLayerScale, &m_canvasRowBounds, &m_canvasRowScale);
     target->SetTransform(transform);
     if (m_rtssSelected >= 0 && static_cast<std::size_t>(m_rtssSelected) < m_rtssLayerRects.size()) {
         const Rect& box = m_rtssLayerRects[static_cast<std::size_t>(m_rtssSelected)];
@@ -1666,7 +1734,23 @@ void OverlayEditor::paint()
                 horizontal.toCanvas(box.right), vertical.toCanvas(box.bottom) }, 3.0f, theme.accent, 1.5f);
         }
     }
-    if (m_rtssSelected < 0 && m_model->settings.overlay.layout == OverlayLayout::Plates) {
+    if (m_rtssSelected < 0
+        && (!m_model->settings.overlay.pixelLayout
+            || m_model->settings.overlay.layout != OverlayLayout::Plates)) {
+        const CanvasAxis horizontal { m_canvas.left, m_panX, screenScale };
+        const CanvasAxis vertical { m_canvas.top, m_panY, screenScale };
+        for (const auto& row : m_canvasRowBounds) {
+            if (row.id == m_selected) {
+                m_renderer.strokeRoundRect(
+                    { horizontal.toCanvas(row.rect.left), vertical.toCanvas(row.rect.top),
+                        horizontal.toCanvas(row.rect.right), vertical.toCanvas(row.rect.bottom) },
+                    3.0f, theme.accent, 1.5f);
+                break;
+            }
+        }
+    }
+    if (m_rtssSelected < 0 && m_model->settings.overlay.pixelLayout
+        && m_model->settings.overlay.layout == OverlayLayout::Plates) {
         const Rect plate = plateOnCanvas();
         const float rowScale = screenScale * m_model->settings.overlay.scalePercent / 100.0f;
         for (const auto& entry : rows) {

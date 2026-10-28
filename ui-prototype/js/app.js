@@ -1746,7 +1746,13 @@
         selected.clear();
         selected.add(row.dataset.osdItem);
         markRows();
-        drag = { reorder: row };
+        const position = overlayState.rowPositions[row.dataset.osdItem] || { x: 0, y: 0 };
+        drag = event.shiftKey ? { reorder: row } : {
+          row, x: event.clientX, y: event.clientY,
+          startX: position.x, startY: position.y,
+          unit: Math.max(.001, rect.width / Math.max(1, osd.offsetWidth)),
+          bounds: row.getBoundingClientRect(), screen: osd.offsetParent.getBoundingClientRect()
+        };
       } else {
         freeOverlayAnchor();
         drag = { x: event.clientX, y: event.clientY,
@@ -1795,6 +1801,22 @@
         else target.before(drag.reorder);
         overlayState.metricOrder = [...osd.querySelectorAll(".osd__row")]
           .map((item) => item.querySelector("[data-metric]")?.dataset.metric).filter(Boolean);
+        applyOverlay();
+        return;
+      }
+      if (drag.row) {
+        const dx = Math.round((event.clientX - drag.x) / drag.unit);
+        const dy = Math.round((event.clientY - drag.y) / drag.unit);
+        const bounds = drag.bounds;
+        const screen = drag.screen;
+        const x = Math.max(-2048, Math.min(2048, drag.startX + dx));
+        const y = Math.max(-2048, Math.min(2048, drag.startY + dy));
+        overlayState.rowPositions[drag.row.dataset.osdItem] = {
+          x: Math.round(Math.max(drag.startX + (screen.left - bounds.left) / drag.unit,
+            Math.min(drag.startX + (screen.right - bounds.right) / drag.unit, x))),
+          y: Math.round(Math.max(drag.startY + (screen.top - bounds.top) / drag.unit,
+            Math.min(drag.startY + (screen.bottom - bounds.bottom) / drag.unit, y)))
+        };
         applyOverlay();
         return;
       }
