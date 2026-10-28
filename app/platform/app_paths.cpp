@@ -179,9 +179,18 @@ bool writeTextFile(const std::string& path, const std::string& content)
             return false;
         }
         file << content;
+        file.close();
+        if (!file) {
+            DeleteFileW(toWide(temporary).c_str());
+            return false;
+        }
     }
 
-    return MoveFileExW(toWide(temporary).c_str(), toWide(path).c_str(), MOVEFILE_REPLACE_EXISTING) != FALSE;
+    if (MoveFileExW(toWide(temporary).c_str(), toWide(path).c_str(), MOVEFILE_REPLACE_EXISTING)) {
+        return true;
+    }
+    DeleteFileW(toWide(temporary).c_str());
+    return false;
 }
 
 void ensureDirectory(const std::string& path)

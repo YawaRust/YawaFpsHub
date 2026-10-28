@@ -104,6 +104,15 @@ namespace {
         return dataDirectory() + "\\game-profiles\\" + std::string(gameKey) + ".ini";
     }
 
+    bool writeGameOverlay(std::string_view gameKey, const OverlaySettings& overlay)
+    {
+        ensureDirectory(dataDirectory() + "\\game-profiles");
+        Settings profile = defaultSettings();
+        profile.overlay = overlay;
+        copyOverlayPlacement(profile.overlay, defaultSettings().overlay);
+        return writeTextFile(gameOverlayPath(gameKey), serializeSettings(profile));
+    }
+
     std::vector<std::pair<std::string, RECT>> overlayMonitors()
     {
         std::vector<std::pair<std::string, RECT>> result;
@@ -1483,6 +1492,12 @@ void MainWindow::applyAction(const UiHit& hit)
             m_model.hasGameProfile = false;
             m_model.settings.overlay = m_baseOverlay;
         } else {
+            if (!writeGameOverlay(m_recentGameKey, m_model.settings.overlay)) {
+                MessageBoxW(m_window,
+                    L"Не удалось сохранить профиль игры. Проверьте доступ к каталогу данных.", L"YawaFpsHub",
+                    MB_OK | MB_ICONERROR);
+                break;
+            }
             m_activeGameKey = m_recentGameKey;
             m_profileActive = true;
             m_model.hasGameProfile = true;
@@ -2061,14 +2076,8 @@ void MainWindow::saveSettings()
 {
     if (m_profileActive && !m_activeGameKey.empty()) {
         copyOverlayPlacement(m_baseOverlay, m_model.settings.overlay);
-        const std::string directory = dataDirectory() + "\\game-profiles";
-        ensureDirectory(directory);
-        const std::string path = gameOverlayPath(m_activeGameKey);
-        Settings profile = defaultSettings();
-        profile.overlay = m_model.settings.overlay;
-        copyOverlayPlacement(profile.overlay, defaultSettings().overlay);
-        if (!writeTextFile(path, serializeSettings(profile)) && m_log != nullptr) {
-            m_log->warning("не удалось записать профиль " + path);
+        if (!writeGameOverlay(m_activeGameKey, m_model.settings.overlay) && m_log != nullptr) {
+            m_log->warning("не удалось записать профиль " + gameOverlayPath(m_activeGameKey));
         }
     } else {
         m_baseOverlay = m_model.settings.overlay;
