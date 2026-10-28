@@ -1111,17 +1111,26 @@ namespace {
             std::wstring text = rtssText(layout, source, values, edit.text.has_value());
             int graph = -1;
             const bool fillGraph = source.ends_with(",81>");
-            if (source.ends_with(",80>") || fillGraph) {
+            if (source.ends_with(",80>") || source.ends_with(",10>") || fillGraph) {
                 if (source.starts_with("<G=Frametime,")) {
                     graph = 0;
                 } else if (source.starts_with("<G=Framerate 1% Low,")) {
                     graph = 1;
+                } else if (source.starts_with("<G=CPU usage,")
+                    && std::any_of(layout.availableTags.begin(), layout.availableTags.end(),
+                        [](const auto& tag) { return tag.first == "%CPU usage%"; })) {
+                    graph = 2;
+                } else if (source.starts_with("<G=GPU1 usage,")
+                    && std::any_of(layout.availableTags.begin(), layout.availableTags.end(),
+                        [](const auto& tag) { return tag.first == "%GPU1 usage%"; })) {
+                    graph = 3;
                 }
             }
             if (graph >= 0) {
                 const auto& history = values.rtssGraphHistory[static_cast<std::size_t>(graph)];
-                if (history.size() >= 2 && std::all_of(history.begin(), history.end(),
-                        [](float value) { return std::isfinite(value) && value > 0.0f; })) {
+                if (history.size() >= 2 && std::all_of(history.begin(), history.end(), [graph](float value) {
+                        return std::isfinite(value) && (graph < 2 ? value > 0.0f : value >= 0.0f);
+                    })) {
                     text.clear();
                 } else {
                     graph = -1; // Нет реальных кадров: не рисуем искусственную кривую.
@@ -1210,7 +1219,10 @@ namespace {
             if (placement.graph >= 0) {
                 const auto& history = values.rtssGraphHistory[static_cast<std::size_t>(placement.graph)];
                 const auto highest = std::max_element(history.begin(), history.end());
-                const float ceiling = std::max(placement.graph == 0 ? 33.0f : 1.0f, *highest);
+                const float ceiling = std::max(placement.graph == 0 ? 33.0f
+                        : placement.graph == 1                      ? 1.0f
+                                                                    : 100.0f,
+                    *highest);
                 ID2D1SolidColorBrush* brush = nullptr;
                 if (SUCCEEDED(target->CreateSolidColorBrush(toD2D(fromRgba(color), opacity), &brush))) {
                     const auto point = [&](std::size_t sample) {
@@ -1348,7 +1360,8 @@ OverlayText makeOverlayText(const OverlaySettings& settings, const MetricStore& 
 {
     OverlayText text;
     if (settings.recipe == OverlayRecipe::Rtss && settings.rtssTemplate && settings.rtssVisual) {
-        const std::array<MetricId, 2> graphMetrics { MetricId::FrameTime, MetricId::Low1Fps };
+        const std::array<MetricId, 4> graphMetrics { MetricId::FrameTime, MetricId::Low1Fps,
+            MetricId::CpuLoad, MetricId::GpuLoad };
         for (std::size_t index = 0; index < graphMetrics.size(); ++index) {
             if (!store.hasValue(graphMetrics[index])) {
                 continue;

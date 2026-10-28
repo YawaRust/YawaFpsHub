@@ -930,6 +930,18 @@ namespace {
         CHECK(restored.overlay.rtssLayerEdits[1].textColor == 0x80773322u);
         CHECK(restored.overlay.rtssLayerEdits[1].size == 175);
         CHECK(restored.overlay.rtssLayerEdits[2].text && restored.overlay.rtssLayerEdits[2].text->empty());
+        const std::string graph10 = "[Master]\nImplementation=2\n[General]\nLayers=2\nSources=1\n"
+                                    "[Source0]\nName=CPU usage\nProvider=HAL\nID=CPU usage\n"
+                                    "[Layer0]\nText=<G=Frametime,0,0,1,0,40,10>\n"
+                                    "[Layer1]\nText=<G=CPU usage,0,0,1,0,100,10>\n";
+        CHECK(importRtssOverlay(graph10, imported, error));
+        CHECK(imported.rtssOmittedLayers == 0);
+        CHECK(imported.rtssVisual && imported.rtssVisual->layers[1].text.starts_with("<G=CPU usage,"));
+        const std::size_t provider = graph10.find("Provider=HAL");
+        std::string externalGraph = graph10;
+        externalGraph.replace(provider, 12, "Provider=Other");
+        CHECK(importRtssOverlay(externalGraph, imported, error));
+        CHECK(imported.rtssOmittedLayers == 1);
         Settings invalidEdits;
         CHECK(parseSettings("[rtss_layer_edits]\n1 = 2049,0,0\n2 = 0,0,3\n256 = 1,1,1\n",
             invalidEdits, error));

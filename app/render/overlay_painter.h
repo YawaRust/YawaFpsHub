@@ -21,7 +21,7 @@ struct OverlayText {
     std::vector<float> gaugeFill;
     std::vector<float> sparklineHistory;
     // Только реальные значения локальных датчиков; графики чужих провайдеров не синтезируются.
-    std::array<std::vector<float>, 2> rtssGraphHistory;
+    std::array<std::vector<float>, 4> rtssGraphHistory;
 };
 
 struct OverlayFormats {

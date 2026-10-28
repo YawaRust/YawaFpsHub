@@ -1310,9 +1310,18 @@ bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::str
         std::transform(lowered.begin(), lowered.end(), lowered.begin(),
             [](unsigned char letter) { return static_cast<char>(std::tolower(letter)); });
         const auto& layer = visual->layers[static_cast<std::size_t>(index)];
-        bool recognized = (layer.text.starts_with("<G=Frametime,")
-            || layer.text.starts_with("<G=Framerate 1% Low,"))
-            && (layer.text.ends_with(",80>") || layer.text.ends_with(",81>"));
+        const bool graphMode
+            = layer.text.ends_with(",10>") || layer.text.ends_with(",80>") || layer.text.ends_with(",81>");
+        bool recognized = graphMode
+            && (layer.text.starts_with("<G=Frametime,") || layer.text.starts_with("<G=Framerate 1% Low,"));
+        if (graphMode) {
+            for (const RtssMetric& metric : kRtssMetrics) {
+                if ((layer.text.starts_with("<G=CPU usage,") && metric.tag == "%CPU usage%")
+                    || (layer.text.starts_with("<G=GPU1 usage,") && metric.tag == "%GPU1 usage%")) {
+                    recognized |= availableSource(metric);
+                }
+            }
+        }
         for (const RtssMetric& source : kRtssMetrics) {
             std::string tag(source.tag);
             std::transform(tag.begin(), tag.end(), tag.begin(),

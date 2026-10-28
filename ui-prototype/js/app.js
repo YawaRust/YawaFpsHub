@@ -2186,16 +2186,22 @@
         }
         return osd.querySelector(`[data-metric="${metric}"]`)?.textContent?.trim() || "нет данных";
       }).replace(/\\[nrtb]/g, " ");
-      const graph = source.match(/^<G=(Frametime|Framerate 1% Low),.*,(80|81)>$/);
+      const graph = source.match(/^<G=(Frametime|Framerate 1% Low|CPU usage|GPU1 usage),.*,(10|80|81)>$/);
       if (graph) {
-        const history = lastSnapshot?.sensors.get(graph[1] === "Frametime" ? "frameMs" : "fpsLow1")?.history
-          ?.slice(-32);
-        if (history?.length >= 2 && history.every((value) => Number.isFinite(value) && value > 0)) {
+        const external = graph[1] === "CPU usage" || graph[1] === "GPU1 usage";
+        const matching = rtssVisual.sources.filter((entry) => entry.name === graph[1]);
+        const available = !external || (matching.length > 0 && matching.every((entry) =>
+          entry.provider === "HAL" && entry.id === graph[1]));
+        const sensor = { Frametime: "frameMs", "Framerate 1% Low": "fpsLow1",
+          "CPU usage": "cpu", "GPU1 usage": "gpu" }[graph[1]];
+        const history = available ? lastSnapshot?.sensors.get(sensor)?.history?.slice(-32) : null;
+        if (history?.length >= 2 && history.every((value) => Number.isFinite(value)
+          && (external ? value >= 0 : value > 0))) {
           const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
           svg.setAttribute("viewBox", `0 0 ${layer.width} ${layer.height}`);
           svg.setAttribute("width", String(layer.width));
           svg.setAttribute("height", String(layer.height));
-          const ceiling = Math.max(graph[1] === "Frametime" ? 33 : 1, ...history);
+          const ceiling = Math.max(graph[1] === "Frametime" ? 33 : external ? 100 : 1, ...history);
           const points = history.map((value, index) =>
             `${index * layer.width / (history.length - 1)},${layer.height *
               (1 - Math.min(1, value / ceiling))}`).join(" ");
@@ -2204,7 +2210,7 @@
           shape.setAttribute("points", graph[2] === "81"
             ? `0,${layer.height} ${points} ${layer.width},${layer.height}` : points);
           shape.setAttribute(graph[2] === "81" ? "fill" : "stroke", paint(edit.textColor ?? layer.color, "#fff"));
-          if (graph[2] === "80") shape.setAttribute("fill", "none");
+          if (graph[2] !== "81") shape.setAttribute("fill", "none");
           svg.append(shape);
           node.replaceChildren(svg);
         }

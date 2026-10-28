@@ -509,6 +509,29 @@ bool MainWindow::smokeImportRtss(std::string_view package, std::string& error)
                 error = "RTSS-график с локальными данными не отрисован";
                 return false;
             }
+            OverlaySettings graphOnly = imported;
+            auto visual = std::make_shared<RtssVisualLayout>(*imported.rtssVisual);
+            bool foundMode80 = false;
+            for (std::size_t index = 0; index < visual->layers.size(); ++index) {
+                auto& layer = visual->layers[index];
+                const bool graph = layer.text.starts_with("<G=Frametime,") && layer.text.ends_with(",80>");
+                graphOnly.rtssLayerEdits[index].visible = graph && !foundMode80;
+                if (graph && !foundMode80) {
+                    layer.text.replace(layer.text.size() - 4, 4, ",10>");
+                    foundMode80 = true;
+                }
+            }
+            if (foundMode80) {
+                graphOnly.rtssVisual = std::move(visual);
+                m_overlay.setSettings(graphOnly);
+                m_overlay.repaint();
+                if (!m_overlay.hasVisiblePixels()) {
+                    error = "RTSS-график режима 10 без видимых подложек не отрисован";
+                    return false;
+                }
+                m_overlay.setSettings(imported);
+                m_overlay.repaint();
+            }
         }
         OverlaySettings hidden = imported;
         for (std::size_t index = 0; index < hidden.rtssVisual->layers.size(); ++index) {
