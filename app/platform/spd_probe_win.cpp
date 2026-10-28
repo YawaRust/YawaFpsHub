@@ -220,7 +220,7 @@ bool readCezanneDdr4Spd(unsigned address, Ddr4SpdProbeResult& result, std::strin
         error = "SPD second page or XMP metadata is incomplete or invalid.";
         return false;
     }
-    result = { *passport, *profiles };
+    result = { *passport, *profiles, decodeDdr4PartNumber(bytes) };
     return true;
 }
 

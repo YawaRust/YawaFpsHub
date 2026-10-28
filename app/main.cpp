@@ -184,6 +184,8 @@ int spdProbeCommandOutput(unsigned address)
             + std::to_string(result.passport.minimumCyclePs) + " ps";
         if (result.passport.moduleCapacityMiB)
             text += ", capacity " + std::to_string(*result.passport.moduleCapacityMiB) + " MiB";
+        if (result.partNumber)
+            text += ", module part number (unverified) " + *result.partNumber;
         text += ".\nXMP 2.0 passport: ";
         if (result.profiles.empty()) {
             text += "no signature";

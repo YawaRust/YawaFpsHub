@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace yawa {
@@ -98,6 +99,26 @@ inline std::optional<SpdIdentity> decodeSpdBase(std::span<const std::uint8_t> by
             static_cast<unsigned>(tRp), static_cast<unsigned>(tRas) };
     }
     return result;
+}
+
+// DDR4 manufacturing field 329..348 is NOT covered by either JEDEC CRC.
+// Treat it as an unverified label, never as a serial number or active profile.
+inline std::optional<std::string> decodeDdr4PartNumber(std::span<const std::uint8_t> bytes)
+{
+    if (bytes.size() != 512 || bytes[2] != 0x0c || (bytes[0] & 0x70u) != 0x20u || !decodeSpdBase(bytes)
+        || spdCrc16(bytes.subspan(128, 126)) != static_cast<unsigned>(bytes[254] | (bytes[255] << 8)))
+        return std::nullopt;
+    const auto field = bytes.subspan(329, 20);
+    if (field.front() == ' ' || !std::all_of(field.begin(), field.end(), [](std::uint8_t value) {
+            return value >= 0x20 && value <= 0x7e;
+        }))
+        return std::nullopt;
+    std::string part(field.begin(), field.end());
+    const auto last = part.find_last_not_of(' ');
+    if (last == std::string::npos)
+        return std::nullopt;
+    part.resize(last + 1);
+    return part;
 }
 
 struct Ddr4XmpProfile

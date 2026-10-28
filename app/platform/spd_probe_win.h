@@ -11,6 +11,7 @@ struct Ddr4SpdProbeResult
 {
     SpdIdentity passport;
     std::vector<Ddr4XmpProfile> profiles;
+    std::optional<std::string> partNumber; // Непроверенная подпись модуля, не серийный номер.
 };
 
 // Explicit CLI-only probe. Never returns raw SPD, manufacturing data or a claim

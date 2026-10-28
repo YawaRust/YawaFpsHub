@@ -87,6 +87,12 @@ void runSpdTests()
     CHECK(noXmp.has_value());
     if (noXmp)
         CHECK(noXmp->empty());
+    constexpr std::string_view part = "ABC-1234";
+    auto noXmpPart = full;
+    std::fill(noXmpPart.begin() + 329, noXmpPart.begin() + 349, std::uint8_t { ' ' });
+    std::transform(part.begin(), part.end(), noXmpPart.begin() + 329,
+        [](char value) { return static_cast<std::uint8_t>(value); });
+    CHECK(decodeDdr4PartNumber(noXmpPart) == part);
     std::fill(full.begin() + 256, full.end(), std::uint8_t { 0xff });
     CHECK(!decodeDdr4Xmp(full)); // Unreadable second page must not mean 'no XMP'.
     std::fill(full.begin() + 256, full.end(), std::uint8_t { 0 });
@@ -115,6 +121,27 @@ void runSpdTests()
     CHECK(!decodeDdr4Xmp(full));
     full[387] = 0x20;
     CHECK(!decodeDdr4Xmp(std::span<const std::uint8_t>(full.data(), 256)));
+
+    // The manufacturing label is outside both CRC-covered regions; malformed
+    // or truncated page-one bytes must never be printed as a part number.
+    CHECK(!decodeDdr4PartNumber(full));
+    std::fill(full.begin() + 329, full.begin() + 349, std::uint8_t { ' ' });
+    CHECK(!decodeDdr4PartNumber(full));
+    std::transform(part.begin(), part.end(), full.begin() + 329,
+        [](char value) { return static_cast<std::uint8_t>(value); });
+    CHECK(decodeDdr4PartNumber(full) == part);
+    CHECK(!decodeDdr4PartNumber(std::span<const std::uint8_t>(full.data(), 256)));
+    full[329] = 0xff;
+    CHECK(!decodeDdr4PartNumber(full));
+    full[329] = static_cast<std::uint8_t>('A');
+    full[331] = 0;
+    CHECK(!decodeDdr4PartNumber(full));
+    full[331] = static_cast<std::uint8_t>('C');
+    full[128] ^= 1;
+    CHECK(!decodeDdr4PartNumber(full));
+    full[128] ^= 1;
+    full[4] ^= 1;
+    CHECK(!decodeDdr4PartNumber(full));
 }
 
 } // namespace yawa::test
