@@ -887,7 +887,10 @@ body.is-compact .chart-wrap--frames canvas { height: 96px; }
 .editable-number__input { width: 68px; height: 26px; border: 1px solid var(--accent); border-radius: 6px; background: var(--panel-flat); color: var(--text); font: inherit; text-align: right; }
 @media (max-width: 1450px) { .overlay-workshop { grid-template-columns: 190px minmax(0, 1fr); } .workshop-inspector { grid-column: 2; } }
 @media (max-width: 900px) { .overlay-workshop { grid-template-columns: 1fr; } .workshop-inspector { grid-column: auto; } .workshop-layers__list { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); } }
-.workshop-nav #toggleCanvasWorkspace { flex: 0 0 auto; color: var(--accent); }
+.workshop-nav #toggleCanvasWorkspace,
+.workshop-nav #workshopImport,
+.workshop-nav #workshopExport { flex: 0 0 auto; color: var(--accent); }
+@media (max-width: 900px) { .workshop-nav { flex-wrap: wrap; } }
 .overlay-grid[data-focus="true"] > .workshop-recipes { display: none; }
 @media (min-width: 901px) {
   .overlay-grid[data-focus="true"] .overlay-workshop { grid-template-columns: 190px minmax(0, 1fr); }

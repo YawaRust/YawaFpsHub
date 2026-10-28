@@ -3143,6 +3143,8 @@
     if (button) showWorkshopSection(button.dataset.editorSection);
   });
   showWorkshopSection("assemble");
+  $("#workshopImport").addEventListener("click", () => $("#importOsdRecipeFile").click());
+  $("#workshopExport").addEventListener("click", () => $("#exportOsdRecipe").click());
   $("#toggleCanvasWorkspace").addEventListener("click", (event) => {
     const focused = $("#overlayGrid").dataset.focus !== "true";
     $("#overlayGrid").dataset.focus = String(focused);
