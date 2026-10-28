@@ -120,7 +120,18 @@ jobs:
           if (-not (Test-Path $exe)) {
             $fail = "нет YawaFpsHub.exe"
           } else {
+            $startup = [System.Diagnostics.Stopwatch]::StartNew()
             $process = Start-Process -FilePath $exe -ArgumentList "--smoke=22" -PassThru
+            $windowReady = $false
+            for ($i = 0; $i -lt 40; $i++) {
+              $process.Refresh()
+              if ($process.MainWindowHandle -ne [IntPtr]::Zero) { $windowReady = $true; break }
+              if ($process.HasExited) { break }
+              Start-Sleep -Milliseconds 100
+            }
+            $startup.Stop()
+            $diagnostics.Add("до главного окна с запуском процесса: " + $startup.ElapsedMilliseconds + " мс (Windows CI)")
+            if (-not $windowReady -and -not $fail) { $fail = "главное окно не появилось за 4 с" }
             Start-Sleep -Seconds 8
             $process.Refresh()
             $cpuBefore = $process.TotalProcessorTime.TotalSeconds
