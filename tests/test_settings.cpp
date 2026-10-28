@@ -900,6 +900,7 @@ namespace {
         CHECK(!saved.overlay.followGameMonitor && !saved.overlay.clickThrough);
         CHECK(gameProfileKey(L"Game.EXE") == "game.exe");
         CHECK(gameProfileKey(L"The Witcher 3.exe") == "the witcher 3.exe");
+        CHECK(gameProfileKey(L"Игра.exe") == "%000418%000433%000440%000430.exe");
         CHECK(gameProfileKey(L"../game.exe").empty());
         CHECK(gameProfileKey(L"game:bad.exe").empty());
         CHECK(gameProfileKey(L"game.txt").empty());

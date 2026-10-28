@@ -1179,13 +1179,24 @@ std::string gameProfileKey(std::wstring_view processName)
         return { };
     }
     std::string key;
+    constexpr char hex[] = "0123456789ABCDEF";
     for (wchar_t letter : processName) {
-        if (!((letter >= L'a' && letter <= L'z') || (letter >= L'A' && letter <= L'Z')
-                || (letter >= L'0' && letter <= L'9') || letter == L'_' || letter == L'-' || letter == L'.'
-                || letter == L' ')) {
+        if (letter > 127) {
+            key.push_back('%');
+            const auto code = static_cast<std::uint32_t>(letter);
+            for (int shift = 20; shift >= 0; shift -= 4) {
+                key.push_back(hex[(code >> shift) & 0xFu]);
+            }
+        } else if ((letter >= L'a' && letter <= L'z') || (letter >= L'A' && letter <= L'Z')
+            || (letter >= L'0' && letter <= L'9') || letter == L'_' || letter == L'-' || letter == L'.'
+            || letter == L' ') {
+            key.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(letter))));
+        } else {
             return { };
         }
-        key.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(letter))));
+        if (key.size() > 120) {
+            return { };
+        }
     }
     return key.ends_with(".exe") ? key : std::string { };
 }
