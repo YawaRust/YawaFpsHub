@@ -43,7 +43,7 @@ public:
     void toggle(std::string* error = nullptr);
     bool isVisible() const { return m_visible; }
     bool hasVisiblePixels() const;
-    bool isDragging() const { return m_dragging || m_resizing || m_layerDragging; }
+    bool isDragging() const { return m_dragging || m_resizing || m_layerDragging || m_rowDragging; }
 
     void repaint();
 
@@ -52,6 +52,8 @@ public:
     void setMoveHandler(std::function<void(int offsetX, int offsetY, bool finished)> handler);
     void setDirectEditHandler(std::function<void(int scale, int padding, int rowGap, bool finished)> handler);
     void setLayerEditHandler(std::function<void(std::size_t index, int x, int y, bool finished)> handler);
+    void setRowEditHandler(
+        std::function<void(MetricId id, OverlayRowPosition position, bool finished)> handler);
     // Окно приложения: правый клик по оверлею показывает его, чтобы не искать в трее.
     void setOwnerWindow(HWND owner) { m_owner = owner; }
 
@@ -81,6 +83,9 @@ private:
     int layerAt(int x, int y) const;
     void updateLayerDrag(int x, int y);
     void finishLayerDrag();
+    std::optional<MetricId> rowAt(int x, int y) const;
+    void updateRowDrag(int x, int y);
+    void finishRowDrag();
     void startAnimation(const OverlaySettings& from, bool fadeContent);
     void tickAnimation();
     OverlaySettings animatedSettings() const;
@@ -126,6 +131,13 @@ private:
     int m_layerStartX = 0;
     int m_layerStartY = 0;
     float m_layerDragScale = 1.0f;
+    std::function<void(MetricId, OverlayRowPosition, bool)> m_onRowEdit;
+    std::vector<OverlayRowBounds> m_rowBounds;
+    bool m_rowDragging = false;
+    MetricId m_rowDragId = MetricId::Fps;
+    POINT m_rowDragOrigin { };
+    OverlayRowPosition m_rowStart { };
+    float m_rowDragScale = 1.0f;
     bool m_resizing = false;
     POINT m_resizeOrigin{};
     int m_resizeScale = 100;

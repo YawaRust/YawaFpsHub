@@ -48,6 +48,12 @@ struct OverlaySwatch {
 
 OverlaySwatch overlaySwatch(OverlayStyle style);
 
+struct OverlayRowBounds
+{
+    MetricId id;
+    Rect rect;
+};
+
 // Ручные цвета оверлея: одна палитра на редактор и на отрисовку. Индекс -1 означает
 // «как в пресете», 0…5 — конкретный цвет.
 constexpr int kOverlayColorCount = 6;
@@ -57,6 +63,7 @@ std::array<Color, kOverlayColorCount> overlayColorPalette();
 // Один и тот же код рисует и настоящее окно поверх игры, и предпросмотр в настройках.
 Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, const Theme& theme,
     const OverlayText& text, const Rect& bounds, float scale, const OverlayFormats& formats,
-    std::vector<Rect>* rtssLayerBounds = nullptr, float* rtssLayerScale = nullptr);
+    std::vector<Rect>* rtssLayerBounds = nullptr, float* rtssLayerScale = nullptr,
+    std::vector<OverlayRowBounds>* rowBounds = nullptr);
 
 } // namespace yawa

@@ -1045,6 +1045,7 @@ body.is-compact .chart-wrap--frames canvas { height: 96px; }
   max-width: none;
 }
 
+.osd__padding-grip { position: absolute; z-index: 3; left: var(--osd-pad-x, 11px); top: var(--osd-pad-y, 9px); width: 11px; height: 11px; border: 1px solid var(--accent); border-radius: 3px; background: rgba(30, 45, 55, .85); cursor: nwse-resize; }
 #osdPreview.is-rtss-visual { padding: 0 !important; border: 0; background: none; box-shadow: none; backdrop-filter: none; }
 #osdPreview.is-rtss-visual > :not(.rtss-visual-canvas) { display: none; }
 .rtss-visual-canvas { position: relative; flex: none; overflow: hidden; }

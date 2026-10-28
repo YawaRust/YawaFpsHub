@@ -422,6 +422,18 @@ namespace {
         CHECK(target.left == previous.left && target.right == previous.right);
     }
 
+    void testDraggedRowKeepsColumnsAndClamps()
+    {
+        const OverlayRowPosition initial { 12, 252, 40 };
+        const OverlayRowPosition moved = moveOverlayRow(initial, 13, -7);
+        CHECK(moved.labelX == 25 && moved.valueX == 265 && moved.y == 33);
+        const OverlayRowPosition left = moveOverlayRow(initial, -999, -999);
+        CHECK(left.labelX == 0 && left.valueX == 240 && left.y == 0);
+        const OverlayRowPosition right = moveOverlayRow(initial, 999, 9999);
+        CHECK(right.labelX == 230 && right.valueX == 470 && right.y == 1490);
+        CHECK(moveOverlayRow({ 400, 100, 10 }, 999, 0).labelX == 470);
+    }
+
     void testOverlayAnchorMigration()
     {
         Settings settings;
@@ -1094,6 +1106,7 @@ void runSettingsTests()
     testDefaultsRoundTrip();
     testUnknownSensorFailureStaysUnknown();
     testCanvasCoordinatesSurviveZoom();
+    testDraggedRowKeepsColumnsAndClamps();
     testOverlayAnchorMigration();
     testOverlayCustomization();
     testOverlayCustomizationClamps();

@@ -1294,8 +1294,11 @@ OverlayText makeOverlayText(const OverlaySettings& settings, const MetricStore& 
 
 Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, const Theme& theme,
     const OverlayText& text, const Rect& bounds, float scale, const OverlayFormats& formats,
-    std::vector<Rect>* rtssLayerBounds, float* rtssLayerScale)
+    std::vector<Rect>* rtssLayerBounds, float* rtssLayerScale, std::vector<OverlayRowBounds>* rowBounds)
 {
+    if (rowBounds != nullptr) {
+        rowBounds->clear();
+    }
     if (rtssLayerScale != nullptr) {
         *rtssLayerScale = 1.0f;
     }
@@ -1509,9 +1512,13 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
     if (settings.pixelLayout && settings.layout == OverlayLayout::Plates && !text.ids.empty()) {
         spec.width = 520.0f;
         spec.height = 80.0f;
-        for (MetricId id : text.ids) {
-            const auto& row = settings.rowPositions[static_cast<std::size_t>(id)];
-            spec.height = std::max(spec.height, static_cast<float>((row.y >= 0 ? row.y : 12) + 30));
+        for (std::size_t i = 0; i < text.ids.size(); ++i) {
+            if (!rowShown(text, i)) {
+                continue;
+            }
+            const auto& row = settings.rowPositions[static_cast<std::size_t>(text.ids[i])];
+            spec.height = std::max(
+                spec.height, static_cast<float>((row.y >= 0 ? row.y : 12 + static_cast<int>(i) * 28) + 30));
         }
     }
     const bool hasSparkline = settings.showSparkline && text.sparklineHistory.size() >= 2
@@ -1569,6 +1576,12 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
                 : row.labelX < row.valueX                 ? std::min(row.labelX + 230, row.valueX - 8)
                                                           : 505;
             const int valueEnd = row.valueX < row.labelX ? row.labelX - 8 : 505;
+            if (rowBounds != nullptr) {
+                rowBounds->push_back(OverlayRowBounds { text.ids[i],
+                    Rect { left + fit * std::min(row.labelX, row.valueX) * scale, top + fit * (y - top),
+                        left + fit * std::max(labelEnd, valueEnd) * scale,
+                        top + fit * (y + 26.0f * scale - top) } });
+            }
             if (labelEnd > row.labelX) {
                 painter.text(text.labels[i],
                     Rect { frame.left + row.labelX * scale, y, frame.left + labelEnd * scale,

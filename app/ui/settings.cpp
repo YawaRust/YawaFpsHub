@@ -288,6 +288,13 @@ void enableOverlayPixelLayout(OverlaySettings& settings)
     settings.pixelLayout = true;
 }
 
+OverlayRowPosition moveOverlayRow(OverlayRowPosition start, int deltaX, int deltaY)
+{
+    const int dx = std::clamp(
+        deltaX, -std::min(start.labelX, start.valueX), 470 - std::max(start.labelX, start.valueX));
+    return { start.labelX + dx, start.valueX + dx, std::clamp(start.y + deltaY, 0, 1490) };
+}
+
 int scaledOverlayOffset(int offset, double sourceExtent, double targetExtent)
 {
     if (sourceExtent <= 0.0 || targetExtent <= 0.0) {

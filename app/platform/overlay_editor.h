@@ -36,6 +36,9 @@ private:
     void moveRtssLayer(int x, int y);
     int logicalCoordinate(int pixels) const;
     Rect plateOnCanvas() const;
+    Rect scaleGrip() const;
+    Rect paddingGrip() const;
+    void moveGrip(int x, int y);
     void preparePixelLayout();
     OverlayRowPosition canvasPosition(MetricId id) const;
     void editCoordinate(HWND field);
@@ -95,6 +98,11 @@ private:
     float m_rtssLayerScale = 1.0f;
     int m_rtssSelected = -1;
     bool m_rtssDragging = false;
+    bool m_scaleDragging = false;
+    bool m_paddingDragging = false;
+    int m_gripStart = 0;
+    float m_gripWidth = 1.0f;
+    float m_gripHeight = 1.0f;
     int m_rtssStartX = 0;
     int m_rtssStartY = 0;
     int m_rtssOffsetX = 0;

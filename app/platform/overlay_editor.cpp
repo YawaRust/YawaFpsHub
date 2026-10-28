@@ -32,6 +32,18 @@ namespace {
     constexpr int kControlIdY = 2004;
     constexpr std::array<std::wstring_view, 4> kSections { L"Собрать", L"Оформить", L"Текст", L"Строки" };
 
+    std::wstring rtssLayerName(std::string_view name)
+    {
+        const int length
+            = MultiByteToWideChar(1251, 0, name.data(), static_cast<int>(name.size()), nullptr, 0);
+        if (length <= 0) {
+            return { };
+        }
+        std::wstring result(static_cast<std::size_t>(length), L'\0');
+        MultiByteToWideChar(1251, 0, name.data(), static_cast<int>(name.size()), result.data(), length);
+        return result;
+    }
+
     float editorScale(HMONITOR monitor, float dpiScale)
     {
         MONITORINFO info { };
@@ -355,6 +367,13 @@ void OverlayEditor::syncFields()
     if (!m_model || !m_labelEdit) {
         return;
     }
+    const bool isRtss = m_rtssSelected >= 0 && static_cast<std::size_t>(m_rtssSelected) < rtssLayerCount();
+    for (HWND field : { m_labelEdit, m_labelX, m_valueX, m_y, m_alphaEdit, m_hexEdit }) {
+        ShowWindow(field, isRtss ? SW_HIDE : SW_SHOW);
+    }
+    if (isRtss) {
+        return;
+    }
     const OverlaySettings& settings = m_model->settings.overlay;
     const auto row = canvasPosition(m_selected);
     std::string label(metricInfo(m_selected).label);
@@ -435,7 +454,7 @@ void OverlayEditor::recordHistory()
 
 void OverlayEditor::restoreHistory(bool redo)
 {
-    if (m_dragging || m_panning) {
+    if (m_dragging || m_panning || m_rtssDragging || m_scaleDragging || m_paddingDragging) {
         return;
     }
     auto& source = redo ? m_redo : m_undo;
@@ -531,6 +550,49 @@ Rect OverlayEditor::plateOnCanvas() const
     const CanvasAxis vertical { m_canvas.top, m_panY, canvasScale() };
     return Rect { horizontal.toCanvas(m_screenPlate.left), vertical.toCanvas(m_screenPlate.top),
         horizontal.toCanvas(m_screenPlate.right), vertical.toCanvas(m_screenPlate.bottom) };
+}
+
+Rect OverlayEditor::scaleGrip() const
+{
+    const Rect plate = plateOnCanvas();
+    return { plate.right - 9.0f, plate.bottom - 9.0f, plate.right + 8.0f, plate.bottom + 8.0f };
+}
+
+Rect OverlayEditor::paddingGrip() const
+{
+    const auto& settings = m_model->settings.overlay;
+    if (settings.layout != OverlayLayout::Plates || settings.pixelLayout || rtssLayerCount() > 0) {
+        return { };
+    }
+    const Rect plate = plateOnCanvas();
+    const float unit = canvasScale() * settings.scalePercent / 100.0f;
+    const float offset = (settings.paddingPx < 0 ? 10.0f : static_cast<float>(settings.paddingPx)) * unit;
+    return { plate.left + offset - 6.0f, plate.top + offset - 6.0f, plate.left + offset + 7.0f,
+        plate.top + offset + 7.0f };
+}
+
+void OverlayEditor::moveGrip(int x, int y)
+{
+    auto& settings = m_model->settings.overlay;
+    if (m_scaleDragging) {
+        const float dx = static_cast<float>(x - m_dragStartX) / std::max(1.0f, m_gripWidth);
+        const float dy = static_cast<float>(y - m_dragStartY) / std::max(1.0f, m_gripHeight);
+        const int next
+            = std::clamp(static_cast<int>(std::lround(m_gripStart * (1.0f + (dx + dy) / 2.0f))), 70, 160);
+        if (next != settings.scalePercent) {
+            settings.scalePercent = next;
+            changed(false);
+        }
+    } else if (m_paddingDragging) {
+        const float unit = std::max(0.001f, canvasScale() * settings.scalePercent / 100.0f);
+        const int delta
+            = static_cast<int>(std::lround(((x - m_dragStartX) + (y - m_dragStartY)) / (2.0f * unit)));
+        const int next = std::clamp(m_gripStart + delta, 0, 28);
+        if (next != settings.paddingPx) {
+            settings.paddingPx = next;
+            changed(false);
+        }
+    }
 }
 
 void OverlayEditor::move(int x, int y)
@@ -701,6 +763,14 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
                 cursor.x = logicalCoordinate(cursor.x);
                 cursor.y = logicalCoordinate(cursor.y);
                 if (m_canvas.contains(static_cast<float>(cursor.x), static_cast<float>(cursor.y))
+                    && m_screenPlate.width() > 0.0f && m_screenPlate.height() > 0.0f
+                    && (scaleGrip().contains(static_cast<float>(cursor.x), static_cast<float>(cursor.y))
+                        || paddingGrip().contains(
+                            static_cast<float>(cursor.x), static_cast<float>(cursor.y)))) {
+                    SetCursor(LoadCursorW(nullptr, IDC_SIZENWSE));
+                    return TRUE;
+                }
+                if (m_canvas.contains(static_cast<float>(cursor.x), static_cast<float>(cursor.y))
                     && (GetKeyState(VK_SPACE) < 0 || m_panning
                         || plateOnCanvas().contains(
                             static_cast<float>(cursor.x), static_cast<float>(cursor.y)))) {
@@ -825,6 +895,11 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
     }
     case WM_COMMAND: {
         const HWND field = reinterpret_cast<HWND>(lParam);
+        if (m_rtssSelected >= 0
+            && (field == m_labelEdit || field == m_labelX || field == m_valueX || field == m_y
+                || field == m_alphaEdit || field == m_hexEdit)) {
+            return 0;
+        }
         if (field == m_catalogSearch && HIWORD(wParam) == EN_CHANGE) {
             m_catalogScroll = 0;
             refresh();
@@ -1004,8 +1079,11 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
             if (y >= m_layers.top + 34 && index >= firstRtss
                 && index < firstRtss + static_cast<int>(rtssLayerCount())) {
                 m_rtssSelected = index - firstRtss;
+                m_model->editingLabel = -1;
+                syncFields();
                 if (x < m_layers.left + 37.0f) {
-                    auto& edit = m_model->settings.overlay.rtssLayerEdits[static_cast<std::size_t>(m_rtssSelected)];
+                    auto& edit
+                        = m_model->settings.overlay.rtssLayerEdits[static_cast<std::size_t>(m_rtssSelected)];
                     edit.visible = !edit.visible;
                     changed(true);
                 } else {
@@ -1052,6 +1130,33 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
         if (m_inspector.contains(static_cast<float>(x), static_cast<float>(y))) {
             const int localX = x - static_cast<int>(m_inspector.left);
             const int localY = y - static_cast<int>(m_inspector.top);
+            if (m_rtssSelected >= 0 && static_cast<std::size_t>(m_rtssSelected) < rtssLayerCount()) {
+                auto& edit
+                    = m_model->settings.overlay.rtssLayerEdits[static_cast<std::size_t>(m_rtssSelected)];
+                if (localY < 35 && localX > 278) {
+                    if (localX > 405) {
+                        edit.visible = !edit.visible;
+                    } else {
+                        edit.x = edit.y = 0;
+                    }
+                    changed(true);
+                } else if (localY >= 112 && localY <= 148 && localX >= 12 && localX < 405) {
+                    const int direction = (localX - 12) / 98;
+                    const int step = GetKeyState(VK_SHIFT) < 0 ? 10 : 1;
+                    edit.x = std::clamp(edit.x
+                            + (direction == 0        ? -step
+                                    : direction == 1 ? step
+                                                     : 0),
+                        -2048, 2048);
+                    edit.y = std::clamp(edit.y
+                            + (direction == 2        ? -step
+                                    : direction == 3 ? step
+                                                     : 0),
+                        -2048, 2048);
+                    changed(true);
+                }
+                return 0;
+            }
             if (localY < 35 && localX > 278) {
                 if (localX > 405) {
                     auto& settings = m_model->settings.overlay;
@@ -1115,6 +1220,22 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
                 SetCapture(m_window);
                 return 0;
             }
+            if (m_screenPlate.width() > 0.0f && m_screenPlate.height() > 0.0f
+                && (scaleGrip().contains(static_cast<float>(x), static_cast<float>(y))
+                    || paddingGrip().contains(static_cast<float>(x), static_cast<float>(y)))) {
+                m_scaleDragging = scaleGrip().contains(static_cast<float>(x), static_cast<float>(y));
+                m_paddingDragging = !m_scaleDragging;
+                m_dragStartX = x;
+                m_dragStartY = y;
+                m_gripStart = m_scaleDragging                 ? m_model->settings.overlay.scalePercent
+                    : m_model->settings.overlay.paddingPx < 0 ? 10
+                                                              : m_model->settings.overlay.paddingPx;
+                m_gripWidth = plateOnCanvas().width();
+                m_gripHeight = plateOnCanvas().height();
+                SetFocus(m_window);
+                SetCapture(m_window);
+                return 0;
+            }
             const CanvasAxis horizontal { m_canvas.left, m_panX, canvasScale() };
             const CanvasAxis vertical { m_canvas.top, m_panY, canvasScale() };
             for (std::size_t index = m_rtssLayerRects.size(); index > 0; --index) {
@@ -1123,6 +1244,8 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
                     horizontal.toCanvas(box.right), vertical.toCanvas(box.bottom) };
                 if (box.right > box.left && onCanvas.contains(static_cast<float>(x), static_cast<float>(y))) {
                     m_rtssSelected = static_cast<int>(index - 1);
+                    m_model->editingLabel = -1;
+                    syncFields();
                     m_rtssDragging = true;
                     m_rtssStartX = x;
                     m_rtssStartY = y;
@@ -1272,6 +1395,8 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
         const int y = logicalCoordinate(GET_Y_LPARAM(lParam));
         if (m_rtssDragging) {
             moveRtssLayer(x, y);
+        } else if (m_scaleDragging || m_paddingDragging) {
+            moveGrip(x, y);
         } else if (m_panning) {
             m_panX = m_panStartLeft + x - m_panStartX;
             m_panY = m_panStartTop + y - m_panStartY;
@@ -1303,6 +1428,13 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
                 ReleaseCapture();
                 return 0;
             }
+            if (m_scaleDragging || m_paddingDragging) {
+                moveGrip(x, y);
+                m_scaleDragging = m_paddingDragging = false;
+                changed(true);
+                ReleaseCapture();
+                return 0;
+            }
             if (m_panning) {
                 m_panning = false;
                 ReleaseCapture();
@@ -1328,8 +1460,8 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
         break;
     }
     case WM_CAPTURECHANGED:
-        if (m_rtssDragging) {
-            m_rtssDragging = false;
+        if (m_rtssDragging || m_scaleDragging || m_paddingDragging) {
+            m_rtssDragging = m_scaleDragging = m_paddingDragging = false;
             changed(true);
         }
         return 0;
@@ -1478,9 +1610,8 @@ void OverlayEditor::paint()
             const std::size_t layerIndex = index - rows.size() - hidden.size();
             const auto& layer = m_model->settings.overlay.rtssVisual->layers[layerIndex];
             const bool shown = m_model->settings.overlay.rtssLayerEdits[layerIndex].visible;
-            const std::wstring label = layer.name.empty()
-                ? L"RTSS · слой " + std::to_wstring(layerIndex)
-                : L"RTSS · " + widen(layer.name);
+            const std::wstring label = layer.name.empty() ? L"RTSS · слой " + std::to_wstring(layerIndex)
+                                                          : L"RTSS · " + rtssLayerName(layer.name);
             m_renderer.fillRoundRect(row, 5.0f,
                 static_cast<int>(layerIndex) == m_rtssSelected ? theme.accentSoft : theme.panelSoft);
             m_renderer.text(shown ? L"◉" : L"○",
@@ -1535,7 +1666,7 @@ void OverlayEditor::paint()
                 horizontal.toCanvas(box.right), vertical.toCanvas(box.bottom) }, 3.0f, theme.accent, 1.5f);
         }
     }
-    if (m_model->settings.overlay.layout == OverlayLayout::Plates) {
+    if (m_rtssSelected < 0 && m_model->settings.overlay.layout == OverlayLayout::Plates) {
         const Rect plate = plateOnCanvas();
         const float rowScale = screenScale * m_model->settings.overlay.scalePercent / 100.0f;
         for (const auto& entry : rows) {
@@ -1568,51 +1699,96 @@ void OverlayEditor::paint()
                 Rect { left, top, right, bottom }, 4.0f, theme.accent.withAlpha(0.3f), 1.0f);
         }
     }
+    if (m_screenPlate.width() > 0.0f && m_screenPlate.height() > 0.0f) {
+        m_renderer.fillRoundRect(scaleGrip(), 4.0f, theme.accent);
+        m_renderer.strokeRoundRect(scaleGrip(), 4.0f, theme.background, 1.0f);
+        const Rect padding = paddingGrip();
+        if (padding.right > padding.left) {
+            m_renderer.fillRoundRect(padding, 3.0f, theme.accentSoft);
+            m_renderer.strokeRoundRect(padding, 3.0f, theme.accent, 1.5f);
+        }
+    }
     m_renderer.popClip();
     m_renderer.strokeRoundRect(m_canvas, 10.0f, theme.line);
 
     m_renderer.fillRoundRect(m_inspector, 10.0f, theme.panel);
-    const std::wstring title
-        = rows.empty() ? L"Добавьте показатель через «+ Датчик»" : widen(metricInfo(m_selected).label);
-    m_renderer.text(clipText(m_renderer, title, TextRole::Heading, 280.0f),
-        Rect { 32.0f, m_inspector.top + 7.0f, 320.0f, m_inspector.top + 34.0f }, TextRole::Heading,
-        theme.text);
-    m_renderer.text(L"Сбросить имя", Rect { 320.0f, m_inspector.top + 9.0f, 425.0f, m_inspector.top + 32.0f },
-        TextRole::Tiny, theme.accent);
-    m_renderer.text(L"Скрыть", Rect { 434.0f, m_inspector.top + 9.0f, 508.0f, m_inspector.top + 32.0f },
-        TextRole::Tiny, theme.warn);
-    m_renderer.text(L"Подпись", Rect { 32.0f, m_inspector.top + 46.0f, 103.0f, m_inspector.top + 67.0f },
-        TextRole::Small, theme.textDim);
-    m_renderer.text(L"RGBA", Rect { 32.0f, m_inspector.top + 72.0f, 103.0f, m_inspector.top + 92.0f },
-        TextRole::Tiny, theme.textDim);
-    m_renderer.text(L"X подписи", Rect { 32.0f, m_inspector.top + 96.0f, 106.0f, m_inspector.top + 119.0f },
-        TextRole::Tiny, theme.textDim);
-    m_renderer.text(L"X значения", Rect { 182.0f, m_inspector.top + 96.0f, 276.0f, m_inspector.top + 119.0f },
-        TextRole::Tiny, theme.textDim);
-    m_renderer.text(L"Y", Rect { 380.0f, m_inspector.top + 96.0f, 403.0f, m_inspector.top + 119.0f },
-        TextRole::Tiny, theme.textDim);
-    const auto palette = overlayColorPalette();
-    const int selectedColor = m_model->settings.overlay.metricColors[static_cast<std::size_t>(m_selected)];
-    for (int n = -1; n < kOverlayColorCount; ++n) {
-        const float x = 40.0f + static_cast<float>(n + 1) * 56.0f;
-        const Rect chip { x, m_inspector.top + 137.0f, x + 30.0f, m_inspector.top + 167.0f };
-        m_renderer.fillRoundRect(chip, 8.0f, n < 0 ? theme.panelSoft : palette[static_cast<std::size_t>(n)]);
-        if (n == selectedColor) {
-            m_renderer.strokeRoundRect(chip, 8.0f, theme.accent, 2.0f);
+    if (m_rtssSelected >= 0 && static_cast<std::size_t>(m_rtssSelected) < rtssLayerCount()) {
+        const std::size_t index = static_cast<std::size_t>(m_rtssSelected);
+        const auto& layer = m_model->settings.overlay.rtssVisual->layers[index];
+        const auto& edit = m_model->settings.overlay.rtssLayerEdits[index];
+        const std::wstring name
+            = layer.name.empty() ? L"Слой " + std::to_wstring(index) : rtssLayerName(layer.name);
+        m_renderer.text(clipText(m_renderer, L"RTSS · " + name, TextRole::Heading, 280.0f),
+            Rect { 32.0f, m_inspector.top + 7.0f, 316.0f, m_inspector.top + 34.0f }, TextRole::Heading,
+            theme.text);
+        m_renderer.text(L"Сбросить сдвиг",
+            Rect { 318.0f, m_inspector.top + 9.0f, 425.0f, m_inspector.top + 32.0f }, TextRole::Tiny,
+            theme.accent);
+        m_renderer.text(edit.visible ? L"Скрыть" : L"Показать",
+            Rect { 434.0f, m_inspector.top + 9.0f, 508.0f, m_inspector.top + 32.0f }, TextRole::Tiny,
+            theme.warn);
+        m_renderer.text(L"X: " + std::to_wstring(edit.x) + L" px     Y: " + std::to_wstring(edit.y) + L" px",
+            Rect { 32.0f, m_inspector.top + 48.0f, 400.0f, m_inspector.top + 76.0f }, TextRole::Small,
+            theme.text);
+        m_renderer.text(L"Позиция изменяет только вид в Yawa; исходный пакет RTSS не меняется.",
+            Rect { 32.0f, m_inspector.top + 78.0f, 506.0f, m_inspector.top + 103.0f }, TextRole::Tiny,
+            theme.textDim);
+        const std::array<std::wstring_view, 4> directions { L"←", L"→", L"↑", L"↓" };
+        for (int direction = 0; direction < 4; ++direction) {
+            const float left = 32.0f + static_cast<float>(direction) * 98.0f;
+            const Rect button { left, m_inspector.top + 112.0f, left + 92.0f, m_inspector.top + 148.0f };
+            m_renderer.fillRoundRect(button, 6.0f, theme.panelSoft);
+            m_renderer.text(directions[static_cast<std::size_t>(direction)], button, TextRole::Small,
+                theme.accent, TextAlign::Center);
         }
-        if (n < 0) {
-            m_renderer.text(L"А", chip, TextRole::Small, theme.text, TextAlign::Center);
+    } else {
+        const std::wstring title
+            = rows.empty() ? L"Добавьте показатель через «+ Датчик»" : widen(metricInfo(m_selected).label);
+        m_renderer.text(clipText(m_renderer, title, TextRole::Heading, 280.0f),
+            Rect { 32.0f, m_inspector.top + 7.0f, 320.0f, m_inspector.top + 34.0f }, TextRole::Heading,
+            theme.text);
+        m_renderer.text(L"Сбросить имя",
+            Rect { 320.0f, m_inspector.top + 9.0f, 425.0f, m_inspector.top + 32.0f }, TextRole::Tiny,
+            theme.accent);
+        m_renderer.text(L"Скрыть", Rect { 434.0f, m_inspector.top + 9.0f, 508.0f, m_inspector.top + 32.0f },
+            TextRole::Tiny, theme.warn);
+        m_renderer.text(L"Подпись", Rect { 32.0f, m_inspector.top + 46.0f, 103.0f, m_inspector.top + 67.0f },
+            TextRole::Small, theme.textDim);
+        m_renderer.text(L"RGBA", Rect { 32.0f, m_inspector.top + 72.0f, 103.0f, m_inspector.top + 92.0f },
+            TextRole::Tiny, theme.textDim);
+        m_renderer.text(L"X подписи",
+            Rect { 32.0f, m_inspector.top + 96.0f, 106.0f, m_inspector.top + 119.0f }, TextRole::Tiny,
+            theme.textDim);
+        m_renderer.text(L"X значения",
+            Rect { 182.0f, m_inspector.top + 96.0f, 276.0f, m_inspector.top + 119.0f }, TextRole::Tiny,
+            theme.textDim);
+        m_renderer.text(L"Y", Rect { 380.0f, m_inspector.top + 96.0f, 403.0f, m_inspector.top + 119.0f },
+            TextRole::Tiny, theme.textDim);
+        const auto palette = overlayColorPalette();
+        const int selectedColor
+            = m_model->settings.overlay.metricColors[static_cast<std::size_t>(m_selected)];
+        for (int n = -1; n < kOverlayColorCount; ++n) {
+            const float x = 40.0f + static_cast<float>(n + 1) * 56.0f;
+            const Rect chip { x, m_inspector.top + 137.0f, x + 30.0f, m_inspector.top + 167.0f };
+            m_renderer.fillRoundRect(
+                chip, 8.0f, n < 0 ? theme.panelSoft : palette[static_cast<std::size_t>(n)]);
+            if (n == selectedColor) {
+                m_renderer.strokeRoundRect(chip, 8.0f, theme.accent, 2.0f);
+            }
+            if (n < 0) {
+                m_renderer.text(L"А", chip, TextRole::Small, theme.text, TextAlign::Center);
+            }
         }
+        const auto custom = m_model->settings.overlay.metricRgba[static_cast<std::size_t>(m_selected)];
+        m_renderer.text(L"α %", Rect { 471.0f, m_inspector.top + 122.0f, 519.0f, m_inspector.top + 138.0f },
+            TextRole::Tiny, theme.textDim, TextAlign::Center);
+        const Rect picker { 430.0f, m_inspector.top + 138.0f, 470.0f, m_inspector.top + 165.0f };
+        m_renderer.fillRoundRect(
+            picker, 6.0f, custom ? fromRgba((*custom >> 8) | ((*custom & 0xFFu) << 24)) : theme.panelSoft);
+        m_renderer.strokeRoundRect(picker, 6.0f, theme.line, 1.0f);
+        m_renderer.text(
+            L"RGB", picker, TextRole::Tiny, custom ? theme.background : theme.accent, TextAlign::Center);
     }
-    const auto custom = m_model->settings.overlay.metricRgba[static_cast<std::size_t>(m_selected)];
-    m_renderer.text(L"α %", Rect { 471.0f, m_inspector.top + 122.0f, 519.0f, m_inspector.top + 138.0f },
-        TextRole::Tiny, theme.textDim, TextAlign::Center);
-    const Rect picker { 430.0f, m_inspector.top + 138.0f, 470.0f, m_inspector.top + 165.0f };
-    m_renderer.fillRoundRect(
-        picker, 6.0f, custom ? fromRgba((*custom >> 8) | ((*custom & 0xFFu) << 24)) : theme.panelSoft);
-    m_renderer.strokeRoundRect(picker, 6.0f, theme.line, 1.0f);
-    m_renderer.text(
-        L"RGB", picker, TextRole::Tiny, custom ? theme.background : theme.accent, TextAlign::Center);
 
     if (width >= 1200.0f) {
         m_renderer.text(L"Оформление · шрифт · подписи · датчики",

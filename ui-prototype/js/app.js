@@ -1371,6 +1371,8 @@
     osd.style.padding = overlayState.padding === null
       ? ""
       : `${overlayState.padding}px ${overlayState.padding + 2}px`;
+    osd.style.setProperty("--osd-pad-x", `${(overlayState.padding ?? 9) + 2}px`);
+    osd.style.setProperty("--osd-pad-y", `${overlayState.padding ?? 9}px`);
     osd.style.rowGap = overlayState.rowGap === null ? "" : `${overlayState.rowGap}px`;
 
     // Цвета по элементам: значения и подписи независимо от пресета.
@@ -1662,6 +1664,14 @@
     osd.addEventListener("pointerdown", (event) => {
       if (event.button !== 0) return;
       const rect = osd.getBoundingClientRect();
+      if (event.target.closest(".osd__padding-grip") && overlayState.recipe !== "rtss") {
+        drag = { padding: true, x: event.clientX, y: event.clientY,
+          start: overlayState.padding ?? 9, unit: rect.width / Math.max(1, osd.offsetWidth) };
+        overlayHistory.gesture = true;
+        osd.setPointerCapture(event.pointerId);
+        event.preventDefault();
+        return;
+      }
       if (rect.width >= 60 && rect.height >= 45 && event.clientX >= rect.right - 16
         && event.clientY >= rect.bottom - 16) {
         drag = { resize: true, x: event.clientX, y: event.clientY,
@@ -1718,6 +1728,13 @@
 
     osd.addEventListener("pointermove", (event) => {
       if (!drag) return;
+      if (drag.padding) {
+        const unit = Math.max(.001, drag.unit);
+        overlayState.padding = Math.max(0, Math.min(28,
+          Math.round(drag.start + ((event.clientX - drag.x) + (event.clientY - drag.y)) / (2 * unit))));
+        applyOverlay();
+        return;
+      }
       if (drag.rtss !== undefined) {
         const plate = osd.getBoundingClientRect();
         const unit = Math.max(.001, plate.width / Math.max(1, osd.offsetWidth) * rtssVisual.zoom);

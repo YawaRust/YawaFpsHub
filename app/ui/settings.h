@@ -242,6 +242,7 @@ std::string overlayRgbaHex(std::uint32_t rgba);
 Settings defaultSettings();
 void moveOverlayMetric(OverlaySettings& settings, MetricId moved, MetricId before);
 void enableOverlayPixelLayout(OverlaySettings& settings);
+OverlayRowPosition moveOverlayRow(OverlayRowPosition start, int deltaX, int deltaY);
 // Перевод смещения между экраном и сценой редактора (обе стороны используют одни размеры).
 int scaledOverlayOffset(int offset, double sourceExtent, double targetExtent);
 void setOverlayMetricLabel(OverlaySettings& settings, MetricId id, std::string label);
