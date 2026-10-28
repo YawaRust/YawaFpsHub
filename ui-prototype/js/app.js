@@ -420,7 +420,9 @@
   function renderOverlayLayers() {
     const host = $("#osdLayers");
     host.replaceChildren();
-    for (const [id, entry] of sensorRows) {
+    const primary = [...overlayState.metricOrder, ...sensorRows.keys()];
+    const ordered = [...sensorRows].sort((a, b) => primary.indexOf(a[0]) - primary.indexOf(b[0]));
+    for (const [id, entry] of ordered) {
       if (entry.sensor.pinned) displayedLayers.add(id);
       if (!displayedLayers.has(id)) continue;
       const row = document.createElement("div");
@@ -1741,19 +1743,15 @@
         return;
       }
       if (row) {
-        if (!selected.has(row.dataset.osdItem)) {
-          selected.clear();
-          selected.add(row.dataset.osdItem);
-        }
+        selected.clear();
+        selected.add(row.dataset.osdItem);
         markRows();
-      } else freeOverlayAnchor();
-      drag = {
-        x: event.clientX, y: event.clientY, row,
-        rows: row ? [...selected].map((key) => ({ key,
-          x: overlayState.rowPositions[key]?.x || 0,
-          y: overlayState.rowPositions[key]?.y || 0 })) : [],
-        originX: overlayState.originX, originY: overlayState.originY
-      };
+        drag = { reorder: row };
+      } else {
+        freeOverlayAnchor();
+        drag = { x: event.clientX, y: event.clientY,
+          originX: overlayState.originX, originY: overlayState.originY };
+      }
       overlayHistory.gesture = true;
       guides.classList.add("is-active");
       osd.setPointerCapture(event.pointerId);
@@ -1789,60 +1787,41 @@
         syncOsdControls();
         return;
       }
+      if (drag.reorder) {
+        const target = document.elementFromPoint(event.clientX, event.clientY)?.closest(".osd__row");
+        if (!target || target === drag.reorder || !osd.contains(target)) return;
+        const rows = [...osd.querySelectorAll(".osd__row")];
+        if (rows.indexOf(drag.reorder) < rows.indexOf(target)) target.after(drag.reorder);
+        else target.before(drag.reorder);
+        overlayState.metricOrder = [...osd.querySelectorAll(".osd__row")]
+          .map((item) => item.querySelector("[data-metric]")?.dataset.metric).filter(Boolean);
+        applyOverlay();
+        return;
+      }
       const screen = osd.offsetParent.getBoundingClientRect();
       const plate = osd.getBoundingClientRect();
-      if (drag.row) {
-        const scale = plate.width / Math.max(1, osd.offsetWidth);
-        const primary = drag.rows.find((item) => item.key === drag.row.dataset.osdItem);
-        let nextX = primary.x + (event.clientX - drag.x) / scale;
-        let nextY = primary.y + (event.clientY - drag.y) / scale;
-        let guideY = null;
-        if (event.shiftKey) {
-          nextX = grid(nextX);
-          nextY = grid(nextY);
-        } else {
-          const others = [...osd.querySelectorAll(".osd__row:not(.is-hidden)")]
-            .filter((item) => !selected.has(item.dataset.osdItem));
-          const baseline = others.map((item) => item.offsetTop
-            + (overlayState.rowPositions[item.dataset.osdItem]?.y || 0) - drag.row.offsetTop);
-          const snapped = snap(nextY, 0, baseline);
-          nextY = snapped.value;
-          guideY = snapped.guide;
-        }
-        const dx = nextX - primary.x;
-        const dy = nextY - primary.y;
-        drag.rows.forEach((item) => {
-          const position = { x: item.x + dx, y: item.y + dy };
-          overlayState.rowPositions[item.key] = position;
-          const node = osd.querySelector(`[data-osd-item="${item.key}"]`);
-          if (node) node.style.translate = `${position.x}px ${position.y}px`;
-        });
-        showGuide("x", null);
-        showGuide("y", guideY === null ? null : (plate.top - screen.top) / canvasView.zoom
-          + (drag.row.offsetTop + guideY) * (scale / canvasView.zoom));
-      } else {
-        const width = screen.width / canvasView.zoom;
-        const height = screen.height / canvasView.zoom;
-        const plateWidth = plate.width / canvasView.zoom;
-        const plateHeight = plate.height / canvasView.zoom;
-        let x = drag.originX + (event.clientX - drag.x) / canvasView.zoom;
-        let y = drag.originY + (event.clientY - drag.y) / canvasView.zoom;
-        const xSnap = event.shiftKey ? { value: grid(x), guide: null }
-          : snap(x, plateWidth, [0, width * .05, width / 2, width * .95, width]);
-        const ySnap = event.shiftKey ? { value: grid(y), guide: null }
-          : snap(y, plateHeight, [0, height * .05, height / 2, height * .95, height]);
-        x = Math.max(0, Math.min(width - plateWidth, xSnap.value));
-        y = Math.max(0, Math.min(height - plateHeight, ySnap.value));
-        overlayState.originX = x;
-        overlayState.originY = y;
-        showGuide("x", xSnap.guide);
-        showGuide("y", ySnap.guide);
-        applyOverlay();
-      }
+      const width = screen.width / canvasView.zoom;
+      const height = screen.height / canvasView.zoom;
+      const plateWidth = plate.width / canvasView.zoom;
+      const plateHeight = plate.height / canvasView.zoom;
+      let x = drag.originX + (event.clientX - drag.x) / canvasView.zoom;
+      let y = drag.originY + (event.clientY - drag.y) / canvasView.zoom;
+      const xSnap = event.shiftKey ? { value: grid(x), guide: null }
+        : snap(x, plateWidth, [0, width * .05, width / 2, width * .95, width]);
+      const ySnap = event.shiftKey ? { value: grid(y), guide: null }
+        : snap(y, plateHeight, [0, height * .05, height / 2, height * .95, height]);
+      x = Math.max(0, Math.min(width - plateWidth, xSnap.value));
+      y = Math.max(0, Math.min(height - plateHeight, ySnap.value));
+      overlayState.originX = x;
+      overlayState.originY = y;
+      showGuide("x", xSnap.guide);
+      showGuide("y", ySnap.guide);
+      applyOverlay();
     });
 
     const release = (event) => {
       if (!drag) return;
+      const reordered = Boolean(drag.reorder);
       if (drag.rtss !== undefined) store.write("rtssLayerEdits", JSON.stringify(overlayState.rtssLayerEdits));
       drag = null;
       overlayHistory.gesture = false;
@@ -1852,6 +1831,7 @@
       showGuide("y", null);
       osd.classList.remove("is-dragging", "is-resizing");
       if (osd.hasPointerCapture(event.pointerId)) osd.releasePointerCapture(event.pointerId);
+      if (reordered) rebuildOverlaySensors();
     };
     osd.addEventListener("pointerup", release);
     osd.addEventListener("pointercancel", release);
