@@ -41,6 +41,7 @@ enum class ActionKind : std::uint8_t {
     ToggleCompact,
     ToggleTray,
     OpenSettingsFolder,
+    ShowChangelog,
     ResetSettings,
     SetScale,
     SetOpacity,

@@ -18,7 +18,7 @@ constexpr float kDashboardHeight = 1156.0f;
 // Узкое окно: сетка из трёх колонок не читается, карточки идут по одной.
 constexpr float kDashboardNarrowWidth = 900.0f;
 constexpr float kDashboardNarrowHeight = 2562.0f;
-constexpr float kSettingsHeight = 1882.0f;
+constexpr float kSettingsHeight = 1926.0f;
 constexpr float kOverlayHeight = 2422.0f;
 
 

@@ -2,6 +2,7 @@
 #include "metrics/overlay_metric.h"
 #include "metrics/report_frame.h"
 #include "platform/app_paths.h"
+#include "platform/changelog_win.h"
 #include "platform/display_info.h"
 #include "platform/hardware_info_win.h"
 #include "platform/overlay_monitor.h"
@@ -1476,6 +1477,12 @@ void MainWindow::applyAction(const UiHit& hit)
 
     case ActionKind::OpenSettingsFolder:
         revealInExplorer(dataDirectory());
+        break;
+
+    case ActionKind::ShowChangelog:
+        if (!openEmbeddedChangelog(m_window)) {
+            MessageBoxW(m_window, L"Встроенный список изменений недоступен.", L"YawaFpsHub", MB_OK | MB_ICONWARNING);
+        }
         break;
 
     case ActionKind::ResetSettings:

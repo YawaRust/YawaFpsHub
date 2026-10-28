@@ -256,11 +256,14 @@ void drawAboutCard(Renderer& renderer, const AppModel& model, const Theme& theme
         top += 24.0f;
     }
 
-    if (model.gpuNames.size() > 1 && top + 30.0f <= inner.bottom) {
+    if (model.gpuNames.size() > 1 && top + 30.0f <= inner.bottom - 36.0f) {
         const Rect picker{ inner.left, top + 4.0f, inner.left + 190.0f, top + 34.0f };
         drawChip(renderer, picker, L"Следующий адаптер", false, theme);
         hits.push_back(UiHit{ picker, ActionKind::CycleGpu, 0 });
     }
+    const Rect changelog{ inner.left, inner.bottom - 30.0f, inner.left + 190.0f, inner.bottom - 2.0f };
+    drawChip(renderer, changelog, L"Что нового", false, theme);
+    hits.push_back(UiHit{ changelog, ActionKind::ShowChangelog, 0 });
 }
 
 void drawHotkeyCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card,
@@ -376,7 +379,7 @@ void drawSettings(Renderer& renderer, const AppModel& model, const Theme& theme,
         place(260.0f), [&](const Rect& card) { drawSourcesCard(renderer, model, theme, card, hits); });
     drawClipped(place(262.0f), [&](const Rect& card) { drawHotkeyCard(renderer, model, theme, card, hits); });
     drawClipped(place(316.0f), [&](const Rect& card) { drawPortableCard(renderer, model, theme, card, hits); });
-    drawClipped(place(200.0f), [&](const Rect& card) { drawAboutCard(renderer, model, theme, card, hits); });
+    drawClipped(place(244.0f), [&](const Rect& card) { drawAboutCard(renderer, model, theme, card, hits); });
 }
 
 } // namespace yawa

@@ -2015,6 +2015,10 @@ body.is-paused .tag--live { color: var(--warn); border-color: rgba(255, 179, 71,
 .balance__gpus li:last-child, .balance__monitors li:last-child { border-bottom: 0; }
 .balance__gpus span, .balance__monitors span { display: block; margin-top: 3px; font-size: 9.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-faint); }
 .balance__gpus b.is-active { color: var(--accent); }
+.changelog-preview { margin-top: 16px; font-size: 11.5px; color: var(--text-dim); }
+.changelog-preview summary { display: inline-flex; cursor: pointer; list-style: none; }
+.changelog-preview summary::-webkit-details-marker { display: none; }
+.changelog-preview p { line-height: 1.5; margin: 10px 0 0; }
 .balance__modules li { display: flex; gap: 10px; justify-content: space-between; font-size: 11.5px; color: var(--text-dim); padding: 6px 0; border-bottom: 1px solid var(--line-soft); }
 .balance__modules li:last-child { border-bottom: 0; }
 .balance__modules b { color: var(--text); font-weight: 550; }

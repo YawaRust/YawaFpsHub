@@ -89,6 +89,49 @@ jobs:
             }
           }
 
+      - name: Проверить встроенный список изменений
+        shell: pwsh
+        run: |
+          Add-Type @"
+          using System;
+          using System.Runtime.InteropServices;
+          public static class YawaResource {
+            [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+            public static extern IntPtr LoadLibraryExW(string file, IntPtr reserved, uint flags);
+            [DllImport("kernel32.dll", ExactSpelling = true)]
+            public static extern IntPtr FindResourceW(IntPtr module, IntPtr name, IntPtr type);
+            [DllImport("kernel32.dll")]
+            public static extern uint SizeofResource(IntPtr module, IntPtr resource);
+            [DllImport("kernel32.dll")]
+            public static extern IntPtr LoadResource(IntPtr module, IntPtr resource);
+            [DllImport("kernel32.dll")]
+            public static extern IntPtr LockResource(IntPtr resource);
+            [DllImport("kernel32.dll")]
+            public static extern bool FreeLibrary(IntPtr module);
+          }
+          "@
+          $exe = (Get-ChildItem -Path .\build -Recurse -Filter YawaFpsHub.exe | Select-Object -First 1).FullName
+          if (-not $exe) { throw "Собранный exe не найден" }
+          $module = [YawaResource]::LoadLibraryExW($exe, [IntPtr]::Zero, 2)
+          if ($module -eq [IntPtr]::Zero) { throw "Не удалось открыть ресурсы exe" }
+          try {
+            $resource = [YawaResource]::FindResourceW($module, [IntPtr]::new(6201), [IntPtr]::new(10))
+            if ($resource -eq [IntPtr]::Zero) { throw "CHANGELOG отсутствует в exe" }
+            $size = [YawaResource]::SizeofResource($module, $resource)
+            if ($size -lt 100 -or $size -gt 131072) { throw "Неверный размер CHANGELOG в exe" }
+            $loaded = [YawaResource]::LoadResource($module, $resource)
+            $pointer = [YawaResource]::LockResource($loaded)
+            if ($pointer -eq [IntPtr]::Zero) { throw "CHANGELOG не прочитан" }
+            $bytes = [byte[]]::new([int]$size)
+            [Runtime.InteropServices.Marshal]::Copy($pointer, $bytes, 0, [int]$size)
+            $hash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes))
+            if ($hash -ne (Get-FileHash CHANGELOG.md -Algorithm SHA256).Hash) {
+              throw "Встроенный CHANGELOG отличается от исходного"
+            }
+          } finally {
+            [void][YawaResource]::FreeLibrary($module)
+          }
+
       - name: Просмотр локального пакета через CLI
         shell: pwsh
         run: |
