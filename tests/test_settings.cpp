@@ -413,6 +413,10 @@ namespace {
         CHECK(std::abs(fittedY.toCanvas(1000.0f) - 420.0f) < 0.01f);
         CHECK(std::abs(fittedX.toScreen(fittedX.toCanvas(100.0f)) - 100.0f) < 0.01f);
         CHECK(fittedX.toCanvas(550.0f) <= 20.0f + 356.0f - 14.0f + 0.01f);
+        const CanvasFit workspace = fitCanvasContent(line, 1115.0f, 580.0f, 1920.0f);
+        const CanvasAxis workspaceX { 184.0f, workspace.panX, workspace.zoom * 1115.0f / 1920.0f };
+        CHECK(workspaceX.toCanvas(550.0f) - workspaceX.toCanvas(100.0f) > 1000.0f);
+        CHECK(std::abs(workspaceX.toScreen(workspaceX.toCanvas(325.0f)) - 325.0f) < 0.01f);
         // RTSS со смещёнными абсолютными координатами: вписываем слои, не пустоту от (0,0).
         const CanvasFit rtss = fitCanvasContent({ 1420, 680, 1720, 880 }, 356.0f, 200.0f, 1920.0f);
         const CanvasAxis rtssX { 20.0f, rtss.panX, rtss.zoom * 356.0f / 1920.0f };

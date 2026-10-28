@@ -344,6 +344,7 @@ jobs:
             [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindow(string name, string title);
             [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
             [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+            [DllImport("user32.dll")] public static extern bool PostMessageW(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
           }
           "@
           $exe = (Get-ChildItem -Path .\build -Recurse -Filter YawaFpsHub.exe | Select-Object -First 1).FullName
@@ -367,8 +368,27 @@ jobs:
             $ok = [YawaEditorShot]::PrintWindow($hwnd, $hdc, 2)
             $graphics.ReleaseHdc($hdc)
             $graphics.Dispose()
-            if ($ok) { $bitmap.Save("$PWD\screenshot-editor.png", [System.Drawing.Imaging.ImageFormat]::Png) }
+            if (-not $ok) { throw "большой холст редактора не снят" }
+            $bitmap.Save("$PWD\screenshot-editor.png", [System.Drawing.Imaging.ImageFormat]::Png)
             $bitmap.Dispose()
+            $click = [IntPtr]::new((50 -shl 16) -bor 64)
+            if (-not [YawaEditorShot]::PostMessageW($hwnd, 0x0201, [IntPtr]::new(1), $click) -or
+                -not [YawaEditorShot]::PostMessageW($hwnd, 0x0202, [IntPtr]::Zero, $click)) {
+              throw "кнопка перехода к настройкам не нажата"
+            }
+            Start-Sleep -Milliseconds 500
+            $bitmap = New-Object System.Drawing.Bitmap $shotWidth, $shotHeight
+            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+            $hdc = $graphics.GetHdc()
+            $ok = [YawaEditorShot]::PrintWindow($hwnd, $hdc, 2)
+            $graphics.ReleaseHdc($hdc)
+            $graphics.Dispose()
+            if (-not $ok) { throw "режим настроек редактора не снят" }
+            $bitmap.Save("$PWD\screenshot-editor-settings.png", [System.Drawing.Imaging.ImageFormat]::Png)
+            $bitmap.Dispose()
+            $focusHash = (Get-FileHash "$PWD\screenshot-editor.png" -Algorithm SHA256).Hash
+            $settingsHash = (Get-FileHash "$PWD\screenshot-editor-settings.png" -Algorithm SHA256).Hash
+            if ($focusHash -eq $settingsHash) { throw "режим холста не переключился" }
           }
           if (-not $process.WaitForExit(20000)) { $process.Kill(); throw "редактор не завершился" }
           if ($process.ExitCode -ne 0) { throw "код выхода редактора: $($process.ExitCode)" }

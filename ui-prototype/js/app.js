@@ -1280,6 +1280,7 @@
     $$(".view").forEach((node) => node.classList.toggle("is-active", node.dataset.view === name));
     $("#viewEyebrow").textContent = view.eyebrow;
     $("#viewTitle").textContent = view.title;
+    if (name === "overlay") requestAnimationFrame(fitCanvasToOverlay);
 
     if (lastSnapshot) {
       requestAnimationFrame(() => {
@@ -3142,6 +3143,13 @@
     if (button) showWorkshopSection(button.dataset.editorSection);
   });
   showWorkshopSection("assemble");
+  $("#toggleCanvasWorkspace").addEventListener("click", (event) => {
+    const focused = $("#overlayGrid").dataset.focus !== "true";
+    $("#overlayGrid").dataset.focus = String(focused);
+    event.currentTarget.textContent = focused ? "Настройки →" : "Большой холст →";
+    event.currentTarget.setAttribute("aria-pressed", String(focused));
+    requestAnimationFrame(fitCanvasToOverlay);
+  });
 
   bindPause();
   bindAccents();

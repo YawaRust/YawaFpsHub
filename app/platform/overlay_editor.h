@@ -69,6 +69,10 @@ private:
     std::function<void(bool)> m_onChange;
     std::vector<UiHit> m_hits;
     Rect m_canvas;
+    Rect m_preview;
+    Rect m_fitButton;
+    Rect m_eyedropperButton;
+    Rect m_resetButton;
     Rect m_layers;
     Rect m_inspector;
     Rect m_controls;
@@ -84,6 +88,7 @@ private:
     float m_panX = 0.0f;
     float m_panY = 0.0f;
     bool m_fitPending = true;
+    bool m_focusCanvas = true;
     float m_rowDragScale = 1.0f;
     bool m_panning = false;
     bool m_samplingColor = false;

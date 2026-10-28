@@ -256,6 +256,7 @@ bool OverlayEditor::open(HWND owner, HINSTANCE instance, AppModel& model, const 
     m_canvasZoom = 1.0f;
     m_panX = m_panY = 0.0f;
     m_fitPending = true;
+    m_focusCanvas = true;
     m_rtssDragging = false;
     m_styledRowDragging = false;
     m_samplingColor = false;
@@ -339,13 +340,29 @@ void OverlayEditor::layout()
     const float width = static_cast<float>(client.right) / m_dpiScale;
     const float screenWidth = static_cast<float>(std::max(1, GetSystemMetrics(SM_CXVIRTUALSCREEN)));
     const float screenHeight = static_cast<float>(std::max(1, GetSystemMetrics(SM_CYVIRTUALSCREEN)));
-    const float canvasWidth = std::min(
-        static_cast<float>(kCanvasWidth), std::max(100.0f, height - 520.0f) * screenWidth / screenHeight);
-    const float canvasHeight = canvasWidth * screenHeight / screenWidth;
-    m_canvas = Rect { 184.0f, 307.0f, 184.0f + canvasWidth, 307.0f + canvasHeight };
     m_inspector = Rect { 20.0f, height - 198.0f, 540.0f, height - 20.0f };
-    m_layers = Rect { 20.0f, 307.0f, 174.0f, m_inspector.top - 12.0f };
-    m_controls = Rect { 564.0f, 112.0f, width - 18.0f, height - 20.0f };
+    if (m_focusCanvas) {
+        m_canvas = Rect { 184.0f, 110.0f, width - 18.0f, m_inspector.top - 12.0f };
+        m_layers = Rect { 20.0f, m_canvas.top, 174.0f, m_canvas.bottom };
+        m_preview = Rect { 564.0f, m_inspector.top, width - 18.0f, height - 20.0f };
+        m_controls = { };
+    } else {
+        const float canvasWidth = std::min(
+            static_cast<float>(kCanvasWidth), std::max(100.0f, height - 520.0f) * screenWidth / screenHeight);
+        const float canvasHeight = canvasWidth * screenHeight / screenWidth;
+        m_canvas = Rect { 184.0f, 307.0f, 184.0f + canvasWidth, 307.0f + canvasHeight };
+        m_layers = Rect { 20.0f, 307.0f, 174.0f, m_inspector.top - 12.0f };
+        m_preview = Rect { 20.0f, 70.0f, 540.0f, 282.0f };
+        m_controls = Rect { 564.0f, 112.0f, width - 18.0f, height - 20.0f };
+    }
+    const float toolbarTop = m_canvas.top - 24.0f;
+    const float toolbarRight = m_focusCanvas ? m_canvas.right : 540.0f;
+    m_fitButton = Rect { m_focusCanvas ? toolbarRight - 330.0f : 210.0f, toolbarTop,
+        m_focusCanvas ? toolbarRight - 237.0f : 303.0f, toolbarTop + 24.0f };
+    m_eyedropperButton = Rect { m_focusCanvas ? toolbarRight - 231.0f : 309.0f, toolbarTop,
+        m_focusCanvas ? toolbarRight - 141.0f : 399.0f, toolbarTop + 24.0f };
+    m_resetButton = Rect { m_focusCanvas ? toolbarRight - 135.0f : 405.0f, toolbarTop, toolbarRight,
+        toolbarTop + 24.0f };
     m_catalog = Rect { width - 386.0f, 50.0f, width - 18.0f, std::min(height - 22.0f, 462.0f) };
     m_panelScroll = std::clamp(m_panelScroll, 0,
         std::max(0,
@@ -1096,21 +1113,30 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
     case WM_LBUTTONDOWN: {
         const int x = logicalCoordinate(GET_X_LPARAM(lParam));
         const int y = logicalCoordinate(GET_Y_LPARAM(lParam));
-        if (y >= 283 && y < 307 && x >= 210 && x < 303) {
+        if (x >= 20 && x < 159 && y >= 37 && y < 62) {
+            m_focusCanvas = !m_focusCanvas;
+            m_catalogOpen = false;
+            ShowWindow(m_catalogSearch, SW_HIDE);
+            m_panelScroll = 0;
+            m_fitPending = true;
+            layout();
+            refresh();
+            return 0;
+        }
+        if (m_fitButton.contains(static_cast<float>(x), static_cast<float>(y))) {
             m_samplingColor = false;
             m_fitPending = true;
             refresh();
             return 0;
         }
-        if (y >= 283 && y < 307 && x >= 309 && x < 399) {
+        if (m_eyedropperButton.contains(static_cast<float>(x), static_cast<float>(y))) {
             m_samplingColor = !m_samplingColor;
             refresh();
             return 0;
         }
         if (m_samplingColor) {
             m_samplingColor = false;
-            const bool preview = Rect { 20.0f, 70.0f, 540.0f, 282.0f }.contains(
-                static_cast<float>(x), static_cast<float>(y));
+            const bool preview = m_preview.contains(static_cast<float>(x), static_cast<float>(y));
             if (preview || m_canvas.contains(static_cast<float>(x), static_cast<float>(y))) {
                 POINT screen { static_cast<LONG>(std::lround(x * m_dpiScale)),
                     static_cast<LONG>(std::lround(y * m_dpiScale)) };
@@ -1139,20 +1165,20 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
             restoreHistory(x >= 485);
             return 0;
         }
-        if (x >= static_cast<int>(m_controls.right - 350.0f)
-            && x < static_cast<int>(m_controls.right - 230.0f) && y >= 12 && y < 46) {
+        if (x >= static_cast<int>(m_catalog.right - 350.0f)
+            && x < static_cast<int>(m_catalog.right - 230.0f) && y >= 12 && y < 46) {
             m_onAction(UiHit { { }, ActionKind::ImportOverlayRecipe, 0 }, 0.0f, true);
             recordHistory();
             syncFields();
             refresh();
             return 0;
         }
-        if (x >= static_cast<int>(m_controls.right - 224.0f)
-            && x < static_cast<int>(m_controls.right - 112.0f) && y >= 12 && y < 46) {
+        if (x >= static_cast<int>(m_catalog.right - 224.0f) && x < static_cast<int>(m_catalog.right - 112.0f)
+            && y >= 12 && y < 46) {
             m_onAction(UiHit { { }, ActionKind::ExportOverlayRecipe, 0 }, 0.0f, true);
             return 0;
         }
-        if (x >= static_cast<int>(m_controls.right - 108.0f) && y >= 12 && y < 46) {
+        if (x >= static_cast<int>(m_catalog.right - 108.0f) && y >= 12 && y < 46) {
             m_catalogOpen = !m_catalogOpen;
             ShowWindow(m_catalogSearch, m_catalogOpen ? SW_SHOW : SW_HIDE);
             if (m_catalogOpen) {
@@ -1254,7 +1280,7 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
             }
             return 0;
         }
-        if (x >= 405 && x < 540 && y >= 283 && y < 307) {
+        if (m_resetButton.contains(static_cast<float>(x), static_cast<float>(y))) {
             m_model->settings.overlay.pixelLayout = false;
             changed(true);
             return 0;
@@ -1735,12 +1761,17 @@ void OverlayEditor::paint()
         m_undo.empty() ? theme.textFaint : theme.accent, TextAlign::Center);
     m_renderer.text(L"↷", Rect { 485.0f, 12.0f, 525.0f, 44.0f }, TextRole::Heading,
         m_redo.empty() ? theme.textFaint : theme.accent, TextAlign::Center);
-    m_renderer.text(m_hdrDisplay ? L"HDR-экран: цвет SDR-оверлея и предпросмотра корректирует Windows"
-                                 : L"Слева — слои и холст. Справа — настройки выбранного вида.",
-        Rect { 20.0f, 37.0f, 540.0f, 61.0f }, TextRole::Small, theme.textDim);
+    const Rect modeButton { 20.0f, 37.0f, 159.0f, 62.0f };
+    m_renderer.fillRoundRect(modeButton, 6.0f, theme.accentSoft);
+    m_renderer.text(m_focusCanvas ? L"Настройки →" : L"Большой холст →", modeButton, TextRole::Tiny,
+        theme.accent, TextAlign::Center);
+    m_renderer.text(m_hdrDisplay ? L"HDR-экран: цвет SDR корректирует Windows"
+            : m_focusCanvas      ? L"Слои · большой холст · выбранный элемент снизу"
+                                 : L"Слои и холст · настройки справа",
+        Rect { 166.0f, 37.0f, 540.0f, 61.0f }, TextRole::Small, theme.textDim);
 
-    drawOverlayEditorPreview(m_renderer, *m_model, theme, Rect { 20.0f, 70.0f, 540.0f, 282.0f },
-        GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN));
+    drawOverlayEditorPreview(m_renderer, *m_model, theme, m_preview, GetSystemMetrics(SM_CXVIRTUALSCREEN),
+        GetSystemMetrics(SM_CYVIRTUALSCREEN));
     const auto& rtss = m_model->settings.overlay;
     const std::wstring canvasHint = rtssLayerCount() > 0
         ? L"RTSS: выберите слой на холсте, перетащите или сдвиньте стрелками"
@@ -1749,16 +1780,15 @@ void OverlayEditor::paint()
         : rtss.layout != OverlayLayout::Plates
         ? L"Строка: двигайте весь блок; порядок — в разделе «Строки»"
         : L"Колесо — зум · Ctrl — выбор · Alt — плашка · Shift — сетка";
-    m_renderer.text(clipText(m_renderer, canvasHint, TextRole::Tiny, 180.0f),
-        Rect { 20.0f, 284.0f, 206.0f, 304.0f }, TextRole::Tiny,
-        rtss.rtssOmittedLayers > 0 ? theme.accent : theme.textDim);
-    const Rect fitButton { 210.0f, 283.0f, 303.0f, 307.0f };
-    m_renderer.fillRoundRect(fitButton, 6.0f, theme.panelSoft);
-    m_renderer.text(L"Вписать", fitButton, TextRole::Tiny, theme.accent, TextAlign::Center);
-    const Rect eyedropper { 309.0f, 283.0f, 399.0f, 307.0f };
-    m_renderer.fillRoundRect(eyedropper, 6.0f, m_samplingColor ? theme.accentSoft : theme.panelSoft);
-    m_renderer.text(L"Пипетка", eyedropper, TextRole::Tiny, theme.accent, TextAlign::Center);
-    m_renderer.text(L"Вернуть шаблон", Rect { 405.0f, 283.0f, 540.0f, 307.0f }, TextRole::Tiny, theme.accent);
+    const float hintLeft = m_focusCanvas ? m_canvas.left : 20.0f;
+    m_renderer.text(clipText(m_renderer, canvasHint, TextRole::Tiny, m_fitButton.left - hintLeft - 8.0f),
+        Rect { hintLeft, m_fitButton.top + 1.0f, m_fitButton.left - 4.0f, m_fitButton.bottom - 3.0f },
+        TextRole::Tiny, rtss.rtssOmittedLayers > 0 ? theme.accent : theme.textDim);
+    m_renderer.fillRoundRect(m_fitButton, 6.0f, theme.panelSoft);
+    m_renderer.text(L"Вписать", m_fitButton, TextRole::Tiny, theme.accent, TextAlign::Center);
+    m_renderer.fillRoundRect(m_eyedropperButton, 6.0f, m_samplingColor ? theme.accentSoft : theme.panelSoft);
+    m_renderer.text(L"Пипетка", m_eyedropperButton, TextRole::Tiny, theme.accent, TextAlign::Center);
+    m_renderer.text(L"Вернуть шаблон", m_resetButton, TextRole::Tiny, theme.accent);
     const auto rows = overlayMetricRows(m_model->settings.overlay, m_model->store);
     const auto hidden = hiddenLayerRows(m_hiddenLayers, rows);
     const std::size_t rtssCount = rtssLayerCount();
@@ -1807,11 +1837,24 @@ void OverlayEditor::paint()
     m_renderer.popClip();
     m_renderer.fillRoundRect(m_canvas, 10.0f, theme.panel);
     m_renderer.pushClip(m_canvas);
-    for (int step = 1; step < 4; ++step) {
-        const float x = m_canvas.left + m_canvas.width() * step / 4.0f;
-        const float y = m_canvas.top + m_canvas.height() * step / 4.0f;
-        m_renderer.drawLine(x, m_canvas.top, x, m_canvas.bottom, theme.line.withAlpha(0.35f), 1.0f);
-        m_renderer.drawLine(m_canvas.left, y, m_canvas.right, y, theme.line.withAlpha(0.35f), 1.0f);
+    if (m_focusCanvas) {
+        for (int step = 1; step * 20.0f < m_canvas.width(); ++step) {
+            const float x = m_canvas.left + step * 20.0f;
+            m_renderer.drawLine(x, m_canvas.top, x, m_canvas.bottom,
+                theme.line.withAlpha(step % 5 == 0 ? 0.5f : 0.16f), 1.0f);
+        }
+        for (int step = 1; step * 20.0f < m_canvas.height(); ++step) {
+            const float y = m_canvas.top + step * 20.0f;
+            m_renderer.drawLine(m_canvas.left, y, m_canvas.right, y,
+                theme.line.withAlpha(step % 5 == 0 ? 0.5f : 0.16f), 1.0f);
+        }
+    } else {
+        for (int step = 1; step < 4; ++step) {
+            const float x = m_canvas.left + m_canvas.width() * step / 4.0f;
+            const float y = m_canvas.top + m_canvas.height() * step / 4.0f;
+            m_renderer.drawLine(x, m_canvas.top, x, m_canvas.bottom, theme.line.withAlpha(0.35f), 1.0f);
+            m_renderer.drawLine(m_canvas.left, y, m_canvas.right, y, theme.line.withAlpha(0.35f), 1.0f);
+        }
     }
     ID2D1RenderTarget* target = m_renderer.target();
     D2D1::Matrix3x2F transform;
@@ -1983,7 +2026,7 @@ void OverlayEditor::paint()
             L"RGB", picker, TextRole::Tiny, custom ? theme.background : theme.accent, TextAlign::Center);
     }
 
-    if (width >= 1200.0f) {
+    if (width >= 1200.0f && !m_focusCanvas) {
         m_renderer.text(L"Оформление · шрифт · подписи · датчики",
             Rect { m_controls.left, 12.0f, width - 400.0f, 44.0f }, TextRole::Heading, theme.text);
     }
@@ -1997,34 +2040,36 @@ void OverlayEditor::paint()
     m_renderer.text(m_catalogOpen ? L"Закрыть" : L"+ Датчик",
         Rect { width - 108.0f, 12.0f, width - 18.0f, 45.0f }, TextRole::Small, theme.accent,
         TextAlign::Center);
-    m_renderer.pushClip(m_controls);
-    m_renderer.pushTranslate(0.0f, -static_cast<float>(m_panelScroll));
     m_hits.clear();
-    const Rect controlsArea { m_controls.left, m_controls.top + 4.0f, m_controls.right - 6.0f,
-        m_controls.top + overlayEditorSectionHeight(m_model->settings.overlay, m_section) };
-    drawOverlayEditorSection(m_renderer, *m_model, theme, controlsArea, m_section, m_hits);
-    m_renderer.popTranslate();
-    m_renderer.popClip();
-    for (UiHit& hit : m_hits) {
-        hit.rect.top -= static_cast<float>(m_panelScroll);
-        hit.rect.bottom -= static_cast<float>(m_panelScroll);
-    }
-    for (std::size_t index = 0; index < kSections.size(); ++index) {
-        const float tabWidth = m_controls.width() / static_cast<float>(kSections.size());
-        const Rect tab { m_controls.left + tabWidth * static_cast<float>(index), 68.0f,
-            m_controls.left + tabWidth * static_cast<float>(index + 1) - 6.0f, 101.0f };
-        m_renderer.fillRoundRect(
-            tab, 8.0f, static_cast<int>(index) == m_section ? theme.accentSoft : theme.panelSoft);
-        m_renderer.text(kSections[index], tab, TextRole::Small,
-            static_cast<int>(index) == m_section ? theme.accent : theme.text, TextAlign::Center);
-    }
-    if (overlayEditorSectionHeight(m_model->settings.overlay, m_section) > m_controls.height()) {
-        const float fraction = static_cast<float>(m_panelScroll)
-            / overlayEditorSectionHeight(m_model->settings.overlay, m_section);
-        m_renderer.fillRoundRect(
-            Rect { m_controls.right - 4.0f, m_controls.top + fraction * m_controls.height(), m_controls.right,
-                m_controls.top + fraction * m_controls.height() + 55.0f },
-            2.0f, theme.accent);
+    if (!m_focusCanvas) {
+        m_renderer.pushClip(m_controls);
+        m_renderer.pushTranslate(0.0f, -static_cast<float>(m_panelScroll));
+        const Rect controlsArea { m_controls.left, m_controls.top + 4.0f, m_controls.right - 6.0f,
+            m_controls.top + overlayEditorSectionHeight(m_model->settings.overlay, m_section) };
+        drawOverlayEditorSection(m_renderer, *m_model, theme, controlsArea, m_section, m_hits);
+        m_renderer.popTranslate();
+        m_renderer.popClip();
+        for (UiHit& hit : m_hits) {
+            hit.rect.top -= static_cast<float>(m_panelScroll);
+            hit.rect.bottom -= static_cast<float>(m_panelScroll);
+        }
+        for (std::size_t index = 0; index < kSections.size(); ++index) {
+            const float tabWidth = m_controls.width() / static_cast<float>(kSections.size());
+            const Rect tab { m_controls.left + tabWidth * static_cast<float>(index), 68.0f,
+                m_controls.left + tabWidth * static_cast<float>(index + 1) - 6.0f, 101.0f };
+            m_renderer.fillRoundRect(
+                tab, 8.0f, static_cast<int>(index) == m_section ? theme.accentSoft : theme.panelSoft);
+            m_renderer.text(kSections[index], tab, TextRole::Small,
+                static_cast<int>(index) == m_section ? theme.accent : theme.text, TextAlign::Center);
+        }
+        if (overlayEditorSectionHeight(m_model->settings.overlay, m_section) > m_controls.height()) {
+            const float fraction = static_cast<float>(m_panelScroll)
+                / overlayEditorSectionHeight(m_model->settings.overlay, m_section);
+            m_renderer.fillRoundRect(
+                Rect { m_controls.right - 4.0f, m_controls.top + fraction * m_controls.height(),
+                    m_controls.right, m_controls.top + fraction * m_controls.height() + 55.0f },
+                2.0f, theme.accent);
+        }
     }
     if (m_catalogOpen) {
         m_renderer.fillRoundRect(m_catalog, 10.0f, theme.panel);
