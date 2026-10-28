@@ -238,6 +238,9 @@ bool OverlayEditor::open(HWND owner, HINSTANCE instance, AppModel& model, const 
     m_panelScroll = 0;
     m_section = 0;
     m_hiddenLayers.clear();
+    m_rtssLayerRects.clear();
+    m_rtssSelected = -1;
+    m_rtssDragging = false;
     m_samplingColor = false;
     m_undo.clear();
     m_redo.clear();
@@ -380,6 +383,7 @@ void OverlayEditor::syncFields()
 
 void OverlayEditor::select(MetricId id, bool value)
 {
+    m_rtssSelected = -1;
     m_selected = id;
     m_value = value;
     m_model->editingLabel = -1;
@@ -491,6 +495,29 @@ float OverlayEditor::canvasScale() const
 {
     return m_canvas.width() * m_canvasZoom
         / static_cast<float>(std::max(1, GetSystemMetrics(SM_CXVIRTUALSCREEN)));
+}
+
+std::size_t OverlayEditor::rtssLayerCount() const
+{
+    const auto& settings = m_model->settings.overlay;
+    return settings.recipe == OverlayRecipe::Rtss && settings.rtssTemplate && settings.rtssVisual
+        ? settings.rtssVisual->layers.size() : 0;
+}
+
+void OverlayEditor::moveRtssLayer(int x, int y)
+{
+    if (m_rtssSelected < 0 || static_cast<std::size_t>(m_rtssSelected) >= rtssLayerCount()) {
+        return;
+    }
+    auto& edit = m_model->settings.overlay.rtssLayerEdits[static_cast<std::size_t>(m_rtssSelected)];
+    const float unit = std::max(0.001f, canvasScale() * m_rtssLayerScale);
+    const int newX = std::clamp(m_rtssOffsetX + static_cast<int>(std::lround((x - m_rtssStartX) / unit)), -2048, 2048);
+    const int newY = std::clamp(m_rtssOffsetY + static_cast<int>(std::lround((y - m_rtssStartY) / unit)), -2048, 2048);
+    if (edit.x != newX || edit.y != newY) {
+        edit.x = newX;
+        edit.y = newY;
+        changed(false);
+    }
 }
 
 int OverlayEditor::logicalCoordinate(int pixels) const
@@ -774,7 +801,8 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
             const int visible = std::max(1, static_cast<int>((m_layers.height() - 38.0f) / 28.0f));
             m_layersScroll = std::clamp(m_layersScroll - delta / 28, 0,
                 std::max(0,
-                    static_cast<int>(rows.size() + hiddenLayerRows(m_hiddenLayers, rows).size()) - visible));
+                    static_cast<int>(rows.size() + hiddenLayerRows(m_hiddenLayers, rows).size()
+                        + rtssLayerCount()) - visible));
         } else if (m_catalogOpen
             && m_catalog.contains(static_cast<float>(cursor.x), static_cast<float>(cursor.y))) {
             m_catalogScroll = std::clamp(
@@ -972,8 +1000,22 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
             const int index = (y - static_cast<int>(m_layers.top) - 34) / 28 + m_layersScroll;
             const auto rows = overlayMetricRows(m_model->settings.overlay, m_model->store);
             const auto hidden = hiddenLayerRows(m_hiddenLayers, rows);
+            const int firstRtss = static_cast<int>(rows.size() + hidden.size());
+            if (y >= m_layers.top + 34 && index >= firstRtss
+                && index < firstRtss + static_cast<int>(rtssLayerCount())) {
+                m_rtssSelected = index - firstRtss;
+                if (x < m_layers.left + 37.0f) {
+                    auto& edit = m_model->settings.overlay.rtssLayerEdits[static_cast<std::size_t>(m_rtssSelected)];
+                    edit.visible = !edit.visible;
+                    changed(true);
+                } else {
+                    refresh();
+                }
+                SetFocus(m_window);
+                return 0;
+            }
             if (y >= m_layers.top + 34 && index >= 0
-                && index < static_cast<int>(rows.size() + hidden.size())) {
+                && index < firstRtss) {
                 const bool visible = index < static_cast<int>(rows.size());
                 const MetricId id = visible ? rows[static_cast<std::size_t>(index)].id
                                             : hidden[static_cast<std::size_t>(index) - rows.size()];
@@ -1072,6 +1114,26 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
                 SetFocus(m_window);
                 SetCapture(m_window);
                 return 0;
+            }
+            const CanvasAxis horizontal { m_canvas.left, m_panX, canvasScale() };
+            const CanvasAxis vertical { m_canvas.top, m_panY, canvasScale() };
+            for (std::size_t index = m_rtssLayerRects.size(); index > 0; --index) {
+                const Rect& box = m_rtssLayerRects[index - 1];
+                const Rect onCanvas { horizontal.toCanvas(box.left), vertical.toCanvas(box.top),
+                    horizontal.toCanvas(box.right), vertical.toCanvas(box.bottom) };
+                if (box.right > box.left && onCanvas.contains(static_cast<float>(x), static_cast<float>(y))) {
+                    m_rtssSelected = static_cast<int>(index - 1);
+                    m_rtssDragging = true;
+                    m_rtssStartX = x;
+                    m_rtssStartY = y;
+                    const auto& edit = m_model->settings.overlay.rtssLayerEdits[index - 1];
+                    m_rtssOffsetX = edit.x;
+                    m_rtssOffsetY = edit.y;
+                    SetFocus(m_window);
+                    SetCapture(m_window);
+                    refresh();
+                    return 0;
+                }
             }
             const Rect plate = plateOnCanvas();
             if (m_model->settings.overlay.layout != OverlayLayout::Plates
@@ -1208,7 +1270,9 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
     case WM_MOUSEMOVE: {
         const int x = logicalCoordinate(GET_X_LPARAM(lParam));
         const int y = logicalCoordinate(GET_Y_LPARAM(lParam));
-        if (m_panning) {
+        if (m_rtssDragging) {
+            moveRtssLayer(x, y);
+        } else if (m_panning) {
             m_panX = m_panStartLeft + x - m_panStartX;
             m_panY = m_panStartTop + y - m_panStartY;
             refresh();
@@ -1232,6 +1296,13 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
         const int x = logicalCoordinate(GET_X_LPARAM(lParam));
         const int y = logicalCoordinate(GET_Y_LPARAM(lParam));
         if (GetCapture() == m_window) {
+            if (m_rtssDragging) {
+                moveRtssLayer(x, y);
+                m_rtssDragging = false;
+                changed(true);
+                ReleaseCapture();
+                return 0;
+            }
             if (m_panning) {
                 m_panning = false;
                 ReleaseCapture();
@@ -1256,6 +1327,12 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
         }
         break;
     }
+    case WM_CAPTURECHANGED:
+        if (m_rtssDragging) {
+            m_rtssDragging = false;
+            changed(true);
+        }
+        return 0;
     case WM_KEYDOWN:
         if (wParam == VK_ESCAPE) {
             if (m_samplingColor) {
@@ -1283,6 +1360,14 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
             return 0;
         }
         if (wParam == VK_LEFT || wParam == VK_RIGHT || wParam == VK_UP || wParam == VK_DOWN) {
+            if (m_rtssSelected >= 0 && static_cast<std::size_t>(m_rtssSelected) < rtssLayerCount()) {
+                auto& edit = m_model->settings.overlay.rtssLayerEdits[static_cast<std::size_t>(m_rtssSelected)];
+                const int step = GetKeyState(VK_SHIFT) < 0 ? 10 : 1;
+                edit.x = std::clamp(edit.x + (wParam == VK_LEFT ? -step : wParam == VK_RIGHT ? step : 0), -2048, 2048);
+                edit.y = std::clamp(edit.y + (wParam == VK_UP ? -step : wParam == VK_DOWN ? step : 0), -2048, 2048);
+                changed(true);
+                return 0;
+            }
             if (m_model->settings.overlay.layout != OverlayLayout::Plates) {
                 auto& settings = m_model->settings.overlay;
                 const int delta = GetKeyState(VK_SHIFT) < 0 ? 10 : 1;
@@ -1357,7 +1442,9 @@ void OverlayEditor::paint()
     drawOverlayEditorPreview(m_renderer, *m_model, theme, Rect { 20.0f, 70.0f, 540.0f, 282.0f },
         GetSystemMetrics(SM_CXVIRTUALSCREEN), GetSystemMetrics(SM_CYVIRTUALSCREEN));
     const auto& rtss = m_model->settings.overlay;
-    const std::wstring canvasHint = rtss.rtssOmittedLayers > 0
+    const std::wstring canvasHint = rtssLayerCount() > 0
+        ? L"RTSS: выберите слой на холсте, перетащите или сдвиньте стрелками"
+        : rtss.rtssOmittedLayers > 0
         ? L"RTSS: " + std::to_wstring(rtss.rtssOmittedLayers) + L" слоёв без связанной метрики"
         : rtss.layout != OverlayLayout::Plates
         ? L"Строка: двигайте весь блок; порядок — в разделе «Строки»"
@@ -1370,22 +1457,40 @@ void OverlayEditor::paint()
     m_renderer.text(L"Вернуть шаблон", Rect { 405.0f, 283.0f, 540.0f, 307.0f }, TextRole::Tiny, theme.accent);
     const auto rows = overlayMetricRows(m_model->settings.overlay, m_model->store);
     const auto hidden = hiddenLayerRows(m_hiddenLayers, rows);
+    const std::size_t rtssCount = rtssLayerCount();
     m_renderer.fillRoundRect(m_layers, 10.0f, theme.panel);
     m_renderer.text(L"Слои · глазик",
         Rect { m_layers.left + 10.0f, m_layers.top + 8.0f, m_layers.right - 8.0f, m_layers.top + 29.0f },
         TextRole::Small, theme.text);
     m_layersScroll = std::clamp(m_layersScroll, 0,
         std::max(0,
-            static_cast<int>(rows.size() + hidden.size())
+            static_cast<int>(rows.size() + hidden.size() + rtssCount)
                 - std::max(1, static_cast<int>((m_layers.height() - 38.0f) / 28.0f))));
     m_renderer.pushClip(m_layers);
-    for (std::size_t index = static_cast<std::size_t>(m_layersScroll); index < rows.size() + hidden.size();
-        ++index) {
+    for (std::size_t index = static_cast<std::size_t>(m_layersScroll);
+        index < rows.size() + hidden.size() + rtssCount; ++index) {
         const float top = m_layers.top + 34.0f + static_cast<float>(index - m_layersScroll) * 28.0f;
         if (top + 26.0f > m_layers.bottom) {
             break;
         }
         const Rect row { m_layers.left + 6.0f, top, m_layers.right - 6.0f, top + 25.0f };
+        if (index >= rows.size() + hidden.size()) {
+            const std::size_t layerIndex = index - rows.size() - hidden.size();
+            const auto& layer = m_model->settings.overlay.rtssVisual->layers[layerIndex];
+            const bool shown = m_model->settings.overlay.rtssLayerEdits[layerIndex].visible;
+            const std::wstring label = layer.name.empty()
+                ? L"RTSS · слой " + std::to_wstring(layerIndex)
+                : L"RTSS · " + widen(layer.name);
+            m_renderer.fillRoundRect(row, 5.0f,
+                static_cast<int>(layerIndex) == m_rtssSelected ? theme.accentSoft : theme.panelSoft);
+            m_renderer.text(shown ? L"◉" : L"○",
+                Rect { row.left + 3.0f, top, row.left + 29.0f, top + 25.0f }, TextRole::Small,
+                shown ? theme.accent : theme.textDim, TextAlign::Center);
+            m_renderer.text(clipText(m_renderer, label, TextRole::Tiny, row.width() - 38.0f),
+                Rect { row.left + 31.0f, top, row.right - 3.0f, top + 25.0f }, TextRole::Tiny,
+                static_cast<int>(layerIndex) == m_rtssSelected ? theme.text : theme.textDim);
+            continue;
+        }
         const bool visible = index < rows.size();
         const MetricId id = visible ? rows[index].id : hidden[index - rows.size()];
         const std::string_view label = visible ? std::string_view(rows[index].label) : metricInfo(id).label;
@@ -1418,8 +1523,18 @@ void OverlayEditor::paint()
     const Rect screen { 0.0f, 0.0f, static_cast<float>(GetSystemMetrics(SM_CXVIRTUALSCREEN)),
         static_cast<float>(GetSystemMetrics(SM_CYVIRTUALSCREEN)) };
     m_screenPlate = paintOverlay(target, m_model->settings.overlay, theme, text, screen,
-        static_cast<float>(m_model->settings.overlay.scalePercent) / 100.0f, formats);
+        static_cast<float>(m_model->settings.overlay.scalePercent) / 100.0f, formats,
+        &m_rtssLayerRects, &m_rtssLayerScale);
     target->SetTransform(transform);
+    if (m_rtssSelected >= 0 && static_cast<std::size_t>(m_rtssSelected) < m_rtssLayerRects.size()) {
+        const Rect& box = m_rtssLayerRects[static_cast<std::size_t>(m_rtssSelected)];
+        const CanvasAxis horizontal { m_canvas.left, m_panX, screenScale };
+        const CanvasAxis vertical { m_canvas.top, m_panY, screenScale };
+        if (box.right > box.left) {
+            m_renderer.strokeRoundRect(Rect { horizontal.toCanvas(box.left), vertical.toCanvas(box.top),
+                horizontal.toCanvas(box.right), vertical.toCanvas(box.bottom) }, 3.0f, theme.accent, 1.5f);
+        }
+    }
     if (m_model->settings.overlay.layout == OverlayLayout::Plates) {
         const Rect plate = plateOnCanvas();
         const float rowScale = screenScale * m_model->settings.overlay.scalePercent / 100.0f;

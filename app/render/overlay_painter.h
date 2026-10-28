@@ -54,6 +54,7 @@ std::array<Color, kOverlayColorCount> overlayColorPalette();
 // Рисует оверлей выбранного стиля внутри bounds и возвращает прямоугольник содержимого.
 // Один и тот же код рисует и настоящее окно поверх игры, и предпросмотр в настройках.
 Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, const Theme& theme,
-    const OverlayText& text, const Rect& bounds, float scale, const OverlayFormats& formats);
+    const OverlayText& text, const Rect& bounds, float scale, const OverlayFormats& formats,
+    std::vector<Rect>* rtssLayerBounds = nullptr, float* rtssLayerScale = nullptr);
 
 } // namespace yawa

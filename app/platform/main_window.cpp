@@ -446,6 +446,21 @@ bool MainWindow::smokeImportRtss(std::string_view package, std::string& error)
         error = "импорт RTSS создал прозрачный кадр";
         return false;
     }
+    if (imported.rtssVisual) {
+        OverlaySettings hidden = imported;
+        for (std::size_t index = 0; index < hidden.rtssVisual->layers.size(); ++index) {
+            hidden.rtssLayerEdits[index].visible = false;
+        }
+        m_overlay.setSettings(hidden);
+        m_overlay.repaint();
+        const bool blankWhenHidden = !m_overlay.hasVisiblePixels();
+        m_overlay.setSettings(imported);
+        m_overlay.repaint();
+        if (!blankWhenHidden || !m_overlay.hasVisiblePixels()) {
+            error = "не прошла проверка видимости RTSS-слоёв";
+            return false;
+        }
+    }
     m_model.settings.overlay = std::move(imported);
     m_model.overlayVisible = true;
     return true;

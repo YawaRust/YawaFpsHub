@@ -1008,8 +1008,12 @@ namespace {
     };
 
     Rect drawRtssVisual(ID2D1RenderTarget* target, const RtssVisualLayout& layout, const OverlayText& values,
-        const OverlaySettings& settings, const Rect& bounds, float scale, const OverlayFormats& formats)
+        const OverlaySettings& settings, const Rect& bounds, float scale, const OverlayFormats& formats,
+        std::vector<Rect>* layerBounds, float* layerScale)
     {
+        if (layerBounds != nullptr) {
+            layerBounds->assign(layout.layers.size(), {});
+        }
         const float zoom = static_cast<float>(layout.zoom) * scale;
         const float cellHeight = static_cast<float>(layout.fontHeight) * zoom;
         const float cellWidth = cellHeight * 0.61f;
@@ -1021,9 +1025,11 @@ namespace {
         placed.reserve(layout.layers.size());
         float right = 0.0f;
         float bottom = 0.0f;
-        for (const RtssVisualLayer& layer : layout.layers) {
+        for (std::size_t index = 0; index < layout.layers.size(); ++index) {
+            const RtssVisualLayer& layer = layout.layers[index];
+            const RtssLayerEdit& edit = settings.rtssLayerEdits[index];
             const std::wstring text = rtssText(layout, layer.text, values);
-            if (text.empty() && !layer.hasBackground) {
+            if (!edit.visible || (text.empty() && !layer.hasBackground)) {
                 placed.push_back({ });
                 continue;
             }
@@ -1036,8 +1042,8 @@ namespace {
                 : nominalWidth;
             const float height
                 = layer.height == 0 ? cellHeight * layer.size / 100.0f : units(layer.height, true);
-            float x = units(layer.x, false);
-            float y = units(layer.y, true);
+            float x = units(layer.x, false) + static_cast<float>(edit.x) * zoom;
+            float y = units(layer.y, true) + static_cast<float>(edit.y) * zoom;
             x -= width * static_cast<float>(layer.origin % 3) / 2.0f;
             y -= height * static_cast<float>(layer.origin / 3) / 2.0f;
             placed.push_back({ Rect { x, y, x + width, y + height }, text });
@@ -1049,6 +1055,9 @@ namespace {
         }
         const float fit = std::min({ 1.0f, std::max(1.0f, bounds.width() - 4.0f) / right,
             std::max(1.0f, bounds.height() - 4.0f) / bottom });
+        if (layerScale != nullptr) {
+            *layerScale = zoom * fit;
+        }
         const float width = right * fit;
         const float height = bottom * fit;
         const bool onRight = settings.position == OverlayPosition::TopRight
@@ -1077,6 +1086,11 @@ namespace {
             const RtssPlacement& placement = placed[index];
             if (placement.rect.right <= placement.rect.left) {
                 continue;
+            }
+            if (layerBounds != nullptr) {
+                (*layerBounds)[index] = Rect { left + fit * placement.rect.left,
+                    top + fit * placement.rect.top, left + fit * placement.rect.right,
+                    top + fit * placement.rect.bottom };
             }
             const D2D1_RECT_F rect = D2D1::RectF(left + placement.rect.left, top + placement.rect.top,
                 left + placement.rect.right, top + placement.rect.bottom);
@@ -1220,13 +1234,21 @@ OverlayText makeOverlayText(const OverlaySettings& settings, const MetricStore& 
 }
 
 Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, const Theme& theme,
-    const OverlayText& text, const Rect& bounds, float scale, const OverlayFormats& formats)
+    const OverlayText& text, const Rect& bounds, float scale, const OverlayFormats& formats,
+    std::vector<Rect>* rtssLayerBounds, float* rtssLayerScale)
 {
+    if (rtssLayerScale != nullptr) {
+        *rtssLayerScale = 1.0f;
+    }
+    if (rtssLayerBounds != nullptr) {
+        rtssLayerBounds->clear();
+    }
     if (target == nullptr) {
         return Rect { };
     }
     if (settings.recipe == OverlayRecipe::Rtss && settings.rtssVisual && settings.rtssTemplate) {
-        return drawRtssVisual(target, *settings.rtssVisual, text, settings, bounds, scale, formats);
+        return drawRtssVisual(target, *settings.rtssVisual, text, settings, bounds, scale, formats,
+            rtssLayerBounds, rtssLayerScale);
     }
     if (visibleRows(text) == 0) {
         return Rect { };

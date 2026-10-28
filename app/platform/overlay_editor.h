@@ -32,6 +32,8 @@ private:
     void select(MetricId id, bool value);
     void move(int x, int y);
     float canvasScale() const;
+    std::size_t rtssLayerCount() const;
+    void moveRtssLayer(int x, int y);
     int logicalCoordinate(int pixels) const;
     Rect plateOnCanvas() const;
     void preparePixelLayout();
@@ -89,6 +91,14 @@ private:
     int m_section = 0;
     int m_layersScroll = 0;
     std::vector<MetricId> m_hiddenLayers;
+    std::vector<Rect> m_rtssLayerRects;
+    float m_rtssLayerScale = 1.0f;
+    int m_rtssSelected = -1;
+    bool m_rtssDragging = false;
+    int m_rtssStartX = 0;
+    int m_rtssStartY = 0;
+    int m_rtssOffsetX = 0;
+    int m_rtssOffsetY = 0;
     int m_catalogScroll = 0;
     bool m_catalogOpen = false;
     int m_dragStartX = 0;

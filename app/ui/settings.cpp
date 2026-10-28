@@ -983,6 +983,20 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
             } else if (key == "resources") {
                 target.overlay.rtssResources = std::clamp(parseInt(value, 0), 0, 63);
             }
+        } else if (section == "rtss_layer_edits") {
+            const int index = parseInt(key, -1);
+            const std::size_t first = value.find(',');
+            const std::size_t second = first == std::string_view::npos ? first : value.find(',', first + 1);
+            if (index >= 0 && index < 256 && std::to_string(index) == key
+                && second != std::string_view::npos && value.find(',', second + 1) == std::string_view::npos) {
+                const int x = parseInt(trim(value.substr(0, first)), 2049);
+                const int y = parseInt(trim(value.substr(first + 1, second - first - 1)), 2049);
+                const int visible = parseInt(trim(value.substr(second + 1)), -1);
+                if (x >= -2048 && x <= 2048 && y >= -2048 && y <= 2048
+                    && (visible == 0 || visible == 1)) {
+                    target.overlay.rtssLayerEdits[static_cast<std::size_t>(index)] = { x, y, visible == 1 };
+                }
+            }
         } else if (section == "hotkeys") {
             if (key == "overlay") {
                 target.hotkeys.overlay = static_cast<unsigned int>(std::clamp(parseInt(value, 0), 0, 254));
@@ -1181,7 +1195,9 @@ bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::str
                 continue;
             }
             RtssVisualLayer& layer = visual->layers[static_cast<std::size_t>(index)];
-            if (key == "Text") {
+            if (key == "Name" && value.size() <= 256) {
+                layer.name = value;
+            } else if (key == "Text") {
                 layerTexts[static_cast<std::size_t>(index)] = value;
                 if (value.size() <= 8192) {
                     layer.text = value;
@@ -1276,6 +1292,7 @@ bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::str
     imported.rtssTemplate = original;
     imported.rtssExchange.reset();
     imported.rtssVisual = std::move(visual);
+    imported.rtssLayerEdits = {};
     imported.rtssOmittedLayers = omitted;
     imported.rtssResources = 0;
     std::array<bool, kMetricCount> placed { };
@@ -1566,6 +1583,21 @@ std::string serializeSettings(const Settings& settings)
         text += "\n";
     }
 
+    bool hasRtssEdits = false;
+    for (const RtssLayerEdit& edit : settings.overlay.rtssLayerEdits) {
+        hasRtssEdits |= edit.x != 0 || edit.y != 0 || !edit.visible;
+    }
+    if (hasRtssEdits) {
+        text += "[rtss_layer_edits]\n";
+        for (std::size_t index = 0; index < settings.overlay.rtssLayerEdits.size(); ++index) {
+            const RtssLayerEdit& edit = settings.overlay.rtssLayerEdits[index];
+            if (edit.x != 0 || edit.y != 0 || !edit.visible) {
+                text += std::to_string(index) + " = " + std::to_string(edit.x) + ","
+                    + std::to_string(edit.y) + "," + (edit.visible ? "1" : "0") + "\n";
+            }
+        }
+        text += "\n";
+    }
     text += "[hotkeys]\n";
     text += "overlay = " + std::to_string(settings.hotkeys.overlay) + "\n";
     text += "position = " + std::to_string(settings.hotkeys.position) + "\n";

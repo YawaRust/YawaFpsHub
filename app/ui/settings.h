@@ -75,6 +75,7 @@ struct CaptureSettings
 
 struct RtssVisualLayer
 {
+    std::string name;
     std::string text;
     std::string visibilitySource;
     int x = 0;
@@ -96,6 +97,13 @@ struct RtssVisualLayout
     int zoom = 1;
     std::vector<RtssVisualLayer> layers;
     std::vector<std::pair<std::string, MetricId>> availableTags;
+};
+
+struct RtssLayerEdit
+{
+    int x = 0;
+    int y = 0;
+    bool visible = true;
 };
 
 struct OverlaySettings
@@ -186,6 +194,8 @@ struct OverlaySettings
     std::shared_ptr<const std::string> rtssTemplate;
     std::shared_ptr<const std::string> rtssExchange;
     std::shared_ptr<const RtssVisualLayout> rtssVisual;
+    // Редактирование слоя не изменяет исходный пакет, используемый при экспорте.
+    std::array<RtssLayerEdit, 256> rtssLayerEdits{};
     int rtssOmittedLayers = 0;
     int rtssResources = 0;
 };

@@ -872,10 +872,18 @@ namespace {
             && imported.rtssVisual->availableTags[0].first == "<FR>");
         Settings saved;
         saved.overlay = imported;
+        saved.overlay.rtssLayerEdits[1] = { 23, -7, false };
         Settings restored;
         CHECK(parseSettings(serializeSettings(saved), restored, error));
+        CHECK(restored.overlay.rtssLayerEdits[1].x == 23
+            && restored.overlay.rtssLayerEdits[1].y == -7
+            && !restored.overlay.rtssLayerEdits[1].visible);
+        CHECK(restored.overlay.rtssTemplate && *restored.overlay.rtssTemplate == source);
         CHECK(restored.overlay.rtssVisual && restored.overlay.rtssVisual->layers[0].x == -2);
         CHECK(restored.overlay.rtssVisual->availableTags.size() == 1);
+        CHECK(importRtssOverlay(source, restored.overlay, error));
+        CHECK(restored.overlay.rtssLayerEdits[1].visible
+            && restored.overlay.rtssLayerEdits[1].x == 0);
     }
 
     void testRtssExternalProviderCannotImpersonateHal()
