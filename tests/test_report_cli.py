@@ -87,4 +87,13 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception:
+        # Actions logs can be unavailable outside the runner; expose the actual
+        # failing assertion in a check annotation rather than only "exit code 1".
+        import traceback
+
+        detail = traceback.format_exc().replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        print(f"::error title=Report CLI smoke::{detail}", flush=True)
+        raise
