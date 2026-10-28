@@ -44,7 +44,7 @@ def main() -> None:
             archive.writestr("session.json", '{"status":"no_game_sample"}\n')
             archive.writestr("sensors.csv", "metric,value,unit\n")
             archive.writestr("audit.json", '{"status":"not_collected"}\n')
-            archive.writestr("diagnosis.json", "{}\n")
+            archive.writestr("diagnosis.json", '{"findings":[{"title":"<script>bad</script>"}]}\n')
             archive.writestr("screen.png", PNG)
         invoke(args.exe, f"--report={package}", 0, ".yawa schema 1: valid")
         invoke(args.exe, f"--report={package}", 0, 'Session: {"status":"no_game_sample"}')
@@ -63,6 +63,9 @@ def main() -> None:
         embedded = re.search(r'src="data:image/png;base64,([A-Za-z0-9+/=]+)"', html)
         assert embedded and base64.b64decode(embedded.group(1)) == PNG
         assert "default-src 'none'" in html and "<script" not in html
+        assert "&lt;script&gt;bad&lt;/script&gt;" in html
+        assert "Заявленные выводы пакета" in html
+        assert "Паспорт системы, аудит и история датчиков в этой версии пакета не собраны" in html
         assert "http://" not in html and "https://" not in html
         invoke(args.exe, [f"--report={package}", f"--html={html_path}"], 1,
                "уже существует")

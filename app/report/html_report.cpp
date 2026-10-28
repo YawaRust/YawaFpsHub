@@ -55,12 +55,13 @@ bool buildHtmlReport(const ReportPackageContents& contents, std::string& html, s
 {
     error.clear();
     if (contents.cardPng.size() > 32u * 1024u * 1024u || contents.sessionJson.size() > 64u * 1024u
-        || !report_internal::validPng(contents.cardPng)) {
-        error = "HTML-отчёт: карточка или сессия недоступна";
+        || contents.diagnosisJson.size() > 64u * 1024u || !report_internal::validPng(contents.cardPng)) {
+        error = "HTML-отчёт: карточка или метаданные недоступны";
         return false;
     }
     std::string output;
-    output.reserve((contents.cardPng.size() + 2) / 3 * 4 + contents.sessionJson.size() * 5 + 2048);
+    output.reserve((contents.cardPng.size() + 2) / 3 * 4
+        + (contents.sessionJson.size() + contents.diagnosisJson.size()) * 5 + 2048);
     output
         = "<!doctype html>\n<html lang=\"ru\"><head><meta charset=\"utf-8\">"
           "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; "
@@ -81,7 +82,13 @@ bool buildHtmlReport(const ReportPackageContents& contents, std::string& html, s
     output += contents.gameFrameIncluded ? "включённый" : "отсутствующий";
     output += ". Это поле не подтверждает происхождение изображения.</p><h3>Сессия</h3><pre>";
     appendEscaped(output, contents.sessionJson);
-    output += "</pre><small>Снимок офлайн · без сетевых ресурсов и скриптов</small></main></body></html>\n";
+    output += "</pre><h3>Заявленные выводы пакета</h3>"
+              "<p>Содержимое диагноза не сверено с измерениями: не используйте его как подтверждённый "
+              "факт.</p><pre>";
+    appendEscaped(output, contents.diagnosisJson);
+    output += "</pre><p>Паспорт системы, аудит и история датчиков в этой версии пакета не собраны. "
+              "Пустые разделы не означают отсутствие неисправностей.</p>"
+              "<small>Снимок офлайн · без сетевых ресурсов и скриптов</small></main></body></html>\n";
     html = std::move(output);
     return true;
 }

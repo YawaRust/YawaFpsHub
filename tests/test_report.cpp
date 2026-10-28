@@ -185,13 +185,18 @@ void runReportTests()
     CHECK(error.empty());
     CHECK(html.find("data:image/png;base64,iVBORw0KGgo") != std::string::npos);
     CHECK(html.find("default-src 'none'") != std::string::npos);
+    CHECK(html.find("gpu_bound") != std::string::npos);
+    CHECK(html.find("Паспорт системы, аудит и история датчиков в этой версии пакета не собраны")
+        != std::string::npos);
     CHECK(html.find("<script") == std::string::npos);
     const std::string originalHtml = html;
     auto untrusted = read;
     untrusted.sessionJson = "<script>alert('x')&\"</script>";
+    untrusted.diagnosisJson = "</pre><script>escape</script>";
     CHECK(buildHtmlReport(untrusted, html, error));
     CHECK(html.find("<script") == std::string::npos);
     CHECK(html.find("&lt;script&gt;") != std::string::npos);
+    CHECK(html.find("&lt;/pre&gt;&lt;script&gt;escape") != std::string::npos);
     CHECK(html.find("&#39;") != std::string::npos);
     CHECK(html.find("&amp;") != std::string::npos);
     CHECK(html.find("&quot;") != std::string::npos);
