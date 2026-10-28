@@ -84,6 +84,7 @@ struct OverlaySettings
     int monitorOriginY = 0;
     bool followGameMonitor = false;
     bool showSparkline = false;
+    MetricId sparklineMetric = MetricId::Fps;
     OverlayLayout layout = OverlayLayout::Plates;
     OverlayStyle style = OverlayStyle::Frosted; // базовая палитра старых стилей
     OverlayRecipe recipe = OverlayRecipe::Frosted;

@@ -26,7 +26,7 @@ enum class ActionKind : std::uint8_t {
     SetStyle,
     ToggleFollowGameMonitor,
     CycleOverlayMonitor,
-    ToggleFpsSparkline,
+    CycleSparkline,
     ToggleMenuScene,
     ToggleGameProfile,
     SetPosition,

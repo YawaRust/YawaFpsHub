@@ -104,6 +104,7 @@
     originY: 0,
     followGameMonitor: false,
     sparkline: false,
+    sparklineMetric: "fps",
     layout: "plates",
     style: "frosted",
     recipe: "frosted",
@@ -167,7 +168,12 @@
     const other = direction === "undo" ? "redo" : "undo";
     overlayHistory[other].push(JSON.stringify(overlayState));
     const snapshot = source.pop();
+    const previousGraph = overlayState.sparklineMetric;
     Object.assign(overlayState, JSON.parse(snapshot));
+    if (previousGraph !== overlayState.sparklineMetric) {
+      sparklineHistory.length = 0;
+      $("#osdSparklinePoints").setAttribute("points", "");
+    }
     overlayHistory.committed = snapshot;
     overlayHistory.restoring = true;
     applyOverlay();
@@ -1089,18 +1095,22 @@
   let lastSnapshot = null;
   let systemRendered = false;
 
-  const fpsSparklineHistory = [];
+  const sparklineHistory = [];
   function onData(snap) {
     lastSnapshot = snap;
-    const fps = snap.sensors.get("fps")?.value;
-    if (Number.isFinite(fps) && fps >= 0) {
-      fpsSparklineHistory.push(fps);
-      if (fpsSparklineHistory.length > 32) fpsSparklineHistory.shift();
-      const low = Math.min(...fpsSparklineHistory);
-      const span = Math.max(1, Math.max(...fpsSparklineHistory) - low);
-      $("#osdSparklinePoints").setAttribute("points", fpsSparklineHistory.map((value, index) =>
-        `${index * 160 / Math.max(1, fpsSparklineHistory.length - 1)},${22 - 16 * (value - low) / span}`).join(" "));
+    const reading = snap.sensors.get(overlayState.sparklineMetric)?.value;
+    if (overlayState.sparkline && Number.isFinite(reading) && reading >= 0) {
+      sparklineHistory.push(reading);
+      if (sparklineHistory.length > 32) sparklineHistory.shift();
+      const low = Math.min(...sparklineHistory);
+      const span = Math.max(1, Math.max(...sparklineHistory) - low);
+      $("#osdSparklinePoints").setAttribute("points", sparklineHistory.map((value, index) =>
+        `${index * 160 / Math.max(1, sparklineHistory.length - 1)},${22 - 16 * (value - low) / span}`).join(" "));
+    } else if (overlayState.sparkline) {
+      sparklineHistory.length = 0;
+      $("#osdSparklinePoints").setAttribute("points", "");
     }
+    $("#osdPreview").classList.toggle("is-sparkline", overlayState.sparkline && sparklineHistory.length >= 2);
     updateMetrics(snap);
     updateBars(snap);
     updateCores(snap);
@@ -1290,8 +1300,11 @@
     osd.style.setProperty("--osd-origin-x", `${overlayState.originX}px`);
     osd.style.setProperty("--osd-origin-y", `${overlayState.originY}px`);
     osd.dataset.layout = overlayState.layout;
-    osd.classList.toggle("is-sparkline", Boolean(overlayState.sparkline));
-    $("#osdSparkline").checked = Boolean(overlayState.sparkline);
+    osd.classList.toggle("is-sparkline", overlayState.sparkline && sparklineHistory.length >= 2);
+    const graphNames = { fps: "FPS", cpu: "CPU", gpu: "GPU", frameMs: "кадр" };
+    const graphName = graphNames[overlayState.sparklineMetric] || "FPS";
+    $("#osdSparkline").textContent = overlayState.sparkline ? `График: ${graphName}` : "График: выкл";
+    $("#osdSparklinePoints").closest("svg").setAttribute("aria-label", `История: ${graphName}`);
     osd.dataset.style = overlayState.style;
     osd.dataset.surface = overlayState.surface || "";
     osd.style.setProperty("--osd-scale", (overlayState.scale / 100).toFixed(2));
@@ -1401,7 +1414,9 @@
   // нужны после сброса пресета и после любой внешней правки состояния.
   function syncOsdControls() {
     $("#osdFollowGame").checked = overlayState.followGameMonitor;
-    $("#osdSparkline").checked = Boolean(overlayState.sparkline);
+    $("#osdSparkline").textContent = overlayState.sparkline ? `График: ${
+      { fps: "FPS", cpu: "CPU", gpu: "GPU", frameMs: "кадр" }[overlayState.sparklineMetric] || "FPS"}`
+      : "График: выкл";
     $$("#osdSurface button").forEach((button) => button.classList.toggle("is-active",
       button.dataset.surface === overlayState.surface));
     $$("#osdStyles .style-tile").forEach((tile) => tile.classList.toggle("is-active",
@@ -2067,8 +2082,18 @@
       overlayState.followGameMonitor = event.target.checked;
       recordOverlayHistory();
     });
-    $("#osdSparkline").addEventListener("change", (event) => {
-      overlayState.sparkline = event.target.checked;
+    $("#osdSparkline").addEventListener("click", () => {
+      const choices = ["fps", "cpu", "gpu", "frameMs"];
+      if (!overlayState.sparkline) {
+        overlayState.sparkline = true;
+        overlayState.sparklineMetric = choices[0];
+      } else {
+        const next = choices.indexOf(overlayState.sparklineMetric) + 1;
+        if (next === choices.length) overlayState.sparkline = false;
+        else overlayState.sparklineMetric = choices[next];
+      }
+      sparklineHistory.length = 0;
+      $("#osdSparklinePoints").setAttribute("points", "");
       applyOverlay();
     });
     $("#osdMenuScene").addEventListener("click", (event) => {

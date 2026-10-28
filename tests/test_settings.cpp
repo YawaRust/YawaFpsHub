@@ -476,6 +476,15 @@ namespace {
         CHECK(roundTrip.overlay.showSparkline);
         CHECK(parseSettings("[overlay]\nfps_sparkline = 0\n", roundTrip, error));
         CHECK(!roundTrip.overlay.showSparkline);
+        CHECK(roundTrip.overlay.sparklineMetric == MetricId::Fps);
+        for (MetricId metric : { MetricId::CpuLoad, MetricId::GpuLoad, MetricId::FrameTime }) {
+            settings.overlay.sparklineMetric = metric;
+            CHECK(parseSettings(serializeSettings(settings), roundTrip, error));
+            CHECK(roundTrip.overlay.showSparkline);
+            CHECK(roundTrip.overlay.sparklineMetric == metric);
+        }
+        CHECK(parseSettings("[overlay]\nfps_sparkline = 1\nsparkline_metric = cpu_temp\n", roundTrip, error));
+        CHECK(roundTrip.overlay.sparklineMetric == MetricId::Fps);
         CHECK(parseSettings(
             "[overlay]\nanchor_mode = other\norigin_x = -20\norigin_y = 99999\n", roundTrip, error));
         CHECK(roundTrip.overlay.anchorMode == OverlayAnchorMode::Corner);

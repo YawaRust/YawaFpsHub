@@ -737,9 +737,13 @@ void drawOverlayEditorQuickControls(
         isHovered(model, follow));
     hits.push_back(UiHit { follow, ActionKind::ToggleFollowGameMonitor, 0 });
     const Rect spark { inner.left + 196.0f, inner.top + 172.0f, inner.right, inner.top + 196.0f };
-    drawChip(renderer, spark, L"График FPS", overlay.showSparkline, theme, TextRole::Tiny,
-        isHovered(model, spark));
-    hits.push_back(UiHit { spark, ActionKind::ToggleFpsSparkline, 0 });
+    const std::wstring_view graph = !overlay.showSparkline ? L"График: выкл"
+        : overlay.sparklineMetric == MetricId::CpuLoad     ? L"График: CPU"
+        : overlay.sparklineMetric == MetricId::GpuLoad     ? L"График: GPU"
+        : overlay.sparklineMetric == MetricId::FrameTime   ? L"График: кадр"
+                                                           : L"График: FPS";
+    drawChip(renderer, spark, graph, overlay.showSparkline, theme, TextRole::Tiny, isHovered(model, spark));
+    hits.push_back(UiHit { spark, ActionKind::CycleSparkline, 0 });
     const Rect profile { inner.left, inner.top + 202.0f, inner.left + 186.0f, inner.top + 226.0f };
     drawChip(renderer, profile, model.hasGameProfile ? L"Убрать профиль игры" : L"Сохранить для игры",
         model.hasGameProfile, theme, TextRole::Tiny, isHovered(model, profile));

@@ -1441,11 +1441,24 @@ void MainWindow::applyAction(const UiHit& hit)
         break;
     }
 
-    case ActionKind::ToggleFpsSparkline:
-        m_model.settings.overlay.showSparkline = !m_model.settings.overlay.showSparkline;
-        m_overlay.setSettings(m_model.settings.overlay);
+    case ActionKind::CycleSparkline: {
+        auto& overlay = m_model.settings.overlay;
+        if (!overlay.showSparkline) {
+            overlay.showSparkline = true;
+            overlay.sparklineMetric = MetricId::Fps;
+        } else if (overlay.sparklineMetric == MetricId::Fps) {
+            overlay.sparklineMetric = MetricId::CpuLoad;
+        } else if (overlay.sparklineMetric == MetricId::CpuLoad) {
+            overlay.sparklineMetric = MetricId::GpuLoad;
+        } else if (overlay.sparklineMetric == MetricId::GpuLoad) {
+            overlay.sparklineMetric = MetricId::FrameTime;
+        } else {
+            overlay.showSparkline = false;
+        }
+        m_overlay.setSettings(overlay);
         saveSettings();
         break;
+    }
 
     case ActionKind::ToggleMenuScene:
         toggleMenuScene();

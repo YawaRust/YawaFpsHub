@@ -1014,10 +1014,10 @@ std::array<Color, kOverlayColorCount> overlayColorPalette()
 OverlayText makeOverlayText(const OverlaySettings& settings, const MetricStore& store)
 {
     OverlayText text;
-    if (settings.showSparkline && store.hasValue(MetricId::Fps)) {
+    if (settings.showSparkline && store.hasValue(settings.sparklineMetric)) {
         std::array<float, 32> history { };
-        const std::size_t count = store.copyHistory(MetricId::Fps, history.data(), history.size());
-        text.fpsHistory.assign(history.begin(), history.begin() + static_cast<std::ptrdiff_t>(count));
+        const std::size_t count = store.copyHistory(settings.sparklineMetric, history.data(), history.size());
+        text.sparklineHistory.assign(history.begin(), history.begin() + static_cast<std::ptrdiff_t>(count));
     }
     for (const OverlayMetricRow& row : overlayMetricRows(settings, store)) {
         text.labels.push_back(wideLabel(row.label));
@@ -1241,8 +1241,8 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
             spec.height = std::max(spec.height, static_cast<float>((row.y >= 0 ? row.y : 12) + 30));
         }
     }
-    const bool hasSparkline = settings.showSparkline && text.fpsHistory.size() >= 2
-        && std::all_of(text.fpsHistory.begin(), text.fpsHistory.end(),
+    const bool hasSparkline = settings.showSparkline && text.sparklineHistory.size() >= 2
+        && std::all_of(text.sparklineHistory.begin(), text.sparklineHistory.end(),
             [](float value) { return std::isfinite(value) && value >= 0.0f; });
     if (hasSparkline) {
         spec.height += 30.0f;
@@ -1343,17 +1343,19 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
     }
 
     if (hasSparkline) {
-        const auto [low, high] = std::minmax_element(text.fpsHistory.begin(), text.fpsHistory.end());
+        const auto [low, high]
+            = std::minmax_element(text.sparklineHistory.begin(), text.sparklineHistory.end());
         const float range = std::max(*high - *low, 1.0f);
         const float span = frame.width() - 2.0f * look.padding * scale;
-        for (std::size_t index = 1; index < text.fpsHistory.size(); ++index) {
+        for (std::size_t index = 1; index < text.sparklineHistory.size(); ++index) {
             const float x1 = frame.left + look.padding * scale
-                + span * static_cast<float>(index - 1) / static_cast<float>(text.fpsHistory.size() - 1);
+                + span * static_cast<float>(index - 1) / static_cast<float>(text.sparklineHistory.size() - 1);
             const float x2 = frame.left + look.padding * scale
-                + span * static_cast<float>(index) / static_cast<float>(text.fpsHistory.size() - 1);
+                + span * static_cast<float>(index) / static_cast<float>(text.sparklineHistory.size() - 1);
             const float y1
-                = frame.bottom - (8.0f + 16.0f * (text.fpsHistory[index - 1] - *low) / range) * scale;
-            const float y2 = frame.bottom - (8.0f + 16.0f * (text.fpsHistory[index] - *low) / range) * scale;
+                = frame.bottom - (8.0f + 16.0f * (text.sparklineHistory[index - 1] - *low) / range) * scale;
+            const float y2
+                = frame.bottom - (8.0f + 16.0f * (text.sparklineHistory[index] - *low) / range) * scale;
             painter.line(x1, y1, x2, y2, look.accent, 1.5f * scale, 0.85f);
         }
     }

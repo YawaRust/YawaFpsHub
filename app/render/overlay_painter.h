@@ -19,7 +19,7 @@ struct OverlayText {
     std::vector<MetricId> ids;
     // Только показатели с определённой шкалой 0–100%; -1 означает «нет шкалы».
     std::vector<float> gaugeFill;
-    std::vector<float> fpsHistory;
+    std::vector<float> sparklineHistory;
 };
 
 struct OverlayFormats {
