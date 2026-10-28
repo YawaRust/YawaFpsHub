@@ -851,7 +851,12 @@ body.is-compact .chart-wrap--frames canvas { height: 96px; }
 .game__guide--y { top: var(--guide-y); left: 0; right: 0; height: 1px; }
 .canvas-help { margin-top: 9px; }
 .overlay-workshop { grid-column: 1 / -1; display: grid; grid-template-columns: 210px minmax(0, 1fr) minmax(290px, .85fr); gap: 14px; align-items: start; }
+.overlay-workshop { order: 1; }
+.workshop-recipes { order: 0; }
 .overlay-workshop > .card { min-width: 0; }
+.workshop-inspector:not(.is-advanced) > .field:not(.quick-field) { display: none; }
+.workshop-quick-hint { color: var(--text-dim); font-size: 12px; line-height: 1.5; margin: 0 0 12px; }
+.workshop-inspector.is-advanced .workshop-quick-hint { display: none; }
 .workshop-layers__list { display: grid; gap: 5px; }
 .workshop-layer { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .workshop-layer__name, .workshop-layer__eye { border: 1px solid var(--line); background: var(--panel-flat); color: var(--text-dim); border-radius: 7px; padding: 6px; cursor: pointer; }

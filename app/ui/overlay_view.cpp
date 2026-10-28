@@ -685,6 +685,49 @@ void drawOverlayEditorPreview(Renderer& renderer, const AppModel& model, const T
     drawPreviewCard(renderer, model, theme, card, unused, &preview);
 }
 
+void drawOverlayEditorQuickControls(
+    Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area, std::vector<UiHit>& hits)
+{
+    const Rect gallery { area.left, area.top, area.right, area.top + 268.0f };
+    renderer.pushClip(gallery);
+    drawCard(renderer, gallery, theme);
+    drawStyleGallery(renderer, model, theme, gallery.inset(kCardPadding), hits);
+    renderer.popClip();
+
+    const Rect card { area.left, gallery.bottom + kGap, area.right, gallery.bottom + kGap + 258.0f };
+    renderer.pushClip(card);
+    drawCard(renderer, card, theme);
+    const Rect inner = card.inset(kCardPadding);
+    const OverlaySettings& overlay = model.settings.overlay;
+    renderer.text(L"Соберите оверлей", Rect { inner.left, inner.top, inner.right, inner.top + 22.0f },
+        TextRole::Heading, theme.text);
+    renderer.text(L"Рецепт выше · слои слева · плашку двигайте на холсте",
+        Rect { inner.left, inner.top + 22.0f, inner.right, inner.top + 38.0f }, TextRole::Tiny,
+        theme.textDim);
+
+    constexpr std::array<std::wstring_view, 3> names { L"Плитки", L"Строка", L"Шкала" };
+    const float chipWidth = (inner.width() - 12.0f) / 3.0f;
+    for (std::size_t index = 0; index < names.size(); ++index) {
+        const float left = inner.left + static_cast<float>(index) * (chipWidth + 6.0f);
+        const Rect chip { left, inner.top + 44.0f, left + chipWidth, inner.top + 70.0f };
+        drawChip(renderer, chip, names[index], static_cast<std::size_t>(overlay.layout) == index, theme,
+            TextRole::Tiny, isHovered(model, chip));
+        hits.push_back(UiHit { chip, ActionKind::SetLayout, static_cast<int>(index) });
+    }
+    drawSlider(renderer, Rect { inner.left, inner.top + 80.0f, inner.right, inner.top + 114.0f },
+        overlay.scalePercent, 70, 160, L"Масштаб", theme, hits, ActionKind::SetScale, L"%");
+    drawSlider(renderer, Rect { inner.left, inner.top + 126.0f, inner.right, inner.top + 160.0f },
+        overlay.opacityPercent, 0, 100, L"Прозрачность", theme, hits, ActionKind::SetOpacity, L"%");
+    const Rect follow { inner.left, inner.top + 172.0f, inner.left + 190.0f, inner.top + 196.0f };
+    drawChip(renderer, follow, L"На мониторе игры", overlay.followGameMonitor, theme, TextRole::Tiny,
+        isHovered(model, follow));
+    hits.push_back(UiHit { follow, ActionKind::ToggleFollowGameMonitor, 0 });
+    renderer.text(L"Точные цвета, позиции и датчики — в инспекторе и подробном режиме.",
+        Rect { inner.left, inner.top + 200.0f, inner.right, inner.top + 216.0f }, TextRole::Tiny,
+        theme.textFaint);
+    renderer.popClip();
+}
+
 void drawOverlayEditorControls(
     Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area, std::vector<UiHit>& hits)
 {

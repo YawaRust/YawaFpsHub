@@ -14,6 +14,8 @@ void drawOverlayEditorPreview(Renderer& renderer, const AppModel& model, const T
     int screenWidth, int screenHeight);
 void drawOverlayEditorControls(Renderer& renderer, const AppModel& model, const Theme& theme,
     const Rect& area, std::vector<UiHit>& hits);
+void drawOverlayEditorQuickControls(Renderer& renderer, const AppModel& model, const Theme& theme,
+    const Rect& area, std::vector<UiHit>& hits);
 
 void drawOverlayView(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area,
     std::vector<UiHit>& hits);

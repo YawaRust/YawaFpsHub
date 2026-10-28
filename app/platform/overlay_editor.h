@@ -84,6 +84,7 @@ private:
     std::vector<OverlaySettings> m_undo;
     std::vector<OverlaySettings> m_redo;
     int m_panelScroll = 0;
+    bool m_advancedControls = false;
     int m_layersScroll = 0;
     std::vector<MetricId> m_hiddenLayers;
     int m_catalogScroll = 0;

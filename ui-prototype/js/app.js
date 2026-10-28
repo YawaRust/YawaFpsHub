@@ -2395,6 +2395,13 @@
     document.body.classList.add("no-fx");
   }
 
+  $("#osdAdvanced").addEventListener("click", (event) => {
+    const inspector = $(".workshop-inspector");
+    const expanded = inspector.classList.toggle("is-advanced");
+    event.currentTarget.setAttribute("aria-expanded", String(expanded));
+    event.currentTarget.textContent = expanded ? "← Просто" : "Подробнее →";
+  });
+
   bindPause();
   bindAccents();
   bindOverlay();

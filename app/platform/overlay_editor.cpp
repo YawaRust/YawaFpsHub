@@ -185,6 +185,8 @@ bool OverlayEditor::open(HWND owner, HINSTANCE instance, AppModel& model, const 
     m_dpiScale = static_cast<float>(GetDpiForWindow(owner)) / 96.0f;
     m_historyCommitted = model.settings.overlay;
     m_layersScroll = 0;
+    m_panelScroll = 0;
+    m_advancedControls = false;
     m_hiddenLayers.clear();
     m_samplingColor = false;
     m_undo.clear();
@@ -267,9 +269,12 @@ void OverlayEditor::layout()
     m_layers = Rect { 20.0f, 307.0f, 174.0f, m_inspector.top - 12.0f };
     m_controls = Rect { 564.0f, 112.0f, width - 18.0f, height - 20.0f };
     m_catalog = Rect { width - 386.0f, 50.0f, width - 18.0f, std::min(height - 22.0f, 462.0f) };
-    m_panelScroll = std::clamp(m_panelScroll, 0,
-        std::max(0,
-            static_cast<int>(overlayEditorControlsHeight(m_model->settings.overlay) - m_controls.height())));
+    m_panelScroll = m_advancedControls
+        ? std::clamp(m_panelScroll, 0,
+              std::max(0,
+                  static_cast<int>(
+                      overlayEditorControlsHeight(m_model->settings.overlay) - m_controls.height())))
+        : 0;
     if (!m_labelEdit) {
         return;
     }
@@ -695,7 +700,8 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
                 static_cast<float>(cursor.x), canvasScale());
             m_panY = CanvasAxis { m_canvas.top, m_panY, previous }.panAtZoom(
                 static_cast<float>(cursor.y), canvasScale());
-        } else if (cursor.x >= static_cast<int>(m_controls.left)) {
+        } else if (m_advancedControls
+            && m_controls.contains(static_cast<float>(cursor.x), static_cast<float>(cursor.y))) {
             m_panelScroll = std::clamp(m_panelScroll - delta, 0,
                 std::max(0,
                     static_cast<int>(
@@ -866,8 +872,18 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
             m_catalogOpen = false;
             ShowWindow(m_catalogSearch, SW_HIDE);
         }
-        if (x >= static_cast<int>(m_controls.left) && y >= 67 && y < 102) {
-            const float width = m_controls.width() / static_cast<float>(kSections.size());
+        if (x >= static_cast<int>(m_controls.left) && x < static_cast<int>(m_controls.right) && y >= 67
+            && y < 102) {
+            if (x >= static_cast<int>(m_controls.right - 124.0f)) {
+                m_advancedControls = !m_advancedControls;
+                m_panelScroll = 0;
+                refresh();
+                return 0;
+            }
+            if (!m_advancedControls) {
+                return 0;
+            }
+            const float width = (m_controls.width() - 130.0f) / static_cast<float>(kSections.size());
             const int tab = static_cast<int>((x - m_controls.left) / width);
             if (tab >= 0 && tab < static_cast<int>(kSections.size())) {
                 const auto anchor = std::find_if(m_hits.begin(), m_hits.end(), [tab](const UiHit& hit) {
@@ -880,9 +896,7 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
                             static_cast<int>(overlayEditorControlsHeight(m_model->settings.overlay)
                                 - m_controls.height())));
                 }
-                m_undo.clear();
-                m_redo.clear();
-                m_historyCommitted = m_model->settings.overlay;
+                // Навигация по разделам не меняет оверлей и не сбрасывает undo/redo.
                 refresh();
             }
             return 0;
@@ -1430,37 +1444,51 @@ void OverlayEditor::paint()
     m_renderer.pushClip(m_controls);
     m_renderer.pushTranslate(0.0f, -static_cast<float>(m_panelScroll));
     m_hits.clear();
-    drawOverlayEditorControls(m_renderer, *m_model, theme,
-        Rect { m_controls.left, m_controls.top + 4.0f, m_controls.right - 6.0f,
-            m_controls.top + overlayEditorControlsHeight(m_model->settings.overlay) },
-        m_hits);
+    const Rect controlsArea { m_controls.left, m_controls.top + 4.0f, m_controls.right - 6.0f,
+        m_controls.top + overlayEditorControlsHeight(m_model->settings.overlay) };
+    if (m_advancedControls) {
+        drawOverlayEditorControls(m_renderer, *m_model, theme, controlsArea, m_hits);
+    } else {
+        drawOverlayEditorQuickControls(m_renderer, *m_model, theme, controlsArea, m_hits);
+    }
     m_renderer.popTranslate();
     m_renderer.popClip();
     for (UiHit& hit : m_hits) {
         hit.rect.top -= static_cast<float>(m_panelScroll);
         hit.rect.bottom -= static_cast<float>(m_panelScroll);
     }
-    std::size_t activeSection = 0;
-    for (std::size_t index = 1; index < kSectionActions.size(); ++index) {
-        const auto anchor = std::find_if(m_hits.begin(), m_hits.end(),
-            [index](const UiHit& hit) { return hit.action == kSectionActions[index]; });
-        if (anchor != m_hits.end() && anchor->rect.top <= m_controls.top + 120.0f) {
-            activeSection = index;
+    if (m_advancedControls) {
+        std::size_t activeSection = 0;
+        for (std::size_t index = 1; index < kSectionActions.size(); ++index) {
+            const auto anchor = std::find_if(m_hits.begin(), m_hits.end(),
+                [index](const UiHit& hit) { return hit.action == kSectionActions[index]; });
+            if (anchor != m_hits.end() && anchor->rect.top <= m_controls.top + 120.0f) {
+                activeSection = index;
+            }
         }
+        for (std::size_t index = 0; index < kSections.size(); ++index) {
+            const float tabWidth = (m_controls.width() - 130.0f) / static_cast<float>(kSections.size());
+            const Rect tab { m_controls.left + tabWidth * static_cast<float>(index), 68.0f,
+                m_controls.left + tabWidth * static_cast<float>(index + 1) - 6.0f, 101.0f };
+            m_renderer.fillRoundRect(tab, 8.0f, index == activeSection ? theme.accentSoft : theme.panelSoft);
+            m_renderer.text(kSections[index], tab, TextRole::Small,
+                index == activeSection ? theme.accent : theme.text, TextAlign::Center);
+        }
+        const float fraction
+            = m_panelScroll / std::max(overlayEditorControlsHeight(m_model->settings.overlay), 1.0f);
+        m_renderer.fillRoundRect(
+            Rect { m_controls.right - 4.0f, m_controls.top + fraction * m_controls.height(), m_controls.right,
+                m_controls.top + fraction * m_controls.height() + 55.0f },
+            2.0f, theme.accent);
+    } else {
+        m_renderer.text(L"Быстро: рецепт → раскладка → перетаскивание",
+            Rect { m_controls.left + 8.0f, 68.0f, m_controls.right - 132.0f, 101.0f }, TextRole::Tiny,
+            theme.textDim);
     }
-    for (std::size_t index = 0; index < kSections.size(); ++index) {
-        const float tabWidth = m_controls.width() / static_cast<float>(kSections.size());
-        const Rect tab { m_controls.left + tabWidth * static_cast<float>(index), 68.0f,
-            m_controls.left + tabWidth * static_cast<float>(index + 1) - 6.0f, 101.0f };
-        m_renderer.fillRoundRect(tab, 8.0f, index == activeSection ? theme.accentSoft : theme.panelSoft);
-        m_renderer.text(kSections[index], tab, TextRole::Small,
-            index == activeSection ? theme.accent : theme.text, TextAlign::Center);
-    }
-    const float fraction
-        = m_panelScroll / std::max(overlayEditorControlsHeight(m_model->settings.overlay), 1.0f);
-    m_renderer.fillRoundRect(Rect { m_controls.right - 4.0f, m_controls.top + fraction * m_controls.height(),
-                                 m_controls.right, m_controls.top + fraction * m_controls.height() + 55.0f },
-        2.0f, theme.accent);
+    const Rect mode { m_controls.right - 124.0f, 68.0f, m_controls.right - 2.0f, 101.0f };
+    m_renderer.fillRoundRect(mode, 8.0f, theme.accentSoft);
+    m_renderer.text(m_advancedControls ? L"← Просто" : L"Подробнее →", mode, TextRole::Tiny, theme.accent,
+        TextAlign::Center);
     if (m_catalogOpen) {
         m_renderer.fillRoundRect(m_catalog, 10.0f, theme.panel);
         m_renderer.strokeRoundRect(m_catalog, 10.0f, theme.accent, 1.0f);

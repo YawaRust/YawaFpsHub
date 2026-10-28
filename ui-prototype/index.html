@@ -765,13 +765,15 @@
                 <h2 class="card__title">Инспектор · всё оформление</h2>
                 <p class="card__sub">Изменения видны сразу в предпросмотре</p>
               </div>
+              <button id="osdAdvanced" class="btn btn--ghost" type="button" aria-expanded="false">Подробнее →</button>
               <div class="segmented segmented--icons" id="osdHistory">
                 <button type="button" data-history="undo" title="Отменить · Ctrl+Z" aria-label="Отменить" disabled>↶</button>
                 <button type="button" data-history="redo" title="Повторить · Ctrl+Shift+Z" aria-label="Повторить" disabled>↷</button>
               </div>
             </header>
 
-            <div class="field">
+            <p class="workshop-quick-hint">Выберите рецепт, включите строки слева и двигайте плашку на холсте.</p>
+            <div class="field quick-field">
               <span class="field__label">Положение</span>
               <div class="segmented segmented--icons" id="osdPosition">
                 <button class="is-active" data-pos="tl" aria-label="Слева сверху">↖</button>
@@ -782,7 +784,7 @@
               </div>
             </div>
 
-            <div class="field field--monitor">
+            <div class="field field--monitor quick-field">
               <label class="switch" for="osdFollowGame">
                 <input type="checkbox" id="osdFollowGame">
                 <span class="switch__track"><span class="switch__knob"></span></span>
@@ -791,7 +793,7 @@
               <small>По умолчанию выключено. В демо без второго монитора положение не меняется.</small>
             </div>
 
-            <div class="field">
+            <div class="field quick-field">
               <span class="field__label">Вид</span>
               <div class="segmented" id="osdLayout">
                 <button class="is-active" data-layout="plates">Плитки</button>
@@ -810,7 +812,7 @@
               </div>
             </div>
 
-            <div class="field">
+            <div class="field quick-field">
               <div class="field__label-row">
                 <span class="field__label">Масштаб</span>
                 <b id="osdScaleValue">100%</b>
@@ -826,7 +828,7 @@
               <input class="range" type="range" id="osdTextScale" min="85" max="130" step="5" value="100">
             </div>
 
-            <div class="field">
+            <div class="field quick-field">
               <div class="field__label-row">
                 <span class="field__label">Прозрачность окна</span>
                 <b id="osdOpacityValue">72%</b>
@@ -1024,7 +1026,7 @@
           </article>
           </div>
 
-          <article class="card span-12">
+          <article class="card span-12 workshop-recipes">
             <header class="card__head">
               <div>
                 <h2 class="card__title">Рецепты оформления</h2>
