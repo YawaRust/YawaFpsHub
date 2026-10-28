@@ -291,6 +291,24 @@ namespace {
             return metrics.widthIncludingTrailingWhitespace;
         }
 
+        void setRowBounds(std::vector<OverlayRowBounds>* bounds, const Rect& frame, float fit)
+        {
+            m_rowBounds = bounds;
+            m_frame = frame;
+            m_fit = fit;
+        }
+
+        void recordRow(MetricId id, const Rect& row)
+        {
+            if (m_rowBounds != nullptr) {
+                m_rowBounds->push_back({ id,
+                    { m_frame.left + (row.left - m_frame.left) * m_fit,
+                        m_frame.top + (row.top - m_frame.top) * m_fit,
+                        m_frame.left + (row.right - m_frame.left) * m_fit,
+                        m_frame.top + (row.bottom - m_frame.top) * m_fit } });
+            }
+        }
+
         float scale() const { return m_scale; }
         float opacity() const { return m_opacity; }
         const Theme& theme() const { return m_theme; }
@@ -325,6 +343,9 @@ namespace {
         OverlayChrome m_chrome;
         float m_outline = 0.0f;
         float m_backgroundOpacity = 1.0f;
+        std::vector<OverlayRowBounds>* m_rowBounds = nullptr;
+        Rect m_frame { };
+        float m_fit = 1.0f;
     };
 
     // Полный визуальный набор стиля: палитра, форма, типографика. Раньше стили отличались
@@ -598,6 +619,8 @@ namespace {
         const float right = frame.right - look.padding * scale;
 
         if (rowShown(text, 0)) {
+            painter.recordRow(text.ids[0],
+                Rect { frame.left, frame.top + 8.0f * scale, frame.right, frame.top + 62.0f * scale });
             const Rect chip { left, frame.top + 8.0f * scale, left + 66.0f * scale,
                 frame.top + 26.0f * scale };
             painter.fillRound(chip, 9.0f * scale, look.label, 0.12f);
@@ -619,6 +642,8 @@ namespace {
             if (!rowShown(text, index)) {
                 continue;
             }
+            painter.recordRow(
+                text.ids[index], Rect { frame.left, y, frame.right, y + (18.0f + look.rowGap) * scale });
             painter.text(labels[index],
                 Rect { left, y, left + look.labelWidth * scale, y + kRowHeight * scale }, TextRole::Tiny,
                 look.label);
@@ -647,6 +672,8 @@ namespace {
         const float right = frame.right - look.padding * scale;
 
         if (rowShown(text, 0)) {
+            painter.recordRow(text.ids[0],
+                Rect { frame.left, frame.top + 8.0f * scale, frame.right, frame.top + 60.0f * scale });
             painter.text(labels[0],
                 Rect { left, frame.top + 8.0f * scale, left + 120.0f * scale, frame.top + 22.0f * scale },
                 TextRole::Tiny, look.accent);
@@ -667,6 +694,8 @@ namespace {
             if (!rowShown(text, index)) {
                 continue;
             }
+            painter.recordRow(
+                text.ids[index], Rect { frame.left, y, frame.right, y + (18.0f + look.rowGap) * scale });
             painter.fillCircle(left + 2.0f * scale, y + 8.0f * scale, 2.0f * scale, look.rowPalette[index]);
             painter.text(labels[index],
                 Rect { left + 10.0f * scale, y, left + look.labelWidth * scale, y + kRowHeight * scale },
@@ -693,6 +722,7 @@ namespace {
             if (!rowShown(text, index)) {
                 continue;
             }
+            painter.recordRow(text.ids[index], Rect { frame.left, y, frame.right, y + 19.0f * scale });
             painter.text(labels[index],
                 Rect { frame.left, y, frame.left + look.padding * scale + look.labelWidth * scale,
                     y + kRowHeight * scale },
@@ -729,6 +759,8 @@ namespace {
             if (!rowShown(text, index)) {
                 continue;
             }
+            painter.recordRow(text.ids[index],
+                Rect { frame.left, y, frame.right, y + std::min(kRowHeight, 18.0f + look.rowGap) * scale });
             painter.text(L"> " + labels[index],
                 Rect { left, y, left + look.labelWidth * scale, y + kRowHeight * scale }, TextRole::Mono,
                 look.label);
@@ -765,6 +797,8 @@ namespace {
         const float right = frame.right - look.padding * scale;
 
         if (rowShown(text, 0)) {
+            painter.recordRow(text.ids[0],
+                Rect { frame.left, frame.top + 8.0f * scale, frame.right, frame.top + 62.0f * scale });
             painter.text(labels[0],
                 Rect { left, frame.top + 8.0f * scale, left + 140.0f * scale, frame.top + 22.0f * scale },
                 TextRole::Tiny, look.accent);
@@ -780,6 +814,8 @@ namespace {
             if (!rowShown(text, index)) {
                 continue;
             }
+            painter.recordRow(
+                text.ids[index], Rect { frame.left, y, frame.right, y + (18.0f + look.rowGap) * scale });
             painter.text(labels[index],
                 Rect { left, y, left + look.labelWidth * scale, y + kRowHeight * scale }, TextRole::Tiny,
                 look.label);
@@ -804,6 +840,8 @@ namespace {
             if (!rowShown(text, index)) {
                 continue;
             }
+            painter.recordRow(text.ids[index],
+                Rect { frame.left, y, frame.right, y + std::min(kRowHeight, 18.0f + look.rowGap) * scale });
             painter.text(labels[index],
                 Rect { frame.left + look.padding * scale, y, frame.left + 86.0f * scale,
                     y + kRowHeight * scale },
@@ -841,6 +879,7 @@ namespace {
             const float valueWidth = big ? painter.measure(values[index], TextRole::Value)
                                          : painter.measure(values[index], TextRole::Small);
             const float cellWidth = std::max(labelWidth, valueWidth) + 10.0f * scale;
+            painter.recordRow(text.ids[index], Rect { x, top, x + cellWidth, bottom });
 
             painter.text(labels[index], Rect { x, top, x + cellWidth, top + 12.0f * scale }, TextRole::Tiny,
                 look.label);
@@ -890,6 +929,8 @@ namespace {
             if (!rowShown(text, index)) {
                 continue;
             }
+            painter.recordRow(text.ids[index],
+                Rect { frame.left, y, frame.right, y + std::min(kRowHeight, 18.0f + look.rowGap) * scale });
             painter.text(labels[index],
                 Rect { left, y, left + look.labelWidth * scale, y + kRowHeight * scale }, TextRole::Mono,
                 look.label);
@@ -915,6 +956,7 @@ namespace {
             if (!rowShown(text, index)) {
                 continue;
             }
+            painter.recordRow(text.ids[index], Rect { frame.left, y, frame.right, y + 24.0f * scale });
             painter.text(labels[index], Rect { left, y, right - 90.0f * scale, y + 17.0f * scale },
                 TextRole::Small, look.label);
             painter.text(text.values[index], Rect { right - 90.0f * scale, y, right, y + 17.0f * scale },
@@ -1202,6 +1244,7 @@ namespace {
             const std::wstring label = look.uppercase ? upperCase(text.labels[index]) : text.labels[index];
             const std::wstring segment = tracked(label + L" " + text.values[index], look.letterSpacing);
             const float width = painter.measure(segment, role);
+            painter.recordRow(text.ids[index], Rect { x, inner.top, x + width + 4.0f, inner.bottom });
             const auto group = overlayColorGroup(text.ids[index]);
             const bool customized = settings.metricColors[static_cast<std::size_t>(text.ids[index])] >= 0
                 || settings.metricRgba[static_cast<std::size_t>(text.ids[index])] || settings.valueColor >= 0
@@ -1561,6 +1604,9 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
     const Rect frame { left, top, left + width, top + height };
     Painter painter(target, theme, scaled, scale, opacity, chrome, settings.textOutline);
     painter.setBackgroundOpacity(backgroundOpacity);
+    if (!settings.pixelLayout) {
+        painter.setRowBounds(rowBounds, frame, fit);
+    }
 
     if (settings.pixelLayout && settings.layout == OverlayLayout::Plates && !text.ids.empty()) {
         painter.plate(frame, look.radius * scale, look.background);

@@ -113,18 +113,24 @@ LRESULT CALLBACK OverlayWindow::windowProc(HWND window, UINT message, WPARAM wPa
                 const RtssLayerEdit& edit = self->m_settings.rtssLayerEdits[self->m_layerIndex];
                 self->m_layerStartX = edit.x;
                 self->m_layerStartY = edit.y;
-            } else if (self->m_onRowEdit && GetKeyState(VK_MENU) >= 0 && self->rowAt(x, y)) {
+            } else if (GetKeyState(VK_MENU) >= 0 && self->rowAt(x, y)
+                && (self->m_settings.pixelLayout ? static_cast<bool>(self->m_onRowEdit)
+                                                 : static_cast<bool>(self->m_onRowReorder))) {
                 self->m_rowDragId = *self->rowAt(x, y);
                 self->m_rowDragging = true;
-                self->m_rowDragOrigin = POINT { x, y };
-                self->m_rowStart = self->m_settings.rowPositions[static_cast<std::size_t>(self->m_rowDragId)];
-                self->m_rowDragScale
-                    = std::max(0.001f, (self->m_contentRectD2D.right - self->m_contentRectD2D.left) / 520.0f);
-                if (self->m_rowStart.y < 0) {
-                    const auto entry = std::find_if(self->m_rowBounds.begin(), self->m_rowBounds.end(),
-                        [self](const OverlayRowBounds& row) { return row.id == self->m_rowDragId; });
-                    self->m_rowStart.y = static_cast<int>(
-                        std::lround((entry->rect.top - self->m_contentRectD2D.top) / self->m_rowDragScale));
+                self->m_rowReordering = !self->m_settings.pixelLayout;
+                if (!self->m_rowReordering) {
+                    self->m_rowDragOrigin = POINT { x, y };
+                    self->m_rowStart
+                        = self->m_settings.rowPositions[static_cast<std::size_t>(self->m_rowDragId)];
+                    self->m_rowDragScale = std::max(
+                        0.001f, (self->m_contentRectD2D.right - self->m_contentRectD2D.left) / 520.0f);
+                    if (self->m_rowStart.y < 0) {
+                        const auto entry = std::find_if(self->m_rowBounds.begin(), self->m_rowBounds.end(),
+                            [self](const OverlayRowBounds& row) { return row.id == self->m_rowDragId; });
+                        self->m_rowStart.y = static_cast<int>(std::lround(
+                            (entry->rect.top - self->m_contentRectD2D.top) / self->m_rowDragScale));
+                    }
                 }
             } else {
                 self->beginDrag(x + static_cast<int>(self->m_monitorRect.left),
@@ -521,9 +527,14 @@ void OverlayWindow::setRowEditHandler(std::function<void(MetricId, OverlayRowPos
     m_onRowEdit = std::move(handler);
 }
 
+void OverlayWindow::setRowReorderHandler(std::function<void(MetricId, MetricId, bool)> handler)
+{
+    m_onRowReorder = std::move(handler);
+}
+
 std::optional<MetricId> OverlayWindow::rowAt(int x, int y) const
 {
-    if (!m_settings.pixelLayout || m_settings.layout != OverlayLayout::Plates) {
+    if (m_settings.recipe == OverlayRecipe::Rtss && m_settings.rtssVisual && m_settings.rtssTemplate) {
         return std::nullopt;
     }
     for (auto it = m_rowBounds.rbegin(); it != m_rowBounds.rend(); ++it) {
@@ -536,7 +547,16 @@ std::optional<MetricId> OverlayWindow::rowAt(int x, int y) const
 
 void OverlayWindow::updateRowDrag(int x, int y)
 {
-    if (!m_rowDragging || !m_onRowEdit) {
+    if (!m_rowDragging) {
+        return;
+    }
+    if (m_rowReordering) {
+        const auto target = rowAt(x, y);
+        if (target && *target != m_rowDragId) {
+            moveOverlayMetric(m_settings, m_rowDragId, *target);
+            repaint();
+            m_onRowReorder(m_rowDragId, *target, false);
+        }
         return;
     }
     const int dx = static_cast<int>(std::lround((x - m_rowDragOrigin.x) / m_rowDragScale));
@@ -556,7 +576,10 @@ void OverlayWindow::finishRowDrag()
         return;
     }
     m_rowDragging = false;
-    if (m_onRowEdit) {
+    if (m_rowReordering) {
+        m_rowReordering = false;
+        m_onRowReorder(m_rowDragId, m_rowDragId, true);
+    } else if (m_onRowEdit) {
         m_onRowEdit(m_rowDragId, m_settings.rowPositions[static_cast<std::size_t>(m_rowDragId)], true);
     }
 }

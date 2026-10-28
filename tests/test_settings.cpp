@@ -178,6 +178,13 @@ namespace {
         CHECK(rows.front().id == MetricId::VramUsed);
         Settings saved;
         saved.overlay = settings;
+        moveOverlayMetric(saved.overlay, MetricId::CpuLoad, MetricId::VramUsed);
+        CHECK(!saved.overlay.pixelLayout);
+        Settings reordered;
+        std::string reorderError;
+        CHECK(parseSettings(serializeSettings(saved), reordered, reorderError));
+        CHECK(!reordered.overlay.pixelLayout);
+        CHECK(overlayMetricRows(reordered.overlay, store)[0].id == MetricId::CpuLoad);
         enableOverlayPixelLayout(saved.overlay);
         saved.overlay.rowPositions[static_cast<std::size_t>(MetricId::VramUsed)] = { 30, 320, 17 };
         Settings parsed;

@@ -562,6 +562,11 @@
   function rebuildOverlaySensors() {
     const host = $("#osdPreview");
     host.replaceChildren();
+    const paddingGrip = document.createElement("span");
+    paddingGrip.className = "osd__padding-grip";
+    paddingGrip.title = "Тянуть для настройки отступов";
+    paddingGrip.setAttribute("aria-label", "Отступы оверлея");
+    host.append(paddingGrip);
     const sensors = [...sensorRows.values()].map((entry) => entry.sensor);
     const primary = [...overlayState.metricOrder, ...Object.keys(OSD_PRIMARY)];
     sensors.sort((a, b) => {
