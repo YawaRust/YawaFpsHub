@@ -166,6 +166,7 @@ struct AppModel
     // Паспорт машины собирается один раз при старте, узкое место пересчитывается
     // из последних показаний: экраны только рисуют то, что лежит в модели.
     HardwareIdentity hardware;
+    std::vector<DiskSmartReading> diskHealth;
     BottleneckResult balance;
     std::vector<Finding> findings;
     GameDiagnosisInput diagnosisInput;

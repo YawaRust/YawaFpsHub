@@ -121,7 +121,7 @@ namespace {
     constexpr float kSystemRow = 274.0f;
     constexpr float kSystemMemory = 416.0f;
     constexpr float kSystemMonitor = 190.0f;
-    constexpr float kSystemDisk = 184.0f;
+    constexpr float kSystemDisk = 320.0f;
     constexpr float kSystemNote = 143.0f;
 
 } // namespace

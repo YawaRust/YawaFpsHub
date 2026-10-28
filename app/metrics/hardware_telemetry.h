@@ -78,6 +78,23 @@ inline std::optional<double> nvmeCompositeTemperature(std::span<const std::byte>
     return health ? health->compositeCelsius : std::nullopt;
 }
 
+struct DiskSmartReading
+{
+    std::uint32_t diskNumber = 0;
+    NvmeSmartHealth health;
+};
+
+inline const NvmeSmartHealth* nvmeHealthForDisk(
+    std::span<const DiskSmartReading> readings, std::uint32_t number)
+{
+    for (const DiskSmartReading& reading : readings) {
+        if (reading.diskNumber == number) {
+            return &reading.health;
+        }
+    }
+    return nullptr;
+}
+
 class ContinuousEnergyCounter
 {
 public:

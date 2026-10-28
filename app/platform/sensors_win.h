@@ -60,6 +60,7 @@ public:
     bool sample(SystemSnapshot& snapshot, std::uint32_t gamePid = 0);
     const SensorAvailability& availability() const { return m_availability; }
     const std::optional<AmdDdr4Timings>& memoryTimings() const { return m_memoryTimings; }
+    std::vector<DiskSmartReading> diskHealth() const { return m_storage.health(); }
 
     std::wstring activeGpuName() const;
     std::uint32_t coreCount() const { return m_coreCount; }

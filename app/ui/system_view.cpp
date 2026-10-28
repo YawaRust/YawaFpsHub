@@ -299,11 +299,42 @@ void drawDisplayCard(Renderer& renderer, const AppModel& model, const Theme& the
     }
 }
 
+std::wstring smartSummary(const NvmeSmartHealth& health)
+{
+    std::wstring text = L"NVMe SMART · использовано " + std::to_wstring(health.percentUsed);
+    text += health.percentUsed == 255 ? L"% или больше" : L"%";
+    if (health.availableSparePercent) {
+        text += L" · резерв " + std::to_wstring(*health.availableSparePercent) + L"%";
+    }
+    if (health.dataUnitsWritten) {
+        // NVMe rounds each 512,000-byte unit up: this is an estimate, not exact bytes written.
+        text += L" · записано ~"
+            + wideText(formatValue(static_cast<double>(*health.dataUnitsWritten) * 0.000000512, 2))
+            + L" ТБ";
+    }
+    if (health.compositeCelsius) {
+        text += L" · " + wideText(formatValue(*health.compositeCelsius, 1)) + L" °C";
+    }
+    return text;
+}
+
+std::wstring smartWarnings(const NvmeSmartHealth& health)
+{
+    std::wstring text = L"Ошибки носителя: ";
+    text += health.mediaErrors ? std::to_wstring(*health.mediaErrors) : L"нет данных";
+    text += L" · аварийные остановки: ";
+    text += health.unsafeShutdowns ? std::to_wstring(*health.unsafeShutdowns) : L"нет данных";
+    if (health.criticalWarning != 0) {
+        text += L" · флаги предупреждения: " + std::to_wstring(health.criticalWarning);
+    }
+    return text;
+}
+
 void drawDiskCard(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card)
 {
     drawCard(renderer, card, theme);
     const Rect inner = card.inset(kCardPadding);
-    drawCardHeader(renderer, card, L"Диски", L"модель, тип подключения и объём из Windows", theme);
+    drawCardHeader(renderer, card, L"Диски", L"модель из Windows · SMART только при точном совпадении номера", theme);
 
     if (model.hardware.disks.empty()) {
         renderer.text(L"нет данных",
@@ -313,7 +344,7 @@ void drawDiskCard(Renderer& renderer, const AppModel& model, const Theme& theme,
 
     float top = inner.top + 42.0f;
     for (const DiskIdentity& disk : model.hardware.disks) {
-        if (top + 36.0f > inner.bottom) {
+        if (top + 70.0f > inner.bottom) {
             break;
         }
         const std::wstring title = field(disk.name);
@@ -346,7 +377,18 @@ void drawDiskCard(Renderer& renderer, const AppModel& model, const Theme& theme,
             renderer.text(clipText(renderer, note, TextRole::Tiny, inner.width()),
                 Rect{ inner.left, top + 19.0f, inner.right, top + 33.0f }, TextRole::Tiny, theme.textFaint);
         }
-        top += 42.0f;
+        const NvmeSmartHealth* health = disk.diskNumber >= 0
+            ? nvmeHealthForDisk(model.diskHealth, static_cast<std::uint32_t>(disk.diskNumber)) : nullptr;
+        const std::wstring smart = health ? smartSummary(*health) : L"NVMe SMART: нет данных для этого диска";
+        renderer.text(clipText(renderer, smart, TextRole::Tiny, inner.width()),
+            Rect{ inner.left, top + 37.0f, inner.right, top + 51.0f }, TextRole::Tiny,
+            health ? theme.textDim : theme.textFaint);
+        if (health) {
+            renderer.text(clipText(renderer, smartWarnings(*health), TextRole::Tiny, inner.width()),
+                Rect{ inner.left, top + 54.0f, inner.right, top + 68.0f }, TextRole::Tiny,
+                health->criticalWarning ? theme.accent : theme.textFaint);
+        }
+        top += 76.0f;
     }
 }
 
@@ -379,7 +421,7 @@ void drawSystemView(Renderer& renderer, const AppModel& model, const Theme& them
     drawDisplayCard(renderer, model, theme, columns.span(narrow ? 0 : 8, narrow ? 12 : 4,
         narrow ? memoryTop + memoryHeight + kGap : memoryTop, monitorHeight));
 
-    const float diskHeight = 184.0f;
+    const float diskHeight = 320.0f;
     const float diskTop = memoryTop + memoryHeight + kGap + (narrow ? monitorHeight + kGap : 0.0f);
     drawDiskCard(renderer, model, theme, columns.span(0, 12, diskTop, diskHeight));
 

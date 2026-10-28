@@ -52,6 +52,12 @@ void runHardwareTelemetryTests()
     health = decodeNvmeSmartHealth(log);
     CHECK(!health->availableSparePercent && !health->spareThresholdPercent);
     CHECK(health->mediaErrors == 2);
+    const std::array<DiskSmartReading, 2> disks { DiskSmartReading { 3, *health },
+        DiskSmartReading { 7, { } } };
+    CHECK(nvmeHealthForDisk(disks, 3) != nullptr);
+    CHECK(nvmeHealthForDisk(disks, 3)->mediaErrors == 2);
+    CHECK(!nvmeHealthForDisk(disks, 7)->mediaErrors);
+    CHECK(nvmeHealthForDisk(disks, 4) == nullptr);
 
     ContinuousEnergyCounter energy;
     CHECK(!energy.sample(10, 1));
