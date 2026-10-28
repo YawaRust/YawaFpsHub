@@ -61,23 +61,42 @@ DumpRequest probeCommand()
     return request;
 }
 
-// Пустой путь отличает ошибочный --report от обычного запуска приложения.
-std::optional<std::wstring> reportCommand()
+struct ReportRequest
+{
+    std::wstring path;
+    bool json = false;
+};
+
+// Неизвестные сочетания --report/--json не должны попадать в обычный запуск с UAC.
+std::optional<ReportRequest> reportCommand()
 {
     int count = 0;
     wchar_t** arguments = CommandLineToArgvW(GetCommandLineW(), &count);
     if (arguments == nullptr)
         return std::nullopt;
-    std::optional<std::wstring> path;
+    ReportRequest request;
+    bool hasReport = false;
+    bool hasJson = false;
+    bool invalid = false;
     for (int index = 1; index < count; ++index) {
         const std::wstring_view arg = arguments[index];
         if (arg.starts_with(L"--report")) {
-            path = count == 2 && arg.starts_with(L"--report=") ? std::wstring(arg.substr(9)) : L"";
-            break;
+            invalid |= hasReport || !arg.starts_with(L"--report=");
+            hasReport = true;
+            if (arg.starts_with(L"--report="))
+                request.path = std::wstring(arg.substr(9));
+        } else if (arg.starts_with(L"--json")) {
+            invalid |= hasJson || arg != L"--json";
+            hasJson = true;
         }
     }
     LocalFree(arguments);
-    return path;
+    if (!hasReport && !hasJson)
+        return std::nullopt;
+    request.json = hasJson;
+    if (!hasReport || invalid || count != 2 + static_cast<int>(hasJson))
+        request.path.clear();
+    return request;
 }
 
 HANDLE probeOutput()
@@ -118,7 +137,7 @@ bool readLocalReport(std::wstring_view path, std::string& archive, std::string& 
     return error.empty();
 }
 
-int reportCommandOutput(std::wstring_view path)
+int reportCommandOutput(const ReportRequest& request)
 {
     HANDLE output = probeOutput();
     if (output == nullptr || output == INVALID_HANDLE_VALUE)
@@ -127,22 +146,29 @@ int reportCommandOutput(std::wstring_view path)
     int status = 1;
     std::string archive;
     std::string error;
-    if (path.empty()) {
-        message = "Usage: YawaFpsHub.exe --report=<local-file.yawa>\n";
+    if (request.path.empty()) {
+        message = request.json ? "{\"error\":\"usage\"}\n"
+                               : "Usage: YawaFpsHub.exe --report=<local-file.yawa> [--json]\n";
         status = 2;
-    } else if (!readLocalReport(path, archive, error)) {
-        message = "Report: " + error + "\n";
+    } else if (!readLocalReport(request.path, archive, error)) {
+        message = request.json ? "{\"error\":\"invalid_report\"}\n" : "Report: " + error + "\n";
     } else {
         yawa::ReportPackageContents contents;
         if (yawa::readReportPackage(archive, contents, error)) {
-            message = std::string(".yawa schema 1: valid\nGame frame: ")
-                + (contents.gameFrameIncluded ? "included" : "omitted")
-                + "\nSession: " + contents.sessionJson;
-            if (message.back() != '\n')
-                message += '\n';
+            if (request.json) {
+                message = std::string("{\"schema\":1,\"game_frame\":\"")
+                    + (contents.gameFrameIncluded ? "included" : "omitted")
+                    + "\",\"session\":" + contents.sessionJson + "}\n";
+            } else {
+                message = std::string(".yawa schema 1: valid\nGame frame: ")
+                    + (contents.gameFrameIncluded ? "included" : "omitted")
+                    + "\nSession: " + contents.sessionJson;
+                if (message.back() != '\n')
+                    message += '\n';
+            }
             status = 0;
         } else {
-            message = "Report: " + error + "\n";
+            message = request.json ? "{\"error\":\"invalid_report\"}\n" : "Report: " + error + "\n";
         }
     }
     DWORD written = 0;

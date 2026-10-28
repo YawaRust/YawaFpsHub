@@ -1,6 +1,7 @@
 """Windows CLI smoke: a valid local archive and three fail-closed inputs."""
 
 import argparse
+import json
 import subprocess
 import tempfile
 import zipfile
@@ -14,13 +15,16 @@ PNG = bytes.fromhex(
 )
 
 
-def invoke(exe: Path, argument: str, expected_status: int, expected_text: str) -> None:
+def invoke(exe: Path, arguments: str | list[str], expected_status: int, expected_text: str) -> str:
+    if isinstance(arguments, str):
+        arguments = [arguments]
     result = subprocess.run(
-        [str(exe), argument], capture_output=True, timeout=15, check=False
+        [str(exe), *arguments], capture_output=True, timeout=15, check=False
     )
     output = result.stdout.decode("utf-8")
     assert result.returncode == expected_status, (result.returncode, output)
     assert expected_text in output, output
+    return output
 
 
 def main() -> None:
@@ -42,12 +46,25 @@ def main() -> None:
             archive.writestr("screen.png", PNG)
         invoke(args.exe, f"--report={package}", 0, ".yawa schema 1: valid")
         invoke(args.exe, f"--report={package}", 0, 'Session: {"status":"no_game_sample"}')
+        parsed = json.loads(invoke(args.exe, [f"--report={package}", "--json"], 0, '"schema":1'))
+        assert parsed == {
+            "schema": 1,
+            "game_frame": "omitted",
+            "session": {"status": "no_game_sample"},
+        }
+        reverse = json.loads(invoke(args.exe, ["--json", f"--report={package}"], 0, '"schema":1'))
+        assert reverse == parsed
         broken = Path(directory) / "broken.yawa"
         broken.write_bytes(package.read_bytes().replace(b"no_game_sample", b"xo_game_sample"))
         invoke(args.exe, f"--report={broken}", 1, "Report:")
+        assert json.loads(invoke(args.exe, [f"--report={broken}", "--json"],
+                                 1, '"error":"invalid_report"')) == {"error": "invalid_report"}
         invoke(args.exe, f"--report={Path(directory) / 'missing.yawa'}", 1, "cannot open")
         invoke(args.exe, r"--report=\\server\share\report.yawa", 1, "network paths")
         invoke(args.exe, "--report", 2, "Usage:")
+        assert json.loads(invoke(args.exe, "--json", 2, '"error":"usage"')) == {"error": "usage"}
+        assert json.loads(invoke(args.exe, [f"--report={package}", "--json", "--probe"],
+                                 2, '"error":"usage"')) == {"error": "usage"}
 
 
 if __name__ == "__main__":
