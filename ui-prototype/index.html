@@ -679,7 +679,7 @@
                 <p class="card__sub">Глазик управляет строкой</p>
               </div></header>
               <div id="osdLayers" class="workshop-layers__list"></div>
-              <div class="workshop-color">
+              <div class="workshop-color" id="osdMetricColorEditor">
                 <label for="osdColorTarget">Что окрасить</label>
                 <select id="osdColorTarget">
                   <option value="metric">Выбранный показатель</option>
@@ -699,6 +699,21 @@
                 <input id="osdLayerAlpha" type="range" min="0" max="100" value="100">
                 <button id="osdLayerAuto" class="btn btn--ghost" type="button">Взять из рецепта</button>
                 <button id="osdLayerSample" class="btn btn--ghost" type="button">Пипетка · из предпросмотра</button>
+              </div>
+              <div class="workshop-color" id="osdRtssInspector" hidden>
+                <strong id="osdRtssName"></strong>
+                <span id="osdRtssCoordinates"></span>
+                <div>
+                  <button class="btn btn--ghost" type="button" data-rtss-action="left" aria-label="Влево">←</button>
+                  <button class="btn btn--ghost" type="button" data-rtss-action="right" aria-label="Вправо">→</button>
+                  <button class="btn btn--ghost" type="button" data-rtss-action="up" aria-label="Вверх">↑</button>
+                  <button class="btn btn--ghost" type="button" data-rtss-action="down" aria-label="Вниз">↓</button>
+                </div>
+                <div>
+                  <button class="btn btn--ghost" type="button" data-rtss-action="reset">Сбросить сдвиг</button>
+                  <button class="btn btn--ghost" type="button" data-rtss-action="visible">Скрыть</button>
+                </div>
+                <small>Изменяется вид в Yawa; исходный пакет RTSS не меняется.</small>
               </div>
             </article>
             <article class="card workshop-canvas">

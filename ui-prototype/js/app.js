@@ -379,8 +379,22 @@
   };
   const displayedLayers = new Set(["fps", "fpsLow1", "cpu", "cpuTemp", "gpu", "gpuTemp", "ramUsed", "vramUsed"]);
 
+  function refreshRtssInspector() {
+    const isRtss = selectedLayer.startsWith("rtss:") && overlayState.recipe === "rtss" && rtssVisual;
+    $("#osdMetricColorEditor").hidden = Boolean(isRtss);
+    $("#osdRtssInspector").hidden = !isRtss;
+    if (!isRtss) return;
+    const index = Number(selectedLayer.slice(5));
+    const layer = rtssVisual.layers.find((entry) => entry.index === index);
+    const edit = overlayState.rtssLayerEdits[index] || {};
+    $("#osdRtssName").textContent = `RTSS · ${layer?.name || `слой ${index}`}`;
+    $("#osdRtssCoordinates").textContent = `X: ${edit.x || 0} px · Y: ${edit.y || 0} px`;
+    $("[data-rtss-action=visible]").textContent = edit.visible === false ? "Показать" : "Скрыть";
+  }
+
   function selectOverlayLayer(id) {
     selectedLayer = id;
+    refreshRtssInspector();
     const hex = currentRgba() || "#FFFFFFFF";
     $("#osdLayerName").textContent = id.startsWith("rtss:")
       ? `RTSS · слой ${id.slice(5)} (перемещение и глазик)`
@@ -462,6 +476,21 @@
   }
 
   function bindLayerColor() {
+    $("#osdRtssInspector").addEventListener("click", (event) => {
+      const action = event.target.closest("[data-rtss-action]")?.dataset.rtssAction;
+      if (!action || !selectedLayer.startsWith("rtss:")) return;
+      const index = Number(selectedLayer.slice(5));
+      const edit = overlayState.rtssLayerEdits[index] || {};
+      const step = event.shiftKey ? 10 : 1;
+      const x = action === "reset" ? 0 : (edit.x || 0) + (action === "left" ? -step : action === "right" ? step : 0);
+      const y = action === "reset" ? 0 : (edit.y || 0) + (action === "up" ? -step : action === "down" ? step : 0);
+      overlayState.rtssLayerEdits[index] = { ...edit, x: Math.max(-2048, Math.min(2048, x)),
+        y: Math.max(-2048, Math.min(2048, y)),
+        visible: action === "visible" ? edit.visible === false : edit.visible !== false };
+      store.write("rtssLayerEdits", JSON.stringify(overlayState.rtssLayerEdits));
+      applyOverlay();
+      renderOverlayLayers();
+    });
     const hexInput = $("#osdLayerHex");
     $("#osdColorTarget").addEventListener("change", (event) => {
       colorTarget = event.target.value;
@@ -1465,6 +1494,7 @@
       radius.value = String(shown);
       radius.style.setProperty("--fill", `${(shown / 24) * 100}%`);
     }
+    refreshRtssInspector();
     recordOverlayHistory();
   }
 
