@@ -33,29 +33,29 @@ void runHardwareTelemetryTests()
     auto health = decodeNvmeSmartHealth(log);
     CHECK(health.has_value());
     CHECK(health->criticalWarning == 0x05);
-    CHECK(health->availableSparePercent == 98);
-    CHECK(health->spareThresholdPercent == 10);
+    CHECK(health->availableSparePercent == 98u);
+    CHECK(health->spareThresholdPercent == 10u);
     CHECK(health->percentUsed == 255);
-    CHECK(health->dataUnitsRead == 11);
-    CHECK(health->dataUnitsWritten == 42);
-    CHECK(health->powerOnHours == 7);
-    CHECK(health->unsafeShutdowns == 3);
-    CHECK(health->mediaErrors == 2);
-    CHECK(health->errorLogEntries == 9);
+    CHECK(health->dataUnitsRead == std::uint64_t { 11 });
+    CHECK(health->dataUnitsWritten == std::uint64_t { 42 });
+    CHECK(health->powerOnHours == std::uint64_t { 7 });
+    CHECK(health->unsafeShutdowns == std::uint64_t { 3 });
+    CHECK(health->mediaErrors == std::uint64_t { 2 });
+    CHECK(health->errorLogEntries == std::uint64_t { 9 });
     CHECK(!health->compositeCelsius);
     log[56] = std::byte(1); // High half of the written 128-bit counter is nonzero.
     health = decodeNvmeSmartHealth(log);
     CHECK(!health->dataUnitsWritten);
-    CHECK(health->dataUnitsRead == 11);
+    CHECK(health->dataUnitsRead == std::uint64_t { 11 });
     log[3] = std::byte(101);
     log[4] = std::byte(255);
     health = decodeNvmeSmartHealth(log);
     CHECK(!health->availableSparePercent && !health->spareThresholdPercent);
-    CHECK(health->mediaErrors == 2);
+    CHECK(health->mediaErrors == std::uint64_t { 2 });
     const std::array<DiskSmartReading, 2> disks { DiskSmartReading { 3, *health },
         DiskSmartReading { 7, { } } };
     CHECK(nvmeHealthForDisk(disks, 3) != nullptr);
-    CHECK(nvmeHealthForDisk(disks, 3)->mediaErrors == 2);
+    CHECK(nvmeHealthForDisk(disks, 3)->mediaErrors == std::uint64_t { 2 });
     CHECK(!nvmeHealthForDisk(disks, 7)->mediaErrors);
     CHECK(nvmeHealthForDisk(disks, 4) == nullptr);
 
