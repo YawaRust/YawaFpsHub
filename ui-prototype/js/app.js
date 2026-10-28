@@ -1857,7 +1857,8 @@
       }
       const row = overlayState.layout === "plates" && !event.altKey
         ? event.target.closest(".osd__row") : null;
-      if (row) selectOverlayLayer(row.querySelector("[data-metric]")?.dataset.metric || "fps");
+      if (row) selectOverlayLayer(event.target.closest("[data-metric]")?.dataset.metric
+        || row.querySelector("[data-metric]")?.dataset.metric || "fps");
       if (row && event.ctrlKey) {
         if (selected.has(row.dataset.osdItem)) selected.delete(row.dataset.osdItem);
         else selected.add(row.dataset.osdItem);
