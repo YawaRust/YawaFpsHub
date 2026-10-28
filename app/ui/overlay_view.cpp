@@ -754,7 +754,10 @@ void drawOverlayEditorQuickControls(
         hits.push_back(UiHit { profile, ActionKind::ToggleGameProfile, 0 });
     }
     const Rect scene { inner.left + 192.0f, inner.top + 202.0f, inner.right, inner.top + 226.0f };
-    drawChip(renderer, scene, model.menuScene ? L"Вернуть · Ctrl+F11" : L"Меню: скрыть · Ctrl+F11",
+    drawChip(renderer, scene,
+        model.menuScene                       ? L"Вернуть · Ctrl+F11"
+            : overlay.menuOpacityPercent == 0 ? L"Меню: скрыть · Ctrl+F11"
+                                              : L"Меню: приглушить · Ctrl+F11",
         model.menuScene, theme, TextRole::Tiny, isHovered(model, scene));
     hits.push_back(UiHit { scene, ActionKind::ToggleMenuScene, 0 });
     drawSlider(renderer, Rect { inner.left, inner.top + 238.0f, inner.right, inner.top + 272.0f },

@@ -1306,6 +1306,9 @@
     osd.style.setProperty("--menu-opacity", (overlayState.menuOpacity / 100).toFixed(2));
     $("#osdMenuOpacity").value = String(overlayState.menuOpacity);
     $("#osdMenuOpacityValue").textContent = `${overlayState.menuOpacity}%`;
+    $("#osdMenuScene").textContent = osd.classList.contains("is-menu-scene")
+      ? "Вернуть оверлей · Ctrl+F11"
+      : `Меню: ${overlayState.menuOpacity === 0 ? "скрыть" : "приглушить"} оверлей · Ctrl+F11`;
     const graphNames = { fps: "FPS", cpu: "CPU", gpu: "GPU", frameMs: "кадр" };
     const graphName = graphNames[overlayState.sparklineMetric] || "FPS";
     $("#osdSparkline").textContent = overlayState.sparkline ? `График: ${graphName}` : "График: выкл";
@@ -2152,10 +2155,15 @@
       $("#osdSparklinePoints").setAttribute("points", "");
       applyOverlay();
     });
-    $("#osdMenuScene").addEventListener("click", (event) => {
-      const menu = $("#osdPreview").classList.toggle("is-menu-scene");
-      event.currentTarget.textContent = menu ? "Вернуть оверлей · Ctrl+F11"
-        : "Меню: скрыть оверлей · Ctrl+F11";
+    $("#osdMenuScene").addEventListener("click", () => {
+      $("#osdPreview").classList.toggle("is-menu-scene");
+      applyOverlay();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.ctrlKey && event.key === "F11" && $("[data-view=overlay]").classList.contains("is-active")) {
+        event.preventDefault();
+        $("#osdMenuScene").click();
+      }
     });
     $("#osdMenuOpacity").addEventListener("input", (event) => {
       overlayState.menuOpacity = Number(event.target.value);

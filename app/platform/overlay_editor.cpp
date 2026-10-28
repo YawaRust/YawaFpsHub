@@ -689,7 +689,7 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
         refresh();
         return 0;
     }
-    case WM_MOVE:
+    case WM_EXITSIZEMOVE:
     case WM_DISPLAYCHANGE:
         if (m_window != nullptr) {
             m_hdrDisplay = hdrAtWindow(m_window);
