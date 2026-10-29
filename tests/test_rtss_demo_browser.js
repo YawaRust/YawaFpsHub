@@ -1,6 +1,9 @@
+document.documentElement.dataset.rtssInitialSparkline = String(Boolean(document.getElementById("osdSparklinePoints")));
 window.addEventListener("error", (event) => {
   document.documentElement.dataset.rtssScriptError = `${event.message} ${event.filename}:${event.lineno}`;
   document.documentElement.dataset.rtssSparkline = String(Boolean(document.querySelector("#osdSparklinePoints")));
+  document.documentElement.dataset.rtssPreviewChildren = String(document.querySelector("#osdPreview")?.children.length);
+  document.documentElement.dataset.rtssMarkupSparkline = String(document.body.innerHTML.includes("osdSparklinePoints"));
 });
 document.addEventListener("DOMContentLoaded", () => {
   const result = document.documentElement.dataset;
