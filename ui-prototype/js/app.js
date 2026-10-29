@@ -413,10 +413,12 @@
     const argb = edit.textColor ?? layer?.color ?? "FFFFFFFF";
     $("#osdRtssColor").value = /^([0-9a-f]{8})$/i.test(argb)
       ? `#${argb.slice(2)}${argb.slice(0, 2)}` : "#FFFFFFFF";
+    $("#osdRtssColorPicker").value = $("#osdRtssColor").value.slice(0, 7);
     const background = edit.backgroundColor ?? layer?.bg ?? "";
     $("#osdRtssBg").value = /^[0-9a-f]{8}$/i.test(background)
       ? `#${background.slice(2)}${background.slice(0, 2)}`
       : /^[0-9a-f]{6}$/i.test(background) ? `#${background}FF` : "";
+    $("#osdRtssBgPicker").value = $("#osdRtssBg").value.slice(0, 7) || "#000000";
     $("#osdRtssSize").value = String(edit.size || layer?.size || 100);
     $("#osdRtssWidth").value = String(edit.width || 0);
     $("#osdRtssHeight").value = String(edit.height || 0);
@@ -592,6 +594,7 @@
         refreshRtssInspector();
         return;
       }
+      $("#osdRtssColorPicker").value = hex.slice(0, 7);
       updateRtss({ textColor: `${hex.slice(7)}${hex.slice(1, 7)}`.toUpperCase() });
     });
     $("#osdRtssBg").addEventListener("change", (event) => {
@@ -599,9 +602,22 @@
       if (!hex) {
         $("[data-rtss-action=resetBackground]").click();
       } else if (/^#[0-9a-f]{8}$/i.test(hex)) {
+        $("#osdRtssBgPicker").value = hex.slice(0, 7);
         updateRtss({ backgroundColor: `${hex.slice(7)}${hex.slice(1, 7)}`.toUpperCase() });
       } else refreshRtssInspector();
     });
+    for (const [pickerId, hexId, field] of [
+      ["osdRtssColorPicker", "osdRtssColor", "textColor"],
+      ["osdRtssBgPicker", "osdRtssBg", "backgroundColor"]]) {
+      $(`#${pickerId}`).addEventListener("input", (event) => {
+        const current = $(`#${hexId}`).value;
+        const alpha = /^#[0-9a-f]{8}$/i.test(current) && current.slice(7).toUpperCase() !== "00"
+          ? current.slice(7) : "FF";
+        const hex = `${event.target.value}${alpha}`.toUpperCase();
+        $(`#${hexId}`).value = hex;
+        updateRtss({ [field]: `${hex.slice(7)}${hex.slice(1, 7)}` });
+      });
+    }
     $("#osdRtssSize").addEventListener("change", (event) => {
       const size = Number(event.target.value);
       if (!Number.isInteger(size) || size < 10 || size > 400) {

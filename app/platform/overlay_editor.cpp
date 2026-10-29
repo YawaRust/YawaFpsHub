@@ -1075,6 +1075,14 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
             if (GetCursorPos(&cursor) && ScreenToClient(m_window, &cursor)) {
                 cursor.x = logicalCoordinate(cursor.x);
                 cursor.y = logicalCoordinate(cursor.y);
+                const int inspectorX = cursor.x - static_cast<int>(m_inspector.left);
+                const int inspectorY = cursor.y - static_cast<int>(m_inspector.top);
+                if (m_rtssSelected >= 0 && static_cast<std::size_t>(m_rtssSelected) < rtssLayerCount()
+                    && inspectorY >= 132 && inspectorY <= 166
+                    && ((inspectorX >= 410 && inspectorX < 452) || (inspectorX >= 462 && inspectorX < 504))) {
+                    SetCursor(LoadCursorW(nullptr, IDC_HAND));
+                    return TRUE;
+                }
                 if (m_canvas.contains(static_cast<float>(cursor.x), static_cast<float>(cursor.y))
                     && m_screenPlate.width() > 0.0f && m_screenPlate.height() > 0.0f
                     && (scaleGrip().contains(static_cast<float>(cursor.x), static_cast<float>(cursor.y))
@@ -1576,6 +1584,37 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
                     const int step = GetKeyState(VK_SHIFT) < 0 ? 10 : 1;
                     nudgeRtssLayers(direction == 0 ? -step : direction == 1 ? step : 0,
                         direction == 2 ? -step : direction == 3 ? step : 0);
+                } else if (localY >= 132 && localY <= 166
+                    && ((localX >= 410 && localX < 452) || (localX >= 462 && localX < 504))) {
+                    SetFocus(m_window);
+                    const bool background = localX >= 462;
+                    const auto& layer = m_model->settings.overlay.rtssVisual->layers[
+                        static_cast<std::size_t>(m_rtssSelected)];
+                    auto& selected
+                        = m_model->settings.overlay.rtssLayerEdits[static_cast<std::size_t>(m_rtssSelected)];
+                    const std::uint32_t current = background
+                        ? selected.backgroundColor.value_or(layer.backgroundColor)
+                        : selected.textColor.value_or(layer.textColor);
+                    static COLORREF custom[16] { };
+                    CHOOSECOLORW picker { };
+                    picker.lStructSize = sizeof(picker);
+                    picker.hwndOwner = m_window;
+                    picker.lpCustColors = custom;
+                    picker.rgbResult = RGB((current >> 16) & 0xFFu, (current >> 8) & 0xFFu, current & 0xFFu);
+                    picker.Flags = CC_RGBINIT | CC_FULLOPEN;
+                    if (ChooseColorW(&picker)) {
+                        const std::uint32_t alpha = (current >> 24) == 0 ? 0xFFu : (current >> 24);
+                        const std::uint32_t color = (alpha << 24)
+                            | (static_cast<std::uint32_t>(GetRValue(picker.rgbResult)) << 16)
+                            | (static_cast<std::uint32_t>(GetGValue(picker.rgbResult)) << 8)
+                            | static_cast<std::uint32_t>(GetBValue(picker.rgbResult));
+                        if (background)
+                            selected.backgroundColor = color;
+                        else
+                            selected.textColor = color;
+                        changed(true);
+                        syncFields();
+                    }
                 }
                 return 0;
             }
@@ -2327,6 +2366,20 @@ void OverlayEditor::paint()
             m_renderer.fillRoundRect(button, 6.0f, theme.panelSoft);
             m_renderer.text(directions[static_cast<std::size_t>(direction)], button, TextRole::Small,
                 theme.accent, TextAlign::Center);
+        }
+        const std::array<std::uint32_t, 2> swatches { edit.textColor.value_or(layer.textColor),
+            edit.backgroundColor.value_or(layer.backgroundColor) };
+        for (int field = 0; field < 2; ++field) {
+            const float left = m_inspector.left + (field == 0 ? 410.0f : 462.0f);
+            const Rect button { left, m_inspector.top + 132.0f, left + 42.0f, m_inspector.top + 166.0f };
+            const std::uint32_t argb = swatches[static_cast<std::size_t>(field)];
+            m_renderer.fillRoundRect(button, 5.0f, theme.panelSoft);
+            m_renderer.fillRoundRect(
+                Rect { left + 4.0f, button.top + 3.0f, left + 38.0f, button.top + 19.0f }, 3.0f,
+                fromRgba((argb << 8) | (argb >> 24)));
+            m_renderer.text(field == 0 ? L"Т" : L"Ф",
+                Rect { left, button.top + 19.0f, left + 42.0f, button.bottom }, TextRole::Tiny, theme.text,
+                TextAlign::Center);
         }
     } else {
         const std::wstring title
