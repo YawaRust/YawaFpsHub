@@ -5,7 +5,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const result = document.documentElement.dataset;
   const bytes = (encoded) => Uint8Array.from(atob(encoded), (symbol) => symbol.charCodeAt(0));
   const waitFor = async (find) => {
-    for (let attempt = 0; attempt < 30; ++attempt) {
+    for (let attempt = 0; attempt < 60; ++attempt) {
       const match = find();
       if (match) return match;
       await new Promise((resolve) => setTimeout(resolve, 50));

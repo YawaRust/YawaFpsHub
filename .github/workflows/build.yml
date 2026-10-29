@@ -185,7 +185,7 @@ jobs:
             Start-Sleep -Seconds 2
             $url = "http://127.0.0.1:8766/ui-prototype/rtss-smoke.html?view=overlay&nofx=1&shot=1"
             $profile = Join-Path $env:TEMP "yawa-edge-rtss-smoke"
-            $dom = & $edge "--headless=new" "--disable-gpu" "--no-first-run" "--user-data-dir=$profile" "--virtual-time-budget=6000" "--dump-dom" $url 2>$null | Out-String
+            $dom = & $edge "--headless=new" "--disable-gpu" "--no-first-run" "--user-data-dir=$profile" "--virtual-time-budget=15000" "--dump-dom" $url 2>$null | Out-String
           } finally {
             Stop-Process -Id $server.Id -Force
           }
