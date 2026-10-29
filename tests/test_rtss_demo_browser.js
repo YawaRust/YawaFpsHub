@@ -1,5 +1,6 @@
 window.addEventListener("error", (event) => {
-  document.documentElement.dataset.rtssScriptError = event.message;
+  document.documentElement.dataset.rtssScriptError = `${event.message} ${event.filename}:${event.lineno}`;
+  document.documentElement.dataset.rtssSparkline = String(Boolean(document.querySelector("#osdSparklinePoints")));
 });
 document.addEventListener("DOMContentLoaded", () => {
   const result = document.documentElement.dataset;
