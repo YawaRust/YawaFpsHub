@@ -307,6 +307,19 @@ void enableOverlayPixelLayout(OverlaySettings& settings)
     settings.pixelLayout = true;
 }
 
+void restoreOverlayTemplate(OverlaySettings& settings)
+{
+    if (settings.recipe == OverlayRecipe::Rtss && settings.rtssTemplate && settings.rtssVisual) {
+        settings.rtssLayerEdits = {};
+        return;
+    }
+    settings.pixelLayout = false;
+    settings.rowPositions = {};
+    settings.styleRowOffsets = {};
+    settings.backgroundWidthPx = -1;
+    settings.backgroundHeightPx = -1;
+}
+
 OverlayRowPosition moveOverlayRow(OverlayRowPosition start, int deltaX, int deltaY)
 {
     const int dx = std::clamp(

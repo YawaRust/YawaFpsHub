@@ -2236,7 +2236,13 @@ void MainWindow::applyAction(const UiHit& hit)
                   L"переносятся; графики и сложные теги частичны, PNG-атлас рисуется "
                   L"только для поддерживаемого тега изображения. "
                   L"Недоступные значения помечены «нет данных». Исходный пакет остаётся "
-                  L"для обратного экспорта.\n\nОткрыть этот макет вместо текущего оверлея?";
+                  L"для обратного экспорта."
+                + ((imported.rtssVisual && !imported.rtssVisual->embeddedImage.empty()
+                       && !imported.rtssVisual->imageBytes)
+                        ? L"\n\nВнимание: встроенный PNG-атлас не найден или не поддерживается. "
+                          L"Слои изображений будут показаны как «нет данных»."
+                        : L"")
+                + L"\n\nОткрыть этот макет вместо текущего оверлея?";
             if (MessageBoxW(dialog.hwndOwner, notice.c_str(), L"Частичный импорт RTSS",
                     MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2)
                 != IDYES) {

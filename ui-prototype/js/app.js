@@ -730,19 +730,23 @@
       applyOverlay();
     });
     const sampleButton = $("#osdLayerSample");
+    const rtssSample = $("#osdRtssSample");
     let sampling = false;
-    sampleButton.addEventListener("click", () => {
+    for (const button of [sampleButton, rtssSample]) button.addEventListener("click", () => {
       sampling = !sampling;
-      sampleButton.classList.toggle("is-active", sampling);
+      button.classList.toggle("is-active", sampling);
       if (sampling) toast("Нажмите на текст или плашку предпросмотра. Градиенты недоступны.");
     });
     $("#gameScene").addEventListener("pointerdown", (event) => {
       if (!sampling) return;
       sampling = false;
       sampleButton.classList.remove("is-active");
+      rtssSample.classList.remove("is-active");
       event.preventDefault();
       event.stopImmediatePropagation();
-      const node = event.target.closest("#osdPreview .osd__val, #osdPreview .osd__key, #osdPreview .osd__unit, #osdPreview");
+      const rtss = selectedLayer.startsWith("rtss:");
+      const node = rtss ? event.target.closest("#osdPreview .rtss-visual-layer")
+        : event.target.closest("#osdPreview .osd__val, #osdPreview .osd__key, #osdPreview .osd__unit, #osdPreview");
       if (!node) {
         toast("Здесь цвет задан градиентом; выберите текст или плашку.");
         return;
@@ -756,9 +760,17 @@
       }
       const rgb = channels.slice(0, 3).map((channel) => Math.round(channel).toString(16).padStart(2, "0")).join("");
       const opacity = Math.round((channels[3] ?? 1) * 255).toString(16).padStart(2, "0");
-      setRgba(`#${rgb}${opacity}`.toUpperCase());
-      selectOverlayLayer(selectedLayer);
-      applyOverlay();
+      if (rtss) {
+        const current = $("#osdRtssColor").value;
+        const alpha = /^#[0-9a-f]{8}$/i.test(current) && current.slice(7).toUpperCase() !== "00"
+          ? current.slice(7) : "FF";
+        updateRtss({ textColor: `${alpha}${rgb}`.toUpperCase() });
+        refreshRtssInspector();
+      } else {
+        setRgba(`#${rgb}${opacity}`.toUpperCase());
+        selectOverlayLayer(selectedLayer);
+        applyOverlay();
+      }
     }, true);
   }
 
@@ -1866,6 +1878,29 @@
   function bindCanvasView() {
     const scene = $("#gameScene");
     $("#fitOsdCanvas").addEventListener("click", fitCanvasToOverlay);
+    $("#restoreOsdTemplate").addEventListener("click", () => {
+      if (overlayState.recipe === "rtss" && originalRtss) {
+        if (!Object.keys(overlayState.rtssLayerEdits).length) {
+          toast("Правок RTSS-слоёв нет");
+          return;
+        }
+        overlayState.rtssLayerEdits = {};
+        store.write("rtssLayerEdits", "{}");
+        renderOverlayLayers();
+      } else {
+        if (!Object.keys(overlayState.rowPositions).length
+          && overlayState.backgroundWidth === null && overlayState.backgroundHeight === null) {
+          toast("Раскладка уже соответствует шаблону");
+          return;
+        }
+        overlayState.rowPositions = {};
+        overlayState.backgroundWidth = null;
+        overlayState.backgroundHeight = null;
+      }
+      applyOverlay();
+      requestAnimationFrame(fitCanvasToOverlay);
+      toast("Раскладка возвращена к шаблону");
+    });
     let pan = null;
     scene.addEventListener("wheel", (event) => {
       event.preventDefault();
@@ -1945,7 +1980,26 @@
       if (overlayState.recipe === "rtss" && rtssVisual) {
         const layers = [...selectedRtssLayers].map((id) =>
           osd.querySelector(`.rtss-visual-layer[data-rtss-layer="${id.slice(5)}"]`)).filter(Boolean);
-        if (layers.length < 2) { toast("Выберите минимум два RTSS-слоя с Ctrl+кликом."); return; }
+        if (layers.length < 2) {
+          const plate = osd.getBoundingClientRect();
+          const scene = $("#gameScene").getBoundingClientRect();
+          const viewport = osd.offsetParent.getBoundingClientRect();
+          const fraction = edge === "left" || edge === "top" ? 0
+            : edge === "right" || edge === "bottom" ? 1 : 0.5;
+          const vertical = axis === "y";
+          const start = vertical ? scene.top : scene.left;
+          const extent = vertical ? scene.height : scene.width;
+          const size = vertical ? plate.height : plate.width;
+          const target = start + 18 + (extent - 36 - size) * fraction;
+          const current = vertical ? plate.top : plate.left;
+          if (Math.abs(target - current) < 0.5) return;
+          freeOverlayAnchor();
+          const origin = Math.max(0, Math.round((target
+            - (vertical ? viewport.top : viewport.left)) / canvasView.zoom));
+          overlayState[vertical ? "originY" : "originX"] = origin;
+          applyOverlay();
+          return;
+        }
         const reference = layers[0].getBoundingClientRect();
         const unit = Math.max(.001, osd.getBoundingClientRect().width / Math.max(1, osd.offsetWidth)
           * rtssVisual.zoom);
@@ -1962,10 +2016,10 @@
       }
       const rows = [...osd.querySelectorAll(".osd__row")]
         .filter((row) => selected.has(row.dataset.osdItem) && !row.classList.contains("is-hidden"));
-      if (rows.length < 2) { toast("Выберите минимум две строки с Ctrl+кликом."); return; }
-      const reference = rows[0].getBoundingClientRect();
+      if (!rows.length) { toast("Выберите видимую строку."); return; }
+      const reference = rows.length === 1 ? osd.getBoundingClientRect() : rows[0].getBoundingClientRect();
       const unit = Math.max(.001, osd.getBoundingClientRect().width / Math.max(1, osd.offsetWidth));
-      for (const row of rows.slice(1)) {
+      for (const row of rows.length === 1 ? rows : rows.slice(1)) {
         const offset = overlayState.rowPositions[row.dataset.osdItem] || { x: 0, y: 0 };
         overlayState.rowPositions[row.dataset.osdItem] = { ...offset,
           [axis]: Math.round(offset[axis] + (position(reference) - position(row.getBoundingClientRect())) / unit) };
@@ -2376,17 +2430,20 @@
     const cellWidth = cellHeight * 0.61;
     const units = (value, vertical) => value < 0 ? -value * (vertical ? cellHeight : cellWidth)
       : value * zoom;
+    const color = (encoded) => encoded.split(",").slice(0, 12)
+      .find((entry) => /^[0-9a-f]{6}([0-9a-f]{2})?$/i.test(entry)) || "";
     const count = Math.min(256, Number(text.match(/^Layers=(\d+)\s*$/mi)?.[1] || 0));
     const layers = [];
-    let width = 0;
-    let height = 0;
+    let left = 0;
+    let top = 0;
+    let right = 0;
+    let bottom = 0;
     for (const [, index, body] of text.matchAll(/^\[Layer(\d+)\]\s*$([\s\S]*?)(?=^\[|$(?![\s\S]))/gmi)) {
       if (Number(index) >= count) continue;
       const number = (name, fallback = 0) => Math.max(-512, Math.min(2048,
         Number(field(body, name, String(fallback))) || fallback));
       const label = field(body, "Text", "").slice(0, 8192);
-      const bg = field(body, "BgndColor", "").split(",")
-        .find((entry) => /^[0-9a-f]{6}([0-9a-f]{2})?$/i.test(entry)) || "";
+      const bg = color(field(body, "BgndColor", ""));
       if (!label && !bg && !number("ExtentX") && !number("ExtentY")) continue;
       const matchedImage = label.match(/^<I=0,0,(\d+),(\d+),(\d+),(\d+)>$/);
       const imageTag = matchedImage && Number(matchedImage[1]) <= 2048
@@ -2406,17 +2463,19 @@
       const x = units(number("PositionX"), false) - layerWidth * (origin % 3) / 2;
       const y = units(number("PositionY"), true) - layerHeight * Math.floor(origin / 3) / 2;
       layers.push({ index: Number(index), name: field(body, "Name", "").slice(0, 96),
-        label, bg, color: field(body, "TextColor", "").split(",")[0],
+        label, bg, color: color(field(body, "TextColor", "")),
         size,
         origin, x, y, width: layerWidth, height: layerHeight,
         autoWidth: !extentX && !imageTag, autoHeight: !extentY && !imageTag });
-      width = Math.max(width, x + layerWidth);
-      height = Math.max(height, y + layerHeight);
+      left = Math.min(left, x);
+      top = Math.min(top, y);
+      right = Math.max(right, x + layerWidth);
+      bottom = Math.max(bottom, y + layerHeight);
     }
     const sources = [...text.matchAll(/^\[Source\d+\]\s*$([\s\S]*?)(?=^\[|$(?![\s\S]))/gmi)]
       .map(([, body]) => ({ name: field(body, "Name", ""),
         provider: field(body, "Provider", ""), id: field(body, "ID", "") }));
-    return { layers, width, height, cellHeight, zoom, sources,
+    return { layers, width: right - left, height: bottom - top, cellHeight, zoom, sources,
       family: field(master, "FontFace", "Consolas").slice(0, 96),
       weight: Math.max(100, Math.min(900, Number(field(master, "FontWeight", "400")) || 400)) };
   }
@@ -2736,6 +2795,7 @@
           }
           if (image && (image.length < 24 || image.length > 4 * 1024 * 1024
             || String.fromCharCode(...image.slice(0, 8)) !== "\x89PNG\r\n\x1a\n")) image = null;
+          const missingImage = Boolean(embedded && !image);
           if (!/^Implementation=2\s*$/mi.test(text) || !/^Layers=([1-9]\d*)\s*$/mi.test(text)) {
             throw new Error("Ожидался текстовый шаблон RTSS OverlayEditor v2");
           }
@@ -2794,6 +2854,7 @@
           if (!window.confirm(`Это предварительная отрисовка, не копия RTSS 1:1. ${omitted} слоёв `
               + "без связанной метрики. Фон, текст и координаты переносятся, "
               + "графики и сложные теги частичны, PNG-атлас рисуется только для поддерживаемого тега. "
+              + (missingImage ? `PNG «${embedded}» не найден: слои изображения покажут «нет данных». ` : "")
               + "Для .ovl выберите макет и его PNG одновременно. Открыть макет?")) return;
           setRtssImage(image ? rtssBase64(image) : "");
           store.write("rtssImage", rtssImage);

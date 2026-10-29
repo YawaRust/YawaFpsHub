@@ -719,6 +719,7 @@
                   <input id="osdRtssBg" type="text" maxlength="9" spellcheck="false" aria-label="Цвет фона RTSS-слоя"></div>
                 <div><button class="btn btn--ghost" type="button" data-rtss-action="resetTextColor">Цвет из RTSS</button>
                   <button class="btn btn--ghost" type="button" data-rtss-action="resetBackground">Фон из RTSS</button></div>
+                <button class="btn btn--ghost" id="osdRtssSample" type="button">Пипетка · цвет текста из предпросмотра</button>
                 <label for="osdRtssSize">Размер шрифта, % (10–400)</label>
                 <input id="osdRtssSize" type="number" min="10" max="400" step="1" aria-label="Размер текста RTSS-слоя">
                 <label for="osdRtssWidth">Ширина слоя, px (0 — из RTSS)</label>
@@ -751,12 +752,13 @@
               </div>
               <div class="canvas-actions">
                 <button class="btn btn--ghost" id="fitOsdCanvas" type="button" title="Только масштаб и панорама холста; положение оверлея не меняется">Вписать оверлей</button>
+                <button class="btn btn--ghost" id="restoreOsdTemplate" type="button" title="Сбросить раскладку, а для RTSS — правки всех слоёв; оригинал остаётся прежним">Вернуть шаблон</button>
                 <span class="tag tag--live"><i></i>F10</span>
               </div>
             </header>
 
             <div class="canvas-align" aria-label="Выравнивание выделенных элементов">
-              <span>Ctrl+клик — выбрать строки или RTSS-слои · угол — размер:</span>
+              <span>Один элемент — по плашке (RTSS — весь оверлей по экрану); Ctrl+клик — несколько, относительно первого:</span>
               <button type="button" data-align="left">Слева</button>
               <button type="button" data-align="centerX">Центр X</button>
               <button type="button" data-align="right">Справа</button>

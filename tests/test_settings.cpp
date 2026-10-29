@@ -392,6 +392,42 @@ namespace {
         CHECK(sensorMissingReason(MetricId::DiskTemp, SensorFailure::NeedsAccess) == SensorFailure::Unknown);
     }
 
+    void testRestoreOverlayTemplateKeepsPersonalSettings()
+    {
+        OverlaySettings settings;
+        const auto fps = static_cast<std::size_t>(MetricId::Fps);
+        settings.pixelLayout = true;
+        settings.rowPositions[fps] = { 45, 300, 120 };
+        settings.styleRowOffsets[fps] = { 18, -7 };
+        settings.backgroundWidthPx = 520;
+        settings.backgroundHeightPx = 300;
+        settings.metricRgba[fps] = 0xAABBCCDDu;
+        settings.originX = 340;
+        settings.savedMonitorId = "display:test";
+        settings.metrics[fps] = false;
+        restoreOverlayTemplate(settings);
+        CHECK(!settings.pixelLayout && settings.rowPositions[fps].y == -1);
+        CHECK(settings.styleRowOffsets[fps].x == 0 && settings.styleRowOffsets[fps].y == 0);
+        CHECK(settings.backgroundWidthPx == -1 && settings.backgroundHeightPx == -1);
+        CHECK(settings.metricRgba[fps] == 0xAABBCCDDu && !settings.metrics[fps]);
+        CHECK(settings.originX == 340 && settings.savedMonitorId == "display:test");
+
+        std::string error;
+        CHECK(importRtssOverlay("[Master]\nImplementation=2\n[General]\nLayers=1\n"
+                                "[Layer0]\nText=<FR>\n",
+            settings, error));
+        const auto original = settings.rtssTemplate;
+        settings.rtssLayerEdits[0].visible = false;
+        settings.rtssLayerEdits[0].text = "other";
+        settings.rtssLayerEdits[0].x = 100;
+        settings.rtssLayerEdits[0].backgroundColor = 0x80808080u;
+        restoreOverlayTemplate(settings);
+        CHECK(settings.rtssTemplate == original && settings.rtssLayerEdits[0].visible);
+        CHECK(!settings.rtssLayerEdits[0].text && !settings.rtssLayerEdits[0].backgroundColor);
+        CHECK(settings.rtssLayerEdits[0].x == 0);
+        CHECK(settings.originX == 340 && settings.savedMonitorId == "display:test");
+    }
+
     void testCanvasCoordinatesSurviveZoom()
     {
         const CanvasAxis horizontal { 20.0f, 35.0f, 0.5f };
@@ -961,7 +997,8 @@ namespace {
                                    "[Source0]\nName=GPU1 usage\nProvider=Other\nID=GPU1 usage\n"
                                    "[Layer0]\nText=GPU\nPositionX=-2\nPositionY=-4\n"
                                    "ExtentX=-16\nExtentY=-6\nBgndColor=1000000,,0,80000000,0,(Framerate,1)\n"
-                                   "[Layer1]\nText=%GPU1 usage%\nPositionX=-12\nTextColor=FFFF8000\n"
+                                   "[Layer1]\nText=%GPU1 usage%\nPositionX=-12\n"
+                                   "TextColor=1000000,,0,FFFF8000,0,(Framerate,1)\n"
                                    "[Layer2]\nText=<FR> FPS\\nREADY\nExtentOrigin=2\nSize=200\n";
         OverlaySettings imported;
         std::string error;
@@ -1293,6 +1330,7 @@ void runSettingsTests()
     testOverlayPreviewScale();
     testDefaultsRoundTrip();
     testUnknownSensorFailureStaysUnknown();
+    testRestoreOverlayTemplateKeepsPersonalSettings();
     testCanvasCoordinatesSurviveZoom();
     testDraggedRowKeepsColumnsAndClamps();
     testStyledRowOffsetKeepsPresetAndRoundTrips();

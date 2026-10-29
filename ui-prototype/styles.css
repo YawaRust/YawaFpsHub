@@ -825,6 +825,10 @@ body.is-compact .chart-wrap--frames canvas { height: 96px; }
 
 .canvas-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .canvas-actions .btn { font-size: 11px; padding: 7px 10px; white-space: nowrap; }
+@media (max-width: 900px) {
+  .workshop-canvas .card__head, .canvas-actions { flex-wrap: wrap; }
+  .canvas-actions { flex-shrink: 1; }
+}
 
 .game {
   position: relative;

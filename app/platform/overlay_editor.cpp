@@ -760,16 +760,19 @@ void OverlayEditor::alignSelectedRows(int edge)
         return;
     }
     const bool vertical = edge >= 3;
+    const bool single = std::count_if(m_canvasRowBounds.begin(), m_canvasRowBounds.end(),
+                            [&selected](const OverlayRowBounds& row) { return selected(row.id); })
+        == 1;
+    const Rect& anchor = single ? m_screenPlate : reference->rect;
     const float unit = std::max(0.001f, m_canvasRowScale);
     bool changedAny = false;
     for (const OverlayRowBounds& item : m_canvasRowBounds) {
-        if (!selected(item.id) || item.id == reference->id) {
+        if (!selected(item.id) || (!single && item.id == reference->id)) {
             continue;
         }
-        const float delta = vertical ? alignCanvasEdge(reference->rect.top, reference->rect.bottom,
-                                           item.rect.top, item.rect.bottom, edge - 3)
-                                     : alignCanvasEdge(reference->rect.left, reference->rect.right,
-                                           item.rect.left, item.rect.right, edge);
+        const float delta = vertical
+            ? alignCanvasEdge(anchor.top, anchor.bottom, item.rect.top, item.rect.bottom, edge - 3)
+            : alignCanvasEdge(anchor.left, anchor.right, item.rect.left, item.rect.right, edge);
         const int shift = static_cast<int>(std::lround(delta / unit));
         if (shift == 0) {
             continue;
@@ -799,17 +802,40 @@ void OverlayEditor::alignSelectedRows(int edge)
 
 void OverlayEditor::alignSelectedRtssLayers(int edge)
 {
-    if (m_selectedRtssLayers.size() < 2 || edge < 0 || edge > 5) {
+    if (edge < 0 || edge > 5) {
         return;
     }
     const auto visible = [this](std::size_t index) {
         return index < m_rtssLayerRects.size() && m_rtssLayerRects[index].right > m_rtssLayerRects[index].left
             && m_rtssLayerRects[index].bottom > m_rtssLayerRects[index].top;
     };
-    const auto first = std::find_if(m_selectedRtssLayers.begin(), m_selectedRtssLayers.end(), visible);
-    if (first == m_selectedRtssLayers.end()) {
+    if (std::count_if(m_selectedRtssLayers.begin(), m_selectedRtssLayers.end(), visible) < 2) {
+        const float width = static_cast<float>(GetSystemMetrics(SM_CXVIRTUALSCREEN));
+        const float height = static_cast<float>(GetSystemMetrics(SM_CYVIRTUALSCREEN));
+        if (m_screenPlate.width() <= 0.0f || m_screenPlate.height() <= 0.0f) {
+            return;
+        }
+        const Rect screen { 18.0f, 18.0f, width - 18.0f, height - 18.0f };
+        const bool vertical = edge >= 3;
+        const float delta = vertical
+            ? alignCanvasEdge(screen.top, screen.bottom, m_screenPlate.top, m_screenPlate.bottom, edge - 3)
+            : alignCanvasEdge(screen.left, screen.right, m_screenPlate.left, m_screenPlate.right, edge);
+        if (std::abs(delta) < 0.5f) {
+            return;
+        }
+        auto& settings = m_model->settings.overlay;
+        if (settings.anchorMode != OverlayAnchorMode::Free) {
+            settings.originX = static_cast<int>(std::lround(m_screenPlate.left));
+            settings.originY = static_cast<int>(std::lround(m_screenPlate.top));
+            settings.anchorMode = OverlayAnchorMode::Free;
+            settings.offsetX = settings.offsetY = 0;
+        }
+        int& origin = vertical ? settings.originY : settings.originX;
+        origin = std::clamp(origin + static_cast<int>(std::lround(delta)), 0, 32768);
+        changed(true);
         return;
     }
+    const auto first = std::find_if(m_selectedRtssLayers.begin(), m_selectedRtssLayers.end(), visible);
     const std::size_t anchor = *first;
     const Rect& reference = m_rtssLayerRects[anchor];
     const bool vertical = edge >= 3;
@@ -1587,12 +1613,25 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
                     if (desktop)
                         ReleaseDC(nullptr, desktop);
                     if (sampled != CLR_INVALID) {
-                        auto& rgba
-                            = m_model->settings.overlay.metricRgba[static_cast<std::size_t>(m_selected)];
-                        const std::uint32_t alpha = rgba ? *rgba & 0xFFu : 0xFFu;
-                        rgba = (static_cast<std::uint32_t>(GetRValue(sampled)) << 24)
-                            | (static_cast<std::uint32_t>(GetGValue(sampled)) << 16)
-                            | (static_cast<std::uint32_t>(GetBValue(sampled)) << 8) | alpha;
+                        if (m_rtssSelected >= 0
+                            && static_cast<std::size_t>(m_rtssSelected) < rtssLayerCount()) {
+                            const auto index = static_cast<std::size_t>(m_rtssSelected);
+                            auto& edit = m_model->settings.overlay.rtssLayerEdits[index];
+                            const auto& layer = m_model->settings.overlay.rtssVisual->layers[index];
+                            const std::uint32_t current = edit.textColor.value_or(layer.textColor);
+                            const std::uint32_t alpha = (current >> 24) == 0 ? 0xFFu : (current >> 24);
+                            edit.textColor = (alpha << 24)
+                                | (static_cast<std::uint32_t>(GetRValue(sampled)) << 16)
+                                | (static_cast<std::uint32_t>(GetGValue(sampled)) << 8)
+                                | static_cast<std::uint32_t>(GetBValue(sampled));
+                        } else {
+                            auto& rgba
+                                = m_model->settings.overlay.metricRgba[static_cast<std::size_t>(m_selected)];
+                            const std::uint32_t alpha = rgba ? *rgba & 0xFFu : 0xFFu;
+                            rgba = (static_cast<std::uint32_t>(GetRValue(sampled)) << 24)
+                                | (static_cast<std::uint32_t>(GetGValue(sampled)) << 16)
+                                | (static_cast<std::uint32_t>(GetBValue(sampled)) << 8) | alpha;
+                        }
                         syncFields();
                         changed(true);
                     }
@@ -1718,7 +1757,20 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
             return 0;
         }
         if (m_resetButton.contains(static_cast<float>(x), static_cast<float>(y))) {
-            m_model->settings.overlay.pixelLayout = false;
+            auto& settings = m_model->settings.overlay;
+            Settings previous;
+            previous.overlay = settings;
+            restoreOverlayTemplate(settings);
+            Settings restored;
+            restored.overlay = settings;
+            if (serializeSettings(previous) == serializeSettings(restored)) {
+                MessageBoxW(m_window, L"Раскладка уже соответствует шаблону.", L"Вернуть шаблон",
+                    MB_OK | MB_ICONINFORMATION);
+                return 0;
+            }
+            m_selectedRows.clear();
+            m_fitPending = true;
+            syncFields();
             changed(true);
             return 0;
         }
@@ -2322,7 +2374,8 @@ void OverlayEditor::paint()
             m_renderer.text(labels[static_cast<std::size_t>(index)], button, TextRole::Tiny, theme.accent,
                 TextAlign::Center);
         }
-        m_renderer.text(rtssLayerCount() > 0 ? L"Ctrl+клик: выбрать RTSS-слои" : L"Ctrl+клик: выбрать строки",
+        m_renderer.text(rtssLayerCount() > 0 ? L"1 слой — по экрану · Ctrl+клик: 2+ слоёв"
+                                             : L"1 строка — по плашке · Ctrl+клик: 2+ строк",
             Rect { 720.0f, 63.0f, width - 20.0f, 85.0f }, TextRole::Tiny, theme.textDim);
     }
     drawOverlayEditorPreview(m_renderer, *m_model, theme, m_preview, GetSystemMetrics(SM_CXVIRTUALSCREEN),
@@ -2343,7 +2396,8 @@ void OverlayEditor::paint()
     m_renderer.text(L"Вписать", m_fitButton, TextRole::Tiny, theme.accent, TextAlign::Center);
     m_renderer.fillRoundRect(m_eyedropperButton, 6.0f, m_samplingColor ? theme.accentSoft : theme.panelSoft);
     m_renderer.text(L"Пипетка", m_eyedropperButton, TextRole::Tiny, theme.accent, TextAlign::Center);
-    m_renderer.text(L"Вернуть шаблон", m_resetButton, TextRole::Tiny, theme.accent);
+    m_renderer.fillRoundRect(m_resetButton, 6.0f, theme.panelSoft);
+    m_renderer.text(L"Вернуть шаблон", m_resetButton, TextRole::Tiny, theme.accent, TextAlign::Center);
     const auto rows = overlayMetricRows(m_model->settings.overlay, m_model->store);
     const auto hidden = hiddenLayerRows(m_hiddenLayers, rows);
     const std::size_t rtssCount = rtssLayerCount();
