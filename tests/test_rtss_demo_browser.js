@@ -28,6 +28,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const wide = await waitFor(() => [...document.querySelectorAll(".rtss-visual-layer")]
       .find((layer) => layer.textContent.includes("WWWWWWWWWW")));
     if (parseFloat(wide.style.width) < 500) throw new Error("узкий слой для Arial W");
+    if (!document.querySelector("#osdSparklinePoints")) throw new Error("график удалён при перестройке датчиков");
 
     result.rtssStage = "image";
     importLayout(window.rtssSmoke.image, window.rtssSmoke.png);
@@ -37,12 +38,14 @@ document.addEventListener("DOMContentLoaded", () => {
       throw new Error("PNG RTSS удалён или не показан после загрузки");
     }
 
-    document.querySelector('#osdPreview [data-metric="cpuTemp"]').textContent = "64 °C";
     const tagged = "[Master]\nImplementation=2\n[General]\nSources=1\nLayers=1\n"
       + "[Source0]\nName=CPU temperature\nProvider=HAL\nID=CPU temperature\n"
       + "[Layer0]\nText=CPU %CPU temperature% C\n";
     result.rtssStage = "tagged";
     importLayout(btoa(tagged));
+    const metric = await waitFor(() => document.querySelector('#osdPreview [data-metric="cpuTemp"]'));
+    metric.textContent = "64 °C";
+    document.querySelector("#osdMenuScene").click();
     const value = await waitFor(() => [...document.querySelectorAll(".rtss-visual-layer")]
       .find((layer) => layer.textContent.startsWith("CPU ")));
     if (value.textContent !== "CPU 64 C") throw new Error("единицы RTSS-датчика продублированы");
