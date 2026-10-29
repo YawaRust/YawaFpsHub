@@ -31,6 +31,9 @@ private:
     void paint();
     void layout();
     void syncFields();
+    void openSourceText();
+    void finishSourceText(bool apply);
+    Rect sourceTextPanel() const;
     void select(MetricId id, bool value);
     void move(int x, int y);
     float canvasScale() const;
@@ -68,6 +71,10 @@ private:
     HWND m_numericEdit = nullptr;
     ActionKind m_numericAction = ActionKind::None;
     HWND m_catalogSearch = nullptr;
+    HWND m_sourceTextEdit = nullptr;
+    bool m_sourceTextOpen = false;
+    int m_sourceTextLayer = -1;
+    std::shared_ptr<const std::string> m_sourceTextTemplate;
     HBRUSH m_editBrush = nullptr;
     Renderer m_renderer;
     AppModel* m_model = nullptr;

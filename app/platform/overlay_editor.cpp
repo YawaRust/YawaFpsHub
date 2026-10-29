@@ -180,6 +180,23 @@ namespace {
         return result;
     }
 
+    constexpr UINT kSourceTextDone = WM_APP + 31;
+    WNDPROC sourceTextOriginal = nullptr;
+    LRESULT CALLBACK sourceTextProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
+    {
+        if (message == WM_KEYDOWN
+            && (wParam == VK_ESCAPE || (wParam == VK_RETURN && GetKeyState(VK_CONTROL) < 0))) {
+            PostMessageW(GetParent(window), kSourceTextDone, wParam == VK_RETURN, 0);
+            return 0;
+        }
+        if (message == WM_CHAR
+            && (wParam == VK_ESCAPE
+                || (GetKeyState(VK_CONTROL) < 0 && (wParam == L'\r' || wParam == L'\n')))) {
+            return 0;
+        }
+        return CallWindowProcW(sourceTextOriginal, window, message, wParam, lParam);
+    }
+
     WNDPROC numericEditOriginal = nullptr;
 
     LRESULT CALLBACK numericEditProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam)
@@ -216,6 +233,9 @@ void OverlayEditor::close()
 void OverlayEditor::refresh()
 {
     if (m_window) {
+        if (m_sourceTextOpen && m_model && m_sourceTextTemplate != m_model->settings.overlay.rtssTemplate) {
+            finishSourceText(false);
+        }
         if (m_model && m_canvasTemplate != m_model->settings.overlay.rtssTemplate) {
             m_canvasTemplate = m_model->settings.overlay.rtssTemplate;
             m_fitPending = true;
@@ -311,19 +331,27 @@ bool OverlayEditor::open(HWND owner, HINSTANCE instance, AppModel& model, const 
             SetWindowLongPtrW(m_numericEdit, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(numericEditProc)));
     }
     m_catalogSearch = createEdit(2005, ES_AUTOHSCROLL);
+    m_sourceTextEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+        WS_CHILD | WS_TABSTOP | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN, 0, 0, 10, 24,
+        m_window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(2011)), instance, nullptr);
+    if (m_sourceTextEdit) {
+        sourceTextOriginal = reinterpret_cast<WNDPROC>(
+            SetWindowLongPtrW(m_sourceTextEdit, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(sourceTextProc)));
+    }
     if (!m_labelEdit || !m_labelX || !m_valueX || !m_y || !m_alphaEdit || !m_rtssHeightEdit || !m_hexEdit
-        || !m_rtssBgEdit || !m_numericEdit || !m_catalogSearch) {
+        || !m_rtssBgEdit || !m_numericEdit || !m_catalogSearch || !m_sourceTextEdit) {
         close();
         return false;
     }
     for (HWND field : { m_labelEdit, m_labelX, m_valueX, m_y, m_alphaEdit, m_rtssHeightEdit, m_hexEdit,
-             m_rtssBgEdit, m_numericEdit, m_catalogSearch }) {
+             m_rtssBgEdit, m_numericEdit, m_catalogSearch, m_sourceTextEdit }) {
         SendMessageW(field, WM_SETFONT, reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)), TRUE);
     }
     SendMessageW(m_labelEdit, EM_SETLIMITTEXT, 64, 0);
     SendMessageW(m_hexEdit, EM_SETLIMITTEXT, 9, 0);
     SendMessageW(m_rtssBgEdit, EM_SETLIMITTEXT, 9, 0);
     SendMessageW(m_catalogSearch, EM_SETLIMITTEXT, 64, 0);
+    SendMessageW(m_sourceTextEdit, EM_SETLIMITTEXT, 8192, 0);
     ShowWindow(m_catalogSearch, SW_HIDE);
     ShowWindow(m_numericEdit, SW_HIDE);
     m_numericAction = ActionKind::None;
@@ -391,7 +419,7 @@ void OverlayEditor::layout()
     const auto px
         = [this](float coordinate) { return static_cast<int>(std::lround(coordinate * m_dpiScale)); };
     const bool rtss = m_rtssSelected >= 0 && static_cast<std::size_t>(m_rtssSelected) < rtssLayerCount();
-    SetWindowPos(m_labelEdit, nullptr, px(112), px(y + (rtss ? 40 : 44)), px(390), px(26),
+    SetWindowPos(m_labelEdit, nullptr, px(112), px(y + (rtss ? 40 : 44)), px(rtss ? 342.0f : 390.0f), px(26),
         SWP_NOZORDER | SWP_NOACTIVATE);
     SetWindowPos(m_labelX, nullptr, px(rtss ? 66.0f : 106.0f), px(y + (rtss ? 105.0f : 92.0f)), px(58),
         px(26), SWP_NOZORDER | SWP_NOACTIVATE);
@@ -408,6 +436,86 @@ void OverlayEditor::layout()
     SetWindowPos(m_rtssBgEdit, nullptr, px(265), px(y + 72), px(125), px(26), SWP_NOZORDER | SWP_NOACTIVATE);
     SetWindowPos(
         m_catalogSearch, nullptr, px(width - 380), px(16), px(256), px(26), SWP_NOZORDER | SWP_NOACTIVATE);
+    if (m_sourceTextEdit && m_sourceTextOpen) {
+        const Rect panel = sourceTextPanel();
+        SetWindowPos(m_sourceTextEdit, HWND_TOP, px(panel.left + 16.0f), px(panel.top + 50.0f),
+            px(panel.width() - 32.0f), px(panel.height() - 112.0f), SWP_NOACTIVATE);
+    }
+}
+
+Rect OverlayEditor::sourceTextPanel() const
+{
+    return { m_canvas.left + 16.0f, m_canvas.top + 12.0f, m_canvas.right - 16.0f, m_canvas.bottom - 12.0f };
+}
+
+void OverlayEditor::openSourceText()
+{
+    if (m_sourceTextOpen || m_rtssSelected < 0
+        || static_cast<std::size_t>(m_rtssSelected) >= rtssLayerCount()) {
+        return;
+    }
+    SetFocus(m_window); // Commit any pending one-line edit first.
+    m_sourceTextLayer = m_rtssSelected;
+    m_sourceTextTemplate = m_model->settings.overlay.rtssTemplate;
+    const auto index = static_cast<std::size_t>(m_sourceTextLayer);
+    const auto& edit = m_model->settings.overlay.rtssLayerEdits[index];
+    const auto& layer = m_model->settings.overlay.rtssVisual->layers[index];
+    const std::wstring text = edit.text ? widen(*edit.text) : rtssLayerName(layer.text);
+    SetWindowTextW(m_sourceTextEdit, text.c_str());
+    m_sourceTextOpen = true;
+    m_focusCanvas = true;
+    layout();
+    ShowWindow(m_sourceTextEdit, SW_SHOW);
+    SetFocus(m_sourceTextEdit);
+    refresh();
+}
+
+void OverlayEditor::finishSourceText(bool apply)
+{
+    if (!m_sourceTextOpen) {
+        return;
+    }
+    bool modified = false;
+    if (apply && m_model && m_sourceTextTemplate == m_model->settings.overlay.rtssTemplate
+        && m_sourceTextLayer >= 0 && static_cast<std::size_t>(m_sourceTextLayer) < rtssLayerCount()) {
+        std::wstring text(static_cast<std::size_t>(GetWindowTextLengthW(m_sourceTextEdit)) + 1, L'\0');
+        const int length = GetWindowTextW(m_sourceTextEdit, text.data(), static_cast<int>(text.size()));
+        text.resize(static_cast<std::size_t>(length));
+        std::wstring normalized;
+        normalized.reserve(text.size());
+        for (std::size_t i = 0; i < text.size(); ++i) {
+            if (text[i] == L'\r' && i + 1 < text.size() && text[i + 1] == L'\n') {
+                continue;
+            }
+            normalized.push_back(text[i] == L'\r' ? L'\n' : text[i]);
+        }
+        const std::string utf8 = narrow(normalized);
+        if (utf8.size() > 8192) {
+            MessageBoxW(m_window, L"Строка RTSS не может превышать 8192 байт UTF-8.",
+                L"Слишком длинная строка", MB_OK | MB_ICONWARNING);
+            SetFocus(m_sourceTextEdit);
+            return;
+        }
+        const auto index = static_cast<std::size_t>(m_sourceTextLayer);
+        auto& edit = m_model->settings.overlay.rtssLayerEdits[index];
+        const auto& layer = m_model->settings.overlay.rtssVisual->layers[index];
+        const std::wstring before = edit.text ? widen(*edit.text) : rtssLayerName(layer.text);
+        if (normalized != before) {
+            edit.text = utf8;
+            modified = true;
+        }
+    }
+    m_sourceTextOpen = false;
+    m_sourceTextLayer = -1;
+    m_sourceTextTemplate.reset();
+    ShowWindow(m_sourceTextEdit, SW_HIDE);
+    SetFocus(m_window);
+    syncFields();
+    if (modified) {
+        changed(true);
+    } else {
+        refresh();
+    }
 }
 
 void OverlayEditor::syncFields()
@@ -1067,7 +1175,14 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
         }
         break;
     case WM_CLOSE:
-        close();
+        if (m_sourceTextOpen) {
+            finishSourceText(false);
+        } else {
+            close();
+        }
+        return 0;
+    case kSourceTextDone:
+        finishSourceText(wParam != 0);
         return 0;
     case WM_SETCURSOR:
         if (LOWORD(lParam) == HTCLIENT) {
@@ -1075,10 +1190,20 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
             if (GetCursorPos(&cursor) && ScreenToClient(m_window, &cursor)) {
                 cursor.x = logicalCoordinate(cursor.x);
                 cursor.y = logicalCoordinate(cursor.y);
+                if (m_sourceTextOpen) {
+                    const Rect panel = sourceTextPanel();
+                    const bool button = cursor.y >= panel.bottom - 48.0f && cursor.y < panel.bottom - 14.0f
+                        && ((cursor.x >= panel.right - 258.0f && cursor.x < panel.right - 142.0f)
+                            || (cursor.x >= panel.right - 132.0f && cursor.x < panel.right - 16.0f));
+                    SetCursor(LoadCursorW(nullptr, button ? IDC_HAND : IDC_ARROW));
+                    return TRUE;
+                }
                 const int inspectorX = cursor.x - static_cast<int>(m_inspector.left);
                 const int inspectorY = cursor.y - static_cast<int>(m_inspector.top);
                 if (m_rtssSelected >= 0 && static_cast<std::size_t>(m_rtssSelected) < rtssLayerCount()
-                    && ((inspectorY >= 40 && inspectorY < 70 && inspectorX >= 12 && inspectorX < 90)
+                    && ((inspectorY >= 40 && inspectorY < 70
+                            && ((inspectorX >= 12 && inspectorX < 90)
+                                || (inspectorX >= 440 && inspectorX < 484)))
                         || (inspectorY >= 132 && inspectorY <= 166
                             && ((inspectorX >= 410 && inspectorX < 452)
                                 || (inspectorX >= 462 && inspectorX < 504))))) {
@@ -1123,7 +1248,10 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
         }
         m_window = nullptr;
         m_labelEdit = m_labelX = m_valueX = m_y = m_alphaEdit = m_rtssHeightEdit = m_hexEdit = m_rtssBgEdit
-            = m_numericEdit = m_catalogSearch = nullptr;
+            = m_numericEdit = m_catalogSearch = m_sourceTextEdit = nullptr;
+        m_sourceTextOpen = false;
+        m_sourceTextLayer = -1;
+        m_sourceTextTemplate.reset();
         m_renderer.shutdown();
         if (m_editBrush) {
             DeleteObject(m_editBrush);
@@ -1192,6 +1320,9 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
         return 0;
     }
     case WM_MOUSEWHEEL: {
+        if (m_sourceTextOpen) {
+            return 0;
+        }
         POINT cursor { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
         ScreenToClient(m_window, &cursor);
         cursor.x = logicalCoordinate(cursor.x);
@@ -1234,6 +1365,9 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
         return 0;
     }
     case WM_COMMAND: {
+        if (m_sourceTextOpen) {
+            return 0;
+        }
         const HWND field = reinterpret_cast<HWND>(lParam);
         if (m_rtssSelected >= 0 && static_cast<std::size_t>(m_rtssSelected) < rtssLayerCount()
             && (field == m_labelEdit || field == m_labelX || field == m_valueX || field == m_y
@@ -1404,6 +1538,17 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
     case WM_LBUTTONDOWN: {
         const int x = logicalCoordinate(GET_X_LPARAM(lParam));
         const int y = logicalCoordinate(GET_Y_LPARAM(lParam));
+        if (m_sourceTextOpen) {
+            const Rect panel = sourceTextPanel();
+            if (x >= panel.right - 258.0f && x < panel.right - 142.0f && y >= panel.bottom - 48.0f
+                && y < panel.bottom - 14.0f) {
+                finishSourceText(true);
+            } else if (x >= panel.right - 132.0f && x < panel.right - 16.0f && y >= panel.bottom - 48.0f
+                && y < panel.bottom - 14.0f) {
+                finishSourceText(false);
+            }
+            return 0;
+        }
         if (x >= 20 && x < 159 && y >= 37 && y < 62) {
             m_focusCanvas = !m_focusCanvas;
             m_catalogOpen = false;
@@ -1596,6 +1741,8 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
                         syncFields();
                     }
                     changed(true);
+                } else if (localY >= 40 && localY < 70 && localX >= 440 && localX < 484) {
+                    openSourceText();
                 } else if (localY >= 40 && localY < 70 && localX >= 12 && localX < 90) {
                     SetFocus(m_window);
                     if (edit.text) {
@@ -1961,6 +2108,9 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
         return 0;
     }
     case WM_MOUSEMOVE: {
+        if (m_sourceTextOpen) {
+            return 0;
+        }
         const int x = logicalCoordinate(GET_X_LPARAM(lParam));
         const int y = logicalCoordinate(GET_Y_LPARAM(lParam));
         if (m_rtssDragging || m_rtssResizing) {
@@ -2046,6 +2196,12 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
         }
         return 0;
     case WM_KEYDOWN:
+        if (m_sourceTextOpen) {
+            if (wParam == VK_ESCAPE || (wParam == VK_RETURN && GetKeyState(VK_CONTROL) < 0)) {
+                finishSourceText(wParam == VK_RETURN);
+            }
+            return 0;
+        }
         if (wParam == VK_ESCAPE) {
             if (m_samplingColor) {
                 m_samplingColor = false;
@@ -2118,6 +2274,9 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
         }
         break;
     case WM_CHAR:
+        if (m_sourceTextOpen) {
+            return 0;
+        }
         if (m_model->editingLabel >= 0) {
             m_onText(static_cast<wchar_t>(wParam));
             refresh();
@@ -2370,6 +2529,9 @@ void OverlayEditor::paint()
             theme.warn);
         m_renderer.text(L"Текст ↩", Rect { 32.0f, m_inspector.top + 43.0f, 110.0f, m_inspector.top + 68.0f },
             TextRole::Small, theme.accent);
+        const Rect expand { 460.0f, m_inspector.top + 40.0f, 504.0f, m_inspector.top + 66.0f };
+        m_renderer.fillRoundRect(expand, 4.0f, theme.accentSoft);
+        m_renderer.text(L"↗", expand, TextRole::Small, theme.accent, TextAlign::Center);
         m_renderer.text(L"Цвет", Rect { 32.0f, m_inspector.top + 76.0f, 110.0f, m_inspector.top + 98.0f },
             TextRole::Small, theme.text);
         m_renderer.text(L"Фон", Rect { 229.0f, m_inspector.top + 76.0f, 260.0f, m_inspector.top + 98.0f },
@@ -2535,6 +2697,25 @@ void OverlayEditor::paint()
                 Rect { m_catalog.right - 57.0f, y, m_catalog.right - 12.0f, y + 26.0f }, TextRole::Tiny,
                 selected ? theme.accent : theme.textFaint, TextAlign::Right);
         }
+    }
+    if (m_sourceTextOpen) {
+        const Rect panel = sourceTextPanel();
+        m_renderer.fillRoundRect(panel, 10.0f, theme.panel);
+        m_renderer.strokeRoundRect(panel, 10.0f, theme.accent, 1.0f);
+        m_renderer.text(L"Строка RTSS · многострочный редактор",
+            { panel.left + 16.0f, panel.top + 10.0f, panel.right - 16.0f, panel.top + 34.0f },
+            TextRole::Heading, theme.text);
+        m_renderer.text(L"8192 байт UTF-8 · Enter — новая строка · Ctrl+Enter — применить · Esc — отмена",
+            { panel.left + 16.0f, panel.top + 32.0f, panel.right - 16.0f, panel.top + 49.0f }, TextRole::Tiny,
+            theme.textDim);
+        const Rect apply { panel.right - 258.0f, panel.bottom - 48.0f, panel.right - 142.0f,
+            panel.bottom - 14.0f };
+        const Rect cancel { panel.right - 132.0f, panel.bottom - 48.0f, panel.right - 16.0f,
+            panel.bottom - 14.0f };
+        m_renderer.fillRoundRect(apply, 5.0f, theme.accentSoft);
+        m_renderer.fillRoundRect(cancel, 5.0f, theme.panelSoft);
+        m_renderer.text(L"Применить", apply, TextRole::Small, theme.accent, TextAlign::Center);
+        m_renderer.text(L"Отмена", cancel, TextRole::Small, theme.text, TextAlign::Center);
     }
     m_renderer.text(L"Ctrl+клик: несколько строк · Shift+тяга: сетка 8 px · Shift+стрелки: 10 px",
         Rect { 20.0f, height - 19.0f, width - 20.0f, height }, TextRole::Tiny, theme.textFaint);

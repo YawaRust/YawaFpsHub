@@ -549,11 +549,40 @@
   }
 
   function bindLayerColor() {
+    const dialog = $("#rtssTextDialog");
+    const area = $("#rtssTextArea");
+    let textLayer = null;
+    const measureText = () => {
+      const bytes = new TextEncoder().encode(area.value).length;
+      const valid = bytes <= 8192;
+      const output = $("#rtssTextBytes");
+      output.textContent = `${bytes} / 8192 байт UTF-8`;
+      output.classList.toggle("is-over-limit", !valid);
+      $("#rtssTextApply").disabled = !valid;
+    };
+    area.addEventListener("input", measureText);
+    area.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && event.ctrlKey) {
+        event.preventDefault();
+        $("#rtssTextApply").click();
+      }
+    });
+    $("#rtssTextCancel").addEventListener("click", () => dialog.close());
+    dialog.addEventListener("close", () => { textLayer = null; });
     $("#osdRtssInspector").addEventListener("click", (event) => {
       const action = event.target.closest("[data-rtss-action]")?.dataset.rtssAction;
       if (!action || !selectedLayer.startsWith("rtss:")) return;
       const index = Number(selectedLayer.slice(5));
       const edit = overlayState.rtssLayerEdits[index] || {};
+      if (action === "editText") {
+        const layer = rtssVisual?.layers.find((item) => item.index === index);
+        textLayer = selectedLayer;
+        area.value = edit.text ?? layer?.label ?? "";
+        measureText();
+        dialog.showModal();
+        area.focus();
+        return;
+      }
       const step = event.shiftKey ? 10 : 1;
       if (["left", "right", "up", "down"].includes(action)) {
         moveSelectedRtss(action === "left" ? -step : action === "right" ? step : 0,
@@ -591,6 +620,15 @@
       store.write("rtssLayerEdits", JSON.stringify(overlayState.rtssLayerEdits));
       applyOverlay();
     };
+    $("#rtssTextApply").addEventListener("click", () => {
+      if (!textLayer || selectedLayer !== textLayer || !rtssVisual) return;
+      if (new TextEncoder().encode(area.value).length > 8192) return;
+      const index = Number(textLayer.slice(5));
+      const layer = rtssVisual.layers.find((item) => item.index === index);
+      const before = overlayState.rtssLayerEdits[index]?.text ?? layer?.label ?? "";
+      if (before !== area.value) updateRtss({ text: area.value });
+      dialog.close();
+    });
     $("#osdRtssText").addEventListener("input", (event) => {
       if (new TextEncoder().encode(event.target.value).length > 8192) {
         refreshRtssInspector();

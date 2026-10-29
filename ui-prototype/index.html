@@ -709,6 +709,7 @@
                 <strong id="osdRtssName"></strong>
                 <label for="osdRtssText">Строка RTSS (до 8192 байт UTF-8)</label>
                 <input id="osdRtssText" type="text" maxlength="8192" spellcheck="false" aria-label="Текст RTSS-слоя">
+                <button class="btn btn--ghost" type="button" data-rtss-action="editText">↗ Развернуть строку</button>
                 <button class="btn btn--ghost" type="button" data-rtss-action="resetText">Строка из RTSS</button>
                 <label for="osdRtssColor">Цвет текста · #RRGGBBAA</label>
                 <div><input id="osdRtssColorPicker" type="color" value="#ffffff" aria-label="Выбрать цвет текста RTSS-слоя">
@@ -1521,6 +1522,18 @@
     </footer>
   </div>
 </div>
+
+<dialog id="rtssTextDialog" class="rtss-text-dialog" aria-labelledby="rtssTextTitle">
+  <h2 id="rtssTextTitle">Строка RTSS · многострочный редактор</h2>
+  <p>Enter — новая строка · Ctrl+Enter — применить · Esc — отмена</p>
+  <label for="rtssTextArea">Текст выбранного слоя</label>
+  <textarea id="rtssTextArea" maxlength="8192" spellcheck="false"></textarea>
+  <div class="rtss-text-dialog__footer">
+    <output id="rtssTextBytes" aria-live="polite"></output>
+    <button id="rtssTextApply" class="btn" type="button">Применить</button>
+    <button id="rtssTextCancel" class="btn btn--ghost" type="button">Отмена</button>
+  </div>
+</dialog>
 
 <script src="js/sim.js"></script>
 <script src="js/charts.js"></script>
