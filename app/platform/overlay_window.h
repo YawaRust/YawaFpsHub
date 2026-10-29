@@ -47,7 +47,8 @@ public:
     bool hasPixelColor(std::uint8_t red, std::uint8_t green, std::uint8_t blue) const;
     bool isDragging() const
     {
-        return m_dragging || m_resizing || m_paddingDragging || m_layerDragging || m_rowDragging;
+        return m_dragging || m_resizing || m_paddingDragging || m_layerDragging || m_layerResizing
+            || m_rowDragging;
     }
 
     void repaint();
@@ -59,6 +60,8 @@ public:
     void setBackgroundEditHandler(
         std::function<void(int width, int height, int originX, int originY, bool finished)> handler);
     void setLayerEditHandler(std::function<void(std::size_t index, int x, int y, bool finished)> handler);
+    void setLayerExtentHandler(
+        std::function<void(std::size_t index, int width, int height, bool finished)> handler);
     void setRowEditHandler(
         std::function<void(MetricId id, OverlayRowPosition position, bool finished)> handler);
     void setRowReorderHandler(std::function<void(MetricId moved, MetricId before, bool finished)> handler);
@@ -94,8 +97,11 @@ private:
     void updatePadding(int x, int y);
     void finishPadding();
     int layerAt(int x, int y) const;
+    int layerResizeAt(int x, int y) const;
     void updateLayerDrag(int x, int y);
     void finishLayerDrag();
+    void updateLayerResize(int x, int y);
+    void finishLayerResize();
     std::optional<MetricId> rowAt(int x, int y) const;
     void updateRowDrag(int x, int y);
     void finishRowDrag();
@@ -137,13 +143,20 @@ private:
     std::function<void(int, int, int, bool)> m_onDirectEdit;
     std::function<void(int, int, int, int, bool)> m_onBackgroundEdit;
     std::function<void(std::size_t, int, int, bool)> m_onLayerEdit;
+    std::function<void(std::size_t, int, int, bool)> m_onLayerExtent;
     std::vector<Rect> m_rtssLayerBounds;
     float m_rtssLayerScale = 1.0f;
     bool m_layerDragging = false;
+    bool m_layerResizing = false;
+    int m_layerHover = -1;
     std::size_t m_layerIndex = 0;
     POINT m_layerDragOrigin{};
     int m_layerStartX = 0;
     int m_layerStartY = 0;
+    int m_layerStartWidth = 0;
+    int m_layerStartHeight = 0;
+    int m_layerSavedWidth = 0;
+    int m_layerSavedHeight = 0;
     float m_layerDragScale = 1.0f;
     std::function<void(MetricId, OverlayRowPosition, bool)> m_onRowEdit;
     std::function<void(MetricId, MetricId, bool)> m_onRowReorder;

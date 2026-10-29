@@ -367,6 +367,22 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
             m_overlayEditor.refresh();
             InvalidateRect(m_window, nullptr, FALSE);
         });
+        m_overlay.setLayerExtentHandler([this](std::size_t index, int width, int height, bool finished) {
+            if (index >= m_model.settings.overlay.rtssLayerEdits.size()) {
+                return;
+            }
+            {
+                std::lock_guard<std::mutex> guard(m_modelMutex);
+                auto& edit = m_model.settings.overlay.rtssLayerEdits[index];
+                edit.width = width;
+                edit.height = height;
+            }
+            if (finished) {
+                saveSettings();
+            }
+            m_overlayEditor.refresh();
+            InvalidateRect(m_window, nullptr, FALSE);
+        });
         m_overlay.setRowEditHandler([this](MetricId id, OverlayRowPosition position, bool finished) {
             {
                 std::lock_guard<std::mutex> guard(m_modelMutex);

@@ -417,6 +417,11 @@ namespace {
         const CanvasAxis workspaceX { 184.0f, workspace.panX, workspace.zoom * 1115.0f / 1920.0f };
         CHECK(workspaceX.toCanvas(550.0f) - workspaceX.toCanvas(100.0f) > 1000.0f);
         CHECK(std::abs(workspaceX.toScreen(workspaceX.toCanvas(325.0f)) - 325.0f) < 0.01f);
+        CHECK(resizeRtssExtent(120, 0, 2.0f) == 120);
+        CHECK(resizeRtssExtent(120, 18, 2.0f) == 129);
+        CHECK(resizeRtssExtent(120, -400, 2.0f) == 16);
+        CHECK(resizeRtssExtent(2048, 10, 1.0f) == 2048);
+        CHECK(resizeRtssExtent(4096, 0, 1.0f) == 4096);
         CHECK(alignCanvasEdge(10.0f, 90.0f, 40.0f, 70.0f, 0) == -30.0f);
         CHECK(alignCanvasEdge(10.0f, 90.0f, 40.0f, 70.0f, 1) == -5.0f);
         CHECK(alignCanvasEdge(10.0f, 90.0f, 40.0f, 70.0f, 2) == 20.0f);

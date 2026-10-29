@@ -70,6 +70,12 @@ inline int originOnMonitor(int origin, int monitorStart)
     return std::max(0, origin - monitorStart);
 }
 
+inline int resizeRtssExtent(int start, int pixels, float scale)
+{
+    const int delta = static_cast<int>(std::lround(static_cast<float>(pixels) / std::max(0.001f, scale)));
+    return delta == 0 ? start : std::clamp(start + delta, 16, 2048);
+}
+
 // Сдвиг к левой/центральной/правой или верхней/средней/нижней границе опорной строки.
 inline float alignCanvasEdge(
     float referenceStart, float referenceEnd, float itemStart, float itemEnd, int edge)
