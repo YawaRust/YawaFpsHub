@@ -781,6 +781,7 @@
 
   function rebuildOverlaySensors() {
     const host = $("#osdPreview");
+    const sparkline = host.querySelector(".osd-sparkline");
     host.replaceChildren();
     const paddingGrip = document.createElement("span");
     paddingGrip.className = "osd__padding-grip";
@@ -814,6 +815,7 @@
       row.append(label, value, unit);
       host.appendChild(row);
     }
+    if (sparkline) host.appendChild(sparkline);
     for (const [id, field] of Object.entries(OSD_PRIMARY)) {
       const toggle = $(`[data-osd-toggle="${field}"]`);
       if (toggle) toggle.checked = Boolean(sensorRows.get(id)?.sensor.pinned);
