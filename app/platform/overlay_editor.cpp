@@ -391,14 +391,14 @@ void OverlayEditor::layout()
     const bool rtss = m_rtssSelected >= 0 && static_cast<std::size_t>(m_rtssSelected) < rtssLayerCount();
     SetWindowPos(m_labelEdit, nullptr, px(112), px(y + (rtss ? 40 : 44)), px(390), px(26),
         SWP_NOZORDER | SWP_NOACTIVATE);
-    SetWindowPos(m_labelX, nullptr, px(rtss ? 66 : 106), px(y + (rtss ? 105 : 92)), px(58), px(26),
-        SWP_NOZORDER | SWP_NOACTIVATE);
-    SetWindowPos(m_valueX, nullptr, px(rtss ? 181 : 275), px(y + (rtss ? 105 : 92)), px(58), px(26),
-        SWP_NOZORDER | SWP_NOACTIVATE);
+    SetWindowPos(m_labelX, nullptr, px(rtss ? 66.0f : 106.0f), px(y + (rtss ? 105.0f : 92.0f)), px(58),
+        px(26), SWP_NOZORDER | SWP_NOACTIVATE);
+    SetWindowPos(m_valueX, nullptr, px(rtss ? 181.0f : 275.0f), px(y + (rtss ? 105.0f : 92.0f)), px(58),
+        px(26), SWP_NOZORDER | SWP_NOACTIVATE);
     SetWindowPos(
         m_y, nullptr, px(408), px(y + (rtss ? 72 : 92)), px(58), px(26), SWP_NOZORDER | SWP_NOACTIVATE);
-    SetWindowPos(m_alphaEdit, nullptr, px(rtss ? 299 : 472), px(y + (rtss ? 105 : 139)), px(rtss ? 58 : 42),
-        px(rtss ? 26 : 24), SWP_NOZORDER | SWP_NOACTIVATE);
+    SetWindowPos(m_alphaEdit, nullptr, px(rtss ? 299.0f : 472.0f), px(y + (rtss ? 105.0f : 139.0f)),
+        px(rtss ? 58.0f : 42.0f), px(rtss ? 26.0f : 24.0f), SWP_NOZORDER | SWP_NOACTIVATE);
     SetWindowPos(
         m_rtssHeightEdit, nullptr, px(418), px(y + 105), px(58), px(26), SWP_NOZORDER | SWP_NOACTIVATE);
     SetWindowPos(m_hexEdit, nullptr, px(112), px(y + 72), px(138), px(rtss ? 26.0f : 20.0f),
