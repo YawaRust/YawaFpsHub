@@ -1221,11 +1221,13 @@ namespace {
                 source.remove_prefix(comma + 1);
             }
         }
-        if (fields[0] || fields[1] || fields[2] || fields[3] || fields[4] == 0 || fields[5] == 0
-            || fields[4] > raster.width || fields[5] > raster.height) {
+        if (fields[0] || fields[1] || fields[4] == 0 || fields[5] == 0 || fields[2] >= raster.width
+            || fields[3] >= raster.height || fields[4] > raster.width - fields[2]
+            || fields[5] > raster.height - fields[3]) {
             return false;
         }
-        crop = D2D1::RectF(0.0f, 0.0f, static_cast<float>(fields[4]), static_cast<float>(fields[5]));
+        crop = D2D1::RectF(static_cast<float>(fields[2]), static_cast<float>(fields[3]),
+            static_cast<float>(fields[2] + fields[4]), static_cast<float>(fields[3] + fields[5]));
         return true;
     }
 
@@ -1350,12 +1352,12 @@ namespace {
             // Явный Extent задаёт границу слоя: текст и отсутствующие провайдеры не
             // могут увеличивать весь макет и превращать остальные датчики в пиксельную пыль.
             const float width = edit.width > 0 ? static_cast<float>(edit.width) * zoom
-                : layer.width == 0
-                ? (imageReady ? imageCrop.right * zoom : std::clamp(textWidth, cellWidth, 1024.0f * zoom))
-                : units(layer.width, false);
+                : layer.width == 0 ? (imageReady ? (imageCrop.right - imageCrop.left) * zoom
+                                                 : std::clamp(textWidth, cellWidth, 1024.0f * zoom))
+                                   : units(layer.width, false);
             const float height = edit.height > 0 ? static_cast<float>(edit.height) * zoom
-                : layer.height == 0              ? (imageReady ? imageCrop.bottom * zoom : textHeight)
-                                                 : units(layer.height, true);
+                : layer.height == 0 ? (imageReady ? (imageCrop.bottom - imageCrop.top) * zoom : textHeight)
+                                    : units(layer.height, true);
             float x = units(layer.x, false) + static_cast<float>(edit.x) * zoom;
             float y = units(layer.y, true) + static_cast<float>(edit.y) * zoom;
             x -= width * static_cast<float>(layer.origin % 3) / 2.0f;

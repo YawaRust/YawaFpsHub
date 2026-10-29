@@ -1,0 +1,16 @@
+[Master]
+Implementation=2
+FontFace=Consolas
+FontHeight=-13
+ZoomRatio=1
+[Settings]
+EmbeddedImage=rtss_crop.png
+[General]
+Layers=1
+[Layer0]
+Name=Crop from atlas
+Text=<I=0,0,4,0,4,4>
+PositionX=12
+PositionY=12
+ExtentX=4
+ExtentY=4

@@ -555,7 +555,7 @@ void MainWindow::setOverlayVisible(bool visible)
 }
 
 bool MainWindow::smokeImportRtss(
-    std::string_view package, std::string& error, std::wstring_view path, bool checkImage)
+    std::string_view package, std::string& error, std::wstring_view path, bool checkImage, bool checkCrop)
 {
     OverlaySettings imported = m_model.settings.overlay;
     const bool parsed = package.starts_with("0CDU") ? importRtssExchange(package, imported, error)
@@ -573,6 +573,10 @@ bool MainWindow::smokeImportRtss(
     }
     if (!m_overlay.hasVisiblePixels()) {
         error = "импорт RTSS создал прозрачный кадр";
+        return false;
+    }
+    if (checkCrop && (!m_overlay.hasPixelColor(245, 43, 71) || m_overlay.hasPixelColor(43, 245, 71))) {
+        error = "RTSS-спрайт не выбрал нужную область PNG-атласа";
         return false;
     }
     if (checkImage && !m_overlay.hasPixelColor(245, 43, 71)) {

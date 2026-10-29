@@ -1102,9 +1102,10 @@ namespace {
         CHECK(restored.overlay.rtssTemplate && *restored.overlay.rtssTemplate == embedded);
         const std::string imageLayout = "[Master]\nImplementation=2\n[Settings]\n"
                                         "EmbeddedImage=atlas.png\n[General]\nLayers=1\n"
-                                        "[Layer0]\nText=<I=0,0,0,0,2,2>\nExtentX=2\nExtentY=2\n";
+                                        "[Layer0]\nText=<I=0,0,2,3,2,2>\nExtentX=2\nExtentY=2\n";
         CHECK(importRtssOverlay(imageLayout, settings, error));
         CHECK(settings.rtssVisual && settings.rtssVisual->embeddedImage == "atlas.png");
+        CHECK(settings.rtssVisual->layers[0].text == "<I=0,0,2,3,2,2>");
         auto visual = std::make_shared<RtssVisualLayout>(*settings.rtssVisual);
         const std::string image = "\x89PNG\r\n\x1A\n" + std::string(24, 'x');
         visual->imageBytes = std::make_shared<const std::string>(image);

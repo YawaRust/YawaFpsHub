@@ -48,8 +48,8 @@ public:
         m_overlay.setSettings(m_model.settings.overlay);
     }
     void setOverlayVisible(bool visible);
-    bool smokeImportRtss(
-        std::string_view package, std::string& error, std::wstring_view path = { }, bool checkImage = false);
+    bool smokeImportRtss(std::string_view package, std::string& error, std::wstring_view path = { },
+        bool checkImage = false, bool checkCrop = false);
     void openEditorForSmoke();
     void scheduleSensorElevation();
     void exportOverlayStyles();

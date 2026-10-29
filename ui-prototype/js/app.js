@@ -2324,18 +2324,19 @@
       const bg = field(body, "BgndColor", "").split(",")
         .find((entry) => /^[0-9a-f]{6}([0-9a-f]{2})?$/i.test(entry)) || "";
       if (!label && !bg && !number("ExtentX") && !number("ExtentY")) continue;
-      const matchedImage = label.match(/^<I=0,0,0,0,(\d+),(\d+)>$/);
-      const imageTag = matchedImage && Number(matchedImage[1]) >= 1
-        && Number(matchedImage[2]) >= 1 && Number(matchedImage[1]) <= 2048
-        && Number(matchedImage[2]) <= 2048 ? matchedImage : null;
+      const matchedImage = label.match(/^<I=0,0,(\d+),(\d+),(\d+),(\d+)>$/);
+      const imageTag = matchedImage && Number(matchedImage[1]) <= 2048
+        && Number(matchedImage[2]) <= 2048 && Number(matchedImage[3]) >= 1
+        && Number(matchedImage[4]) >= 1 && Number(matchedImage[3]) <= 2048
+        && Number(matchedImage[4]) <= 2048 ? matchedImage : null;
       const visible = rtssVisibleTemplate(label).replace(/<[^>]*>|%[^%]*%/g, "нет данных");
       const size = Math.max(10, Math.min(400, number("Size", 100)));
       const longestLine = Math.max(1, ...visible.split("\n").map((line) => line.length));
       const extentX = number("ExtentX");
       const extentY = number("ExtentY");
-      const layerWidth = units(extentX, false) || (imageTag ? Number(imageTag[1]) * zoom
+      const layerWidth = units(extentX, false) || (imageTag ? Number(imageTag[3]) * zoom
         : Math.min(1024 * zoom, Math.max(cellWidth, longestLine * cellWidth * size / 100)));
-      const layerHeight = units(extentY, true) || (imageTag ? Number(imageTag[2]) * zoom
+      const layerHeight = units(extentY, true) || (imageTag ? Number(imageTag[4]) * zoom
         : cellHeight * size / 100 * visible.split("\n").length);
       const origin = Math.max(0, Math.min(8, number("ExtentOrigin")));
       const x = units(number("PositionX"), false) - layerWidth * (origin % 3) / 2;
@@ -2426,21 +2427,33 @@
       node.style.color = paint(edit.textColor ?? layer.color, "#fff");
       node.style.backgroundColor = paint(edit.backgroundColor ?? layer.bg, "transparent");
       const source = edit.text ?? layer.label;
-      const imageTag = source.match(/^<I=0,0,0,0,(\d+),(\d+)>$/);
-      const imageWidth = imageTag && Number(imageTag[1]);
-      const imageHeight = imageTag && Number(imageTag[2]);
-      if (rtssImageUrl && imageWidth >= 1 && imageWidth <= 2048
-        && imageHeight >= 1 && imageHeight <= 2048) {
+      const imageTag = source.match(/^<I=0,0,(\d+),(\d+),(\d+),(\d+)>$/);
+      const imageX = imageTag && Number(imageTag[1]);
+      const imageY = imageTag && Number(imageTag[2]);
+      const imageWidth = imageTag && Number(imageTag[3]);
+      const imageHeight = imageTag && Number(imageTag[4]);
+      if (rtssImageUrl && imageX <= 2048 && imageY <= 2048
+        && imageWidth >= 1 && imageWidth <= 2048 && imageHeight >= 1 && imageHeight <= 2048) {
         const picture = document.createElement("img");
-        picture.src = rtssImageUrl;
-        picture.width = imageWidth;
-        picture.height = imageHeight;
         picture.alt = "";
+        picture.style.visibility = "hidden";
         picture.onload = () => {
-          if (picture.naturalWidth < imageWidth || picture.naturalHeight < imageHeight) {
+          if (picture.naturalWidth > 2048 || picture.naturalHeight > 2048
+            || imageX + imageWidth > picture.naturalWidth
+            || imageY + imageHeight > picture.naturalHeight) {
             node.textContent = "нет данных";
+            return;
           }
+          const scaleX = layerWidth(layer) / imageWidth;
+          const scaleY = layerHeight(layer) / imageHeight;
+          picture.style.width = `${picture.naturalWidth * scaleX}px`;
+          picture.style.height = `${picture.naturalHeight * scaleY}px`;
+          picture.style.marginLeft = `${-imageX * scaleX}px`;
+          picture.style.marginTop = `${-imageY * scaleY}px`;
+          picture.style.visibility = "visible";
         };
+        picture.onerror = () => { node.textContent = "нет данных"; };
+        picture.src = rtssImageUrl;
         node.replaceChildren(picture);
       } else node.textContent = rtssVisibleTemplate(source).replace(/<[^>]*>|%[^%]*%/g, (tag) => {
         const metric = metrics[tag.toLowerCase()];
