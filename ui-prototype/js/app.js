@@ -568,9 +568,11 @@
       if (action === "reset" || action === "resetBackground") {
         delete next.backgroundColor;
       }
+      if (action === "reset" || action === "resetTextColor") {
+        delete next.textColor;
+      }
       if (action === "reset") {
         delete next.text;
-        delete next.textColor;
         delete next.size;
         delete next.width;
         delete next.height;
@@ -590,12 +592,12 @@
     $("#osdRtssText").addEventListener("input", (event) => updateRtss({ text: event.target.value }));
     $("#osdRtssColor").addEventListener("change", (event) => {
       const hex = event.target.value.trim();
-      if (!/^#[0-9a-f]{8}$/i.test(hex)) {
-        refreshRtssInspector();
-        return;
-      }
-      $("#osdRtssColorPicker").value = hex.slice(0, 7);
-      updateRtss({ textColor: `${hex.slice(7)}${hex.slice(1, 7)}`.toUpperCase() });
+      if (!hex) {
+        $("[data-rtss-action=resetTextColor]").click();
+      } else if (/^#[0-9a-f]{8}$/i.test(hex)) {
+        $("#osdRtssColorPicker").value = hex.slice(0, 7);
+        updateRtss({ textColor: `${hex.slice(7)}${hex.slice(1, 7)}`.toUpperCase() });
+      } else refreshRtssInspector();
     });
     $("#osdRtssBg").addEventListener("change", (event) => {
       const hex = event.target.value.trim();

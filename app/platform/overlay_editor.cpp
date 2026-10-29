@@ -1249,12 +1249,17 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
                 wchar_t buffer[16] { };
                 GetWindowTextW(field, buffer, 16);
                 std::uint32_t rgba = 0;
-                if (parseOverlayRgba(narrow(buffer), rgba)) {
+                if (buffer[0] == L'\0') {
+                    if (edit.textColor) {
+                        edit.textColor.reset();
+                        changed(true);
+                    }
+                } else if (parseOverlayRgba(narrow(buffer), rgba)) {
                     edit.textColor = (rgba >> 8) | (rgba << 24);
                     changed(true);
                 } else {
-                    MessageBoxW(m_window, L"Введите цвет в формате #RRGGBBAA.", L"Неверный цвет RGBA",
-                        MB_OK | MB_ICONWARNING);
+                    MessageBoxW(m_window, L"Цвет текста: #RRGGBBAA или пустое поле (из RTSS).",
+                        L"Неверный цвет RGBA", MB_OK | MB_ICONWARNING);
                 }
                 syncFields();
             } else if (field == m_rtssBgEdit && HIWORD(wParam) == EN_KILLFOCUS && !m_syncing) {

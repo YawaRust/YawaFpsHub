@@ -715,7 +715,8 @@
                 <label for="osdRtssBg">Фон слоя · #RRGGBBAA (пусто — из RTSS)</label>
                 <div><input id="osdRtssBgPicker" type="color" value="#000000" aria-label="Выбрать цвет фона RTSS-слоя">
                   <input id="osdRtssBg" type="text" maxlength="9" spellcheck="false" aria-label="Цвет фона RTSS-слоя"></div>
-                <button class="btn btn--ghost" type="button" data-rtss-action="resetBackground">Фон из RTSS</button>
+                <div><button class="btn btn--ghost" type="button" data-rtss-action="resetTextColor">Цвет из RTSS</button>
+                  <button class="btn btn--ghost" type="button" data-rtss-action="resetBackground">Фон из RTSS</button></div>
                 <label for="osdRtssSize">Размер шрифта, % (10–400)</label>
                 <input id="osdRtssSize" type="number" min="10" max="400" step="1" aria-label="Размер текста RTSS-слоя">
                 <label for="osdRtssWidth">Ширина слоя, px (0 — из RTSS)</label>

@@ -1004,6 +1004,14 @@ namespace {
         CHECK(restored.overlay.rtssLayerEdits[1].width == 320
             && restored.overlay.rtssLayerEdits[1].height == 48);
         CHECK(restored.overlay.rtssLayerEdits[2].text && restored.overlay.rtssLayerEdits[2].text->empty());
+        restored.overlay.rtssLayerEdits[1].textColor.reset();
+        Settings colorReset;
+        CHECK(parseSettings(serializeSettings(restored), colorReset, error));
+        CHECK(!colorReset.overlay.rtssLayerEdits[1].textColor);
+        CHECK(colorReset.overlay.rtssLayerEdits[1].backgroundColor == 0x804488CCu
+            && colorReset.overlay.rtssLayerEdits[1].size == 175
+            && colorReset.overlay.rtssLayerEdits[1].width == 320
+            && colorReset.overlay.rtssLayerEdits[1].text == saved.overlay.rtssLayerEdits[1].text);
         const std::string graph10 = "[Master]\nImplementation=2\n[General]\nLayers=2\nSources=1\n"
                                     "[Source0]\nName=CPU usage\nProvider=HAL\nID=CPU usage\n"
                                     "[Layer0]\nText=<G=Frametime,0,0,1,0,40,10>\n"
