@@ -717,7 +717,10 @@
                 <input id="osdRtssWidth" type="number" min="0" max="2048" step="1" aria-label="Ширина RTSS-слоя">
                 <label for="osdRtssHeight">Высота слоя, px (0 — из RTSS)</label>
                 <input id="osdRtssHeight" type="number" min="0" max="2048" step="1" aria-label="Высота RTSS-слоя">
-                <span id="osdRtssCoordinates"></span>
+                <label for="osdRtssX">Смещение X, px (−2048…2048)</label>
+                <input id="osdRtssX" type="number" min="-2048" max="2048" step="1" aria-label="Смещение RTSS-слоя по X">
+                <label for="osdRtssY">Смещение Y, px (−2048…2048)</label>
+                <input id="osdRtssY" type="number" min="-2048" max="2048" step="1" aria-label="Смещение RTSS-слоя по Y">
                 <small id="osdRtssWarning" hidden>Управляющий гипертекст RTSS показан упрощённо; исходный слой сохранён для экспорта.</small>
                 <div>
                   <button class="btn btn--ghost" type="button" data-rtss-action="left" aria-label="Влево">←</button>
@@ -744,8 +747,8 @@
               </div>
             </header>
 
-            <div class="canvas-align" aria-label="Выравнивание выделенных строк">
-              <span>Угол — размер фона · Ctrl+клик — выбрать строки:</span>
+            <div class="canvas-align" aria-label="Выравнивание выделенных элементов">
+              <span>Ctrl+клик — выбрать строки или RTSS-слои · угол — размер:</span>
               <button type="button" data-align="left">Слева</button>
               <button type="button" data-align="centerX">Центр X</button>
               <button type="button" data-align="right">Справа</button>

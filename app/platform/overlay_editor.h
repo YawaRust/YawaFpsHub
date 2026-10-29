@@ -6,6 +6,7 @@
 #include <windows.h>
 
 #include <functional>
+#include <utility>
 #include <vector>
 
 namespace yawa {
@@ -35,7 +36,10 @@ private:
     float canvasScale() const;
     void fitCanvasToContent();
     void alignSelectedRows(int edge);
+    void alignSelectedRtssLayers(int edge);
     std::size_t rtssLayerCount() const;
+    void selectRtssLayer(int index, bool additive);
+    void nudgeRtssLayers(int dx, int dy);
     void moveRtssLayer(int x, int y);
     void moveStyledRow(int x, int y);
     int logicalCoordinate(int pixels) const;
@@ -58,10 +62,12 @@ private:
     HWND m_valueX = nullptr;
     HWND m_y = nullptr;
     HWND m_alphaEdit = nullptr;
+    HWND m_rtssHeightEdit = nullptr;
     HWND m_hexEdit = nullptr;
     HWND m_numericEdit = nullptr;
     ActionKind m_numericAction = ActionKind::None;
     HWND m_catalogSearch = nullptr;
+    HBRUSH m_editBrush = nullptr;
     Renderer m_renderer;
     AppModel* m_model = nullptr;
     const Theme* m_theme = nullptr;
@@ -115,6 +121,8 @@ private:
     Rect m_styledRowBounds { };
     float m_styledRowUnit = 1.0f;
     int m_rtssSelected = -1;
+    std::vector<std::size_t> m_selectedRtssLayers;
+    std::vector<std::pair<std::size_t, OverlayRowOffset>> m_rtssDragOffsets;
     bool m_rtssDragging = false;
     bool m_rtssResizing = false;
     int m_rtssWidthStart = 0;
@@ -131,8 +139,6 @@ private:
     float m_gripUnit = 1.0f;
     int m_rtssStartX = 0;
     int m_rtssStartY = 0;
-    int m_rtssOffsetX = 0;
-    int m_rtssOffsetY = 0;
     int m_catalogScroll = 0;
     bool m_catalogOpen = false;
     int m_dragStartX = 0;

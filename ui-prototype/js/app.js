@@ -386,6 +386,7 @@
 
   const OSD_PRIMARY = { fps: "fps", cpu: "cpu", gpu: "gpu", ramUsed: "ram", vramUsed: "vram" };
   let selectedLayer = "fps";
+  const selectedRtssLayers = new Set();
   let colorTarget = "metric";
   const currentRgba = () => colorTarget === "metric"
     ? overlayState.metricRgba[selectedLayer] : overlayState.customRgba[colorTarget];
@@ -406,7 +407,8 @@
     const layer = rtssVisual.layers.find((entry) => entry.index === index);
     const edit = overlayState.rtssLayerEdits[index] || {};
     $("#osdRtssName").textContent = `RTSS · ${layer?.name || `слой ${index}`}`;
-    $("#osdRtssCoordinates").textContent = `X: ${edit.x || 0} px · Y: ${edit.y || 0} px`;
+    $("#osdRtssX").value = String(edit.x || 0);
+    $("#osdRtssY").value = String(edit.y || 0);
     $("#osdRtssText").value = edit.text ?? layer?.label ?? "";
     const argb = edit.textColor ?? layer?.color ?? "FFFFFFFF";
     $("#osdRtssColor").value = /^([0-9a-f]{8})$/i.test(argb)
@@ -418,7 +420,17 @@
     $("[data-rtss-action=visible]").textContent = edit.visible === false ? "Показать" : "Скрыть";
   }
 
-  function selectOverlayLayer(id) {
+  function selectOverlayLayer(id, { toggle = false, reset = false } = {}) {
+    if (id.startsWith("rtss:")) {
+      if (toggle) {
+        if (selectedRtssLayers.has(id) && selectedRtssLayers.size > 1) selectedRtssLayers.delete(id);
+        else selectedRtssLayers.add(id);
+        if (!selectedRtssLayers.has(id)) id = [...selectedRtssLayers].at(-1);
+      } else if (reset || !selectedRtssLayers.has(id)) {
+        selectedRtssLayers.clear();
+        selectedRtssLayers.add(id);
+      }
+    } else selectedRtssLayers.clear();
     selectedLayer = id;
     refreshRtssInspector();
     const hex = currentRgba() || "#FFFFFFFF";
@@ -437,17 +449,21 @@
     ["osdLayerHex", "osdLayerPicker", "osdLayerAlpha", "osdLayerAuto", "osdLayerSample"]
       .forEach((field) => { $(`#${field}`).disabled = id.startsWith("rtss:"); });
     $$("#osdLayers .workshop-layer__name").forEach((button) => {
-      button.classList.toggle("is-active", button.dataset.layer === id);
+      button.classList.toggle("is-active", button.dataset.layer === id || selectedRtssLayers.has(button.dataset.layer));
     });
     $$("#osdPreview .osd__row").forEach((row) => {
       row.classList.toggle("is-selected", row.querySelector(`[data-metric="${id}"]`) !== null);
     });
     $$("#osdPreview .rtss-visual-layer").forEach((node) => {
-      node.classList.toggle("is-selected", id === `rtss:${node.dataset.rtssLayer}`);
+      node.classList.toggle("is-selected", selectedRtssLayers.has(`rtss:${node.dataset.rtssLayer}`));
     });
   }
 
   function renderOverlayLayers() {
+    if (overlayState.recipe !== "rtss") {
+      selectedRtssLayers.clear();
+      if (selectedLayer.startsWith("rtss:")) selectedLayer = "fps";
+    }
     const host = $("#osdLayers");
     host.replaceChildren();
     const primary = [...overlayState.metricOrder, ...sensorRows.keys()];
@@ -488,7 +504,8 @@
         name.className = "workshop-layer__name";
         name.dataset.layer = id;
         name.textContent = `RTSS · ${layer.name || `слой ${layer.index}`}`;
-        name.addEventListener("click", () => selectOverlayLayer(id));
+        name.addEventListener("click", (event) => selectOverlayLayer(id,
+          { toggle: event.ctrlKey, reset: !event.ctrlKey }));
         const eye = document.createElement("button");
         eye.type = "button";
         eye.className = `workshop-layer__eye${edit.visible === false ? "" : " is-on"}`;
@@ -507,6 +524,24 @@
     selectOverlayLayer(selectedLayer);
   }
 
+  function moveSelectedRtss(dx, dy) {
+    const edits = [...selectedRtssLayers].map((id) => {
+      const index = Number(id.slice(5));
+      const edit = overlayState.rtssLayerEdits[index] || {};
+      return { index, edit, x: edit.x || 0, y: edit.y || 0 };
+    });
+    for (const item of edits) {
+      dx = Math.max(-2048 - item.x, Math.min(2048 - item.x, dx));
+      dy = Math.max(-2048 - item.y, Math.min(2048 - item.y, dy));
+    }
+    if (!dx && !dy) return;
+    for (const item of edits) {
+      overlayState.rtssLayerEdits[item.index] = { ...item.edit, x: item.x + dx, y: item.y + dy };
+    }
+    store.write("rtssLayerEdits", JSON.stringify(overlayState.rtssLayerEdits));
+    applyOverlay();
+  }
+
   function bindLayerColor() {
     $("#osdRtssInspector").addEventListener("click", (event) => {
       const action = event.target.closest("[data-rtss-action]")?.dataset.rtssAction;
@@ -514,8 +549,13 @@
       const index = Number(selectedLayer.slice(5));
       const edit = overlayState.rtssLayerEdits[index] || {};
       const step = event.shiftKey ? 10 : 1;
-      const x = action === "reset" ? 0 : (edit.x || 0) + (action === "left" ? -step : action === "right" ? step : 0);
-      const y = action === "reset" ? 0 : (edit.y || 0) + (action === "up" ? -step : action === "down" ? step : 0);
+      if (["left", "right", "up", "down"].includes(action)) {
+        moveSelectedRtss(action === "left" ? -step : action === "right" ? step : 0,
+          action === "up" ? -step : action === "down" ? step : 0);
+        return;
+      }
+      const x = action === "reset" ? 0 : edit.x || 0;
+      const y = action === "reset" ? 0 : edit.y || 0;
       const next = { ...edit, x: Math.max(-2048, Math.min(2048, x)),
         y: Math.max(-2048, Math.min(2048, y)),
         visible: action === "visible" ? edit.visible === false : edit.visible !== false };
@@ -555,14 +595,18 @@
       }
       updateRtss({ size });
     });
-    for (const [id, field] of [["osdRtssWidth", "width"], ["osdRtssHeight", "height"]]) {
+    for (const [id, field] of [["osdRtssX", "x"], ["osdRtssY", "y"],
+      ["osdRtssWidth", "width"], ["osdRtssHeight", "height"]]) {
       $(`#${id}`).addEventListener("change", (event) => {
-        const size = Number(event.target.value);
-        if (!Number.isInteger(size) || (size !== 0 && (size < 16 || size > 2048))) {
+        const value = Number(event.target.value);
+        const position = field === "x" || field === "y";
+        if (event.target.value.trim() === "" || !Number.isInteger(value)
+          || (position ? value < -2048 || value > 2048
+            : value !== 0 && (value < 16 || value > 2048))) {
           refreshRtssInspector();
           return;
         }
-        updateRtss({ [field]: size });
+        updateRtss({ [field]: value });
       });
     }
     const hexInput = $("#osdLayerHex");
@@ -1815,15 +1859,33 @@
     $(".canvas-align").addEventListener("click", (event) => {
       const edge = event.target.closest("[data-align]")?.dataset.align;
       if (!edge) return;
+      const axis = edge === "top" || edge === "centerY" || edge === "bottom" ? "y" : "x";
+      const position = (rect) => edge === "left" ? rect.left : edge === "right" ? rect.right
+        : edge === "top" ? rect.top : edge === "bottom" ? rect.bottom
+          : axis === "x" ? (rect.left + rect.right) / 2 : (rect.top + rect.bottom) / 2;
+      if (overlayState.recipe === "rtss" && rtssVisual) {
+        const layers = [...selectedRtssLayers].map((id) =>
+          osd.querySelector(`.rtss-visual-layer[data-rtss-layer="${id.slice(5)}"]`)).filter(Boolean);
+        if (layers.length < 2) { toast("Выберите минимум два RTSS-слоя с Ctrl+кликом."); return; }
+        const reference = layers[0].getBoundingClientRect();
+        const unit = Math.max(.001, osd.getBoundingClientRect().width / Math.max(1, osd.offsetWidth)
+          * rtssVisual.zoom);
+        for (const layer of layers.slice(1)) {
+          const index = Number(layer.dataset.rtssLayer);
+          const edit = overlayState.rtssLayerEdits[index] || {};
+          overlayState.rtssLayerEdits[index] = { ...edit,
+            [axis]: Math.max(-2048, Math.min(2048,
+              Math.round((edit[axis] || 0) + (position(reference) - position(layer.getBoundingClientRect())) / unit))) };
+        }
+        store.write("rtssLayerEdits", JSON.stringify(overlayState.rtssLayerEdits));
+        applyOverlay();
+        return;
+      }
       const rows = [...osd.querySelectorAll(".osd__row")]
         .filter((row) => selected.has(row.dataset.osdItem) && !row.classList.contains("is-hidden"));
       if (rows.length < 2) { toast("Выберите минимум две строки с Ctrl+кликом."); return; }
       const reference = rows[0].getBoundingClientRect();
       const unit = Math.max(.001, osd.getBoundingClientRect().width / Math.max(1, osd.offsetWidth));
-      const axis = edge === "top" || edge === "centerY" || edge === "bottom" ? "y" : "x";
-      const position = (rect) => edge === "left" ? rect.left : edge === "right" ? rect.right
-        : edge === "top" ? rect.top : edge === "bottom" ? rect.bottom
-          : axis === "x" ? (rect.left + rect.right) / 2 : (rect.top + rect.bottom) / 2;
       for (const row of rows.slice(1)) {
         const offset = overlayState.rowPositions[row.dataset.osdItem] || { x: 0, y: 0 };
         overlayState.rowPositions[row.dataset.osdItem] = { ...offset,
@@ -1864,14 +1926,19 @@
       if (rtssNode) {
         const index = Number(rtssNode.dataset.rtssLayer);
         const edit = overlayState.rtssLayerEdits[index] || {};
-        selectOverlayLayer(`rtss:${index}`);
+        const id = `rtss:${index}`;
+        selectOverlayLayer(id, { toggle: event.ctrlKey, reset: !selectedRtssLayers.has(id) });
+        if (event.ctrlKey) { event.preventDefault(); return; }
         const layer = rtssVisual.layers.find((item) => item.index === index);
         const bounds = rtssNode.getBoundingClientRect();
         const resizeRtss = bounds.width > 22 && bounds.height > 22
           && event.clientX >= bounds.right - 12 && event.clientY >= bounds.bottom - 12;
         drag = { rtss: index, resizeRtss, x: event.clientX, y: event.clientY,
           unit: Math.max(.001, rect.width / Math.max(1, osd.offsetWidth) * rtssVisual.zoom),
-          layerX: edit.x || 0, layerY: edit.y || 0,
+          offsets: [...selectedRtssLayers].map((item) => {
+            const layerEdit = overlayState.rtssLayerEdits[Number(item.slice(5))] || {};
+            return { index: Number(item.slice(5)), x: layerEdit.x || 0, y: layerEdit.y || 0 };
+          }),
           width: edit.width || Math.round(layer.width / rtssVisual.zoom),
           height: edit.height || Math.round(layer.height / rtssVisual.zoom) };
         overlayHistory.gesture = true;
@@ -1924,12 +1991,23 @@
       }
       if (drag.rtss !== undefined) {
         const edit = overlayState.rtssLayerEdits[drag.rtss] || {};
-        overlayState.rtssLayerEdits[drag.rtss] = drag.resizeRtss ? { ...edit,
-          width: Math.max(16, Math.min(2048, Math.round(drag.width + (event.clientX - drag.x) / drag.unit))),
-          height: Math.max(16, Math.min(2048, Math.round(drag.height + (event.clientY - drag.y) / drag.unit))) }
-          : { ...edit,
-            x: Math.max(-2048, Math.min(2048, Math.round(drag.layerX + (event.clientX - drag.x) / drag.unit))),
-            y: Math.max(-2048, Math.min(2048, Math.round(drag.layerY + (event.clientY - drag.y) / drag.unit))) };
+        if (drag.resizeRtss) {
+          overlayState.rtssLayerEdits[drag.rtss] = { ...edit,
+            width: Math.max(16, Math.min(2048, Math.round(drag.width + (event.clientX - drag.x) / drag.unit))),
+            height: Math.max(16, Math.min(2048, Math.round(drag.height + (event.clientY - drag.y) / drag.unit))) };
+        } else {
+          let dx = Math.round((event.clientX - drag.x) / drag.unit);
+          let dy = Math.round((event.clientY - drag.y) / drag.unit);
+          for (const start of drag.offsets) {
+            dx = Math.max(-2048 - start.x, Math.min(2048 - start.x, dx));
+            dy = Math.max(-2048 - start.y, Math.min(2048 - start.y, dy));
+          }
+          if (dx === 0 && dy === 0) return;
+          for (const start of drag.offsets) {
+            overlayState.rtssLayerEdits[start.index] = { ...overlayState.rtssLayerEdits[start.index],
+              x: start.x + dx, y: start.y + dy };
+          }
+        }
         applyOverlay();
         return;
       }
@@ -2023,18 +2101,12 @@
     document.addEventListener("keydown", (event) => {
       if (!$("[data-view=overlay]").classList.contains("is-active") || !selectedLayer.startsWith("rtss:")
         || event.target.closest("input, textarea, select") || !event.key.startsWith("Arrow")) return;
-      const index = Number(selectedLayer.slice(5));
-      const edit = overlayState.rtssLayerEdits[index] || {};
       const step = event.shiftKey ? 10 : 1;
       const dx = event.key === "ArrowLeft" ? -step : event.key === "ArrowRight" ? step : 0;
       const dy = event.key === "ArrowUp" ? -step : event.key === "ArrowDown" ? step : 0;
       if (!dx && !dy) return;
-      overlayState.rtssLayerEdits[index] = { ...edit,
-        x: Math.max(-2048, Math.min(2048, (edit.x || 0) + dx)),
-        y: Math.max(-2048, Math.min(2048, (edit.y || 0) + dy)) };
-      store.write("rtssLayerEdits", JSON.stringify(overlayState.rtssLayerEdits));
+      moveSelectedRtss(dx, dy);
       event.preventDefault();
-      applyOverlay();
     });
     osd.addEventListener("wheel", (event) => {
       if (!event.ctrlKey && !event.shiftKey) return;
@@ -2313,7 +2385,7 @@
     for (const layer of visibleLayers) {
       const edit = overlayState.rtssLayerEdits[layer.index] || {};
       const node = document.createElement("span");
-      node.className = `rtss-visual-layer${selectedLayer === `rtss:${layer.index}` ? " is-selected" : ""}`;
+      node.className = `rtss-visual-layer${selectedRtssLayers.has(`rtss:${layer.index}`) ? " is-selected" : ""}`;
       node.dataset.rtssLayer = String(layer.index);
       node.style.left = `${layerX(layer) - minX}px`;
       node.style.top = `${layerY(layer) - minY}px`;
@@ -2620,6 +2692,8 @@
           originalRtss = rtssBase64(bytes);
           originalOvx = isOvx ? rtssBase64(inputBytes) : "";
           overlayState.rtssLayerEdits = {};
+          selectedRtssLayers.clear();
+          selectedLayer = "fps";
           store.write("rtssLayerEdits", "{}");
           rtssOmittedLayers = omitted;
           const persisted = store.write("rtssOriginal", originalRtss)
