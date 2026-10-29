@@ -181,7 +181,10 @@ jobs:
           $profile = Join-Path $env:TEMP "yawa-edge-rtss-smoke"
           $dom = & $edge "--headless=new" "--disable-gpu" "--no-first-run" "--user-data-dir=$profile" "--virtual-time-budget=6000" "--dump-dom" $url 2>$null | Out-String
           if ($dom -notmatch 'data-rtss-smoke="pass"') {
-            throw "Демо не показало RTSS-текст/PNG: $($dom | Select-String -Pattern 'data-rtss-(smoke|error)' -AllMatches)"
+            $state = [regex]::Match($dom, '<html[^>]*>').Value
+            Write-Output "::error title=RTSS demo::Edge code $LASTEXITCODE; $state"
+            if (-not $state) { Write-Output "::error title=RTSS demo::$($dom.Substring(0, [Math]::Min(400, $dom.Length)))" }
+            throw "Демо не показало RTSS-текст/PNG"
           }
 
       - name: Самопроверка приложения
