@@ -1297,7 +1297,10 @@ namespace {
                     text = L"нет данных";
                 }
             }
-            if (!edit.visible || (text.empty() && graph < 0 && !layer.hasBackground && !imageReady)) {
+            const std::uint32_t background = edit.backgroundColor.value_or(layer.backgroundColor);
+            const bool hasBackground
+                = (edit.backgroundColor.has_value() || layer.hasBackground) && (background >> 24) != 0;
+            if (!edit.visible || (text.empty() && graph < 0 && !hasBackground && !imageReady)) {
                 placed.push_back({ });
                 continue;
             }
@@ -1393,10 +1396,10 @@ namespace {
             const D2D1_RECT_F rect
                 = D2D1::RectF(left + placement.rect.left - leftEdge, top + placement.rect.top - topEdge,
                     left + placement.rect.right - leftEdge, top + placement.rect.bottom - topEdge);
-            if (layer.hasBackground && layer.backgroundColor >> 24 != 0) {
+            const std::uint32_t background = edit.backgroundColor.value_or(layer.backgroundColor);
+            if ((edit.backgroundColor.has_value() || layer.hasBackground) && background >> 24 != 0) {
                 ID2D1SolidColorBrush* brush = nullptr;
-                if (SUCCEEDED(target->CreateSolidColorBrush(
-                        toD2D(fromRgba(layer.backgroundColor), opacity), &brush))) {
+                if (SUCCEEDED(target->CreateSolidColorBrush(toD2D(fromRgba(background), opacity), &brush))) {
                     target->FillRectangle(rect, brush);
                     brush->Release();
                 }

@@ -1057,8 +1057,7 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                 const int x = parseInt(trim(value.substr(0, first)), 2049);
                 const int y = parseInt(trim(value.substr(first + 1, second - first - 1)), 2049);
                 const int visible = parseInt(trim(value.substr(second + 1)), -1);
-                if (x >= -2048 && x <= 2048 && y >= -2048 && y <= 2048
-                    && (visible == 0 || visible == 1)) {
+                if (x >= -2048 && x <= 2048 && y >= -2048 && y <= 2048 && (visible == 0 || visible == 1)) {
                     auto& edit = target.overlay.rtssLayerEdits[static_cast<std::size_t>(index)];
                     edit.x = x;
                     edit.y = y;
@@ -1066,7 +1065,8 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                 }
             }
         } else if (section == "rtss_layer_text" || section == "rtss_layer_color"
-            || section == "rtss_layer_size" || section == "rtss_layer_extent") {
+            || section == "rtss_layer_background" || section == "rtss_layer_size"
+            || section == "rtss_layer_extent") {
             const int index = parseInt(key, -1);
             if (index >= 0 && index < 256 && std::to_string(index) == key) {
                 auto& edit = target.overlay.rtssLayerEdits[static_cast<std::size_t>(index)];
@@ -1075,11 +1075,16 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                     if (value.empty() || !decoded.empty()) {
                         edit.text = decoded;
                     }
-                } else if (section == "rtss_layer_color" && value.size() == 8) {
+                } else if ((section == "rtss_layer_color" || section == "rtss_layer_background")
+                    && value.size() == 8) {
                     std::uint32_t color = 0;
                     const auto parsed = std::from_chars(value.data(), value.data() + value.size(), color, 16);
                     if (parsed.ec == std::errc { } && parsed.ptr == value.data() + value.size()) {
-                        edit.textColor = color;
+                        if (section == "rtss_layer_color") {
+                            edit.textColor = color;
+                        } else {
+                            edit.backgroundColor = color;
+                        }
                     }
                 } else if (section == "rtss_layer_size") {
                     const int size = parseInt(value, 0);
@@ -1773,14 +1778,14 @@ std::string serializeSettings(const Settings& settings)
         for (std::size_t index = 0; index < settings.overlay.rtssLayerEdits.size(); ++index) {
             const RtssLayerEdit& edit = settings.overlay.rtssLayerEdits[index];
             if (edit.x != 0 || edit.y != 0 || !edit.visible) {
-                text += std::to_string(index) + " = " + std::to_string(edit.x) + ","
-                    + std::to_string(edit.y) + "," + (edit.visible ? "1" : "0") + "\n";
+                text += std::to_string(index) + " = " + std::to_string(edit.x) + "," + std::to_string(edit.y)
+                    + "," + (edit.visible ? "1" : "0") + "\n";
             }
         }
         text += "\n";
     }
-    for (std::string_view section :
-        { "rtss_layer_text", "rtss_layer_color", "rtss_layer_size", "rtss_layer_extent" }) {
+    for (std::string_view section : { "rtss_layer_text", "rtss_layer_color", "rtss_layer_background",
+             "rtss_layer_size", "rtss_layer_extent" }) {
         bool header = false;
         for (std::size_t index = 0; index < settings.overlay.rtssLayerEdits.size(); ++index) {
             const auto& edit = settings.overlay.rtssLayerEdits[index];
@@ -1789,10 +1794,13 @@ std::string serializeSettings(const Settings& settings)
             if (section == "rtss_layer_text" && edit.text && edit.text->size() <= 8192) {
                 value = hexEncode(*edit.text);
                 hasValue = true;
-            } else if (section == "rtss_layer_color" && edit.textColor) {
+            } else if ((section == "rtss_layer_color" && edit.textColor)
+                || (section == "rtss_layer_background" && edit.backgroundColor)) {
+                const std::uint32_t color
+                    = section == "rtss_layer_color" ? *edit.textColor : *edit.backgroundColor;
                 constexpr char digits[] = "0123456789ABCDEF";
                 for (int shift = 28; shift >= 0; shift -= 4) {
-                    value += digits[(*edit.textColor >> shift) & 15];
+                    value += digits[(color >> shift) & 15];
                 }
                 hasValue = true;
             } else if (section == "rtss_layer_size" && edit.size >= 10 && edit.size <= 400) {
@@ -1806,7 +1814,9 @@ std::string serializeSettings(const Settings& settings)
                 continue;
             }
             if (!header) {
-                text += "[" + std::string(section) + "]\n";
+                text += '[';
+                text.append(section);
+                text += "]\n";
                 header = true;
             }
             text += std::to_string(index) + " = " + value + "\n";

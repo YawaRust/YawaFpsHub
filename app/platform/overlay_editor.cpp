@@ -304,6 +304,7 @@ bool OverlayEditor::open(HWND owner, HINSTANCE instance, AppModel& model, const 
     m_alphaEdit = createEdit(2006, ES_NUMBER | ES_AUTOHSCROLL);
     m_rtssHeightEdit = createEdit(2009, ES_NUMBER | ES_AUTOHSCROLL);
     m_hexEdit = createEdit(2008, ES_AUTOHSCROLL);
+    m_rtssBgEdit = createEdit(2010, ES_AUTOHSCROLL);
     m_numericEdit = createEdit(2007, ES_NUMBER | ES_AUTOHSCROLL);
     if (m_numericEdit) {
         numericEditOriginal = reinterpret_cast<WNDPROC>(
@@ -311,16 +312,17 @@ bool OverlayEditor::open(HWND owner, HINSTANCE instance, AppModel& model, const 
     }
     m_catalogSearch = createEdit(2005, ES_AUTOHSCROLL);
     if (!m_labelEdit || !m_labelX || !m_valueX || !m_y || !m_alphaEdit || !m_rtssHeightEdit || !m_hexEdit
-        || !m_numericEdit || !m_catalogSearch) {
+        || !m_rtssBgEdit || !m_numericEdit || !m_catalogSearch) {
         close();
         return false;
     }
     for (HWND field : { m_labelEdit, m_labelX, m_valueX, m_y, m_alphaEdit, m_rtssHeightEdit, m_hexEdit,
-             m_numericEdit, m_catalogSearch }) {
+             m_rtssBgEdit, m_numericEdit, m_catalogSearch }) {
         SendMessageW(field, WM_SETFONT, reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)), TRUE);
     }
     SendMessageW(m_labelEdit, EM_SETLIMITTEXT, 64, 0);
     SendMessageW(m_hexEdit, EM_SETLIMITTEXT, 9, 0);
+    SendMessageW(m_rtssBgEdit, EM_SETLIMITTEXT, 9, 0);
     SendMessageW(m_catalogSearch, EM_SETLIMITTEXT, 64, 0);
     ShowWindow(m_catalogSearch, SW_HIDE);
     ShowWindow(m_numericEdit, SW_HIDE);
@@ -395,14 +397,15 @@ void OverlayEditor::layout()
         px(26), SWP_NOZORDER | SWP_NOACTIVATE);
     SetWindowPos(m_valueX, nullptr, px(rtss ? 181.0f : 275.0f), px(y + (rtss ? 105.0f : 92.0f)), px(58),
         px(26), SWP_NOZORDER | SWP_NOACTIVATE);
-    SetWindowPos(
-        m_y, nullptr, px(408), px(y + (rtss ? 72 : 92)), px(58), px(26), SWP_NOZORDER | SWP_NOACTIVATE);
+    SetWindowPos(m_y, nullptr, px(rtss ? 452.0f : 408.0f), px(y + (rtss ? 72.0f : 92.0f)),
+        px(rtss ? 52.0f : 58.0f), px(26), SWP_NOZORDER | SWP_NOACTIVATE);
     SetWindowPos(m_alphaEdit, nullptr, px(rtss ? 299.0f : 472.0f), px(y + (rtss ? 105.0f : 139.0f)),
         px(rtss ? 58.0f : 42.0f), px(rtss ? 26.0f : 24.0f), SWP_NOZORDER | SWP_NOACTIVATE);
     SetWindowPos(
         m_rtssHeightEdit, nullptr, px(418), px(y + 105), px(58), px(26), SWP_NOZORDER | SWP_NOACTIVATE);
-    SetWindowPos(m_hexEdit, nullptr, px(112), px(y + 72), px(138), px(rtss ? 26.0f : 20.0f),
-        SWP_NOZORDER | SWP_NOACTIVATE);
+    SetWindowPos(m_hexEdit, nullptr, px(112), px(y + 72), px(rtss ? 112.0f : 138.0f),
+        px(rtss ? 26.0f : 20.0f), SWP_NOZORDER | SWP_NOACTIVATE);
+    SetWindowPos(m_rtssBgEdit, nullptr, px(265), px(y + 72), px(125), px(26), SWP_NOZORDER | SWP_NOACTIVATE);
     SetWindowPos(
         m_catalogSearch, nullptr, px(width - 380), px(16), px(256), px(26), SWP_NOZORDER | SWP_NOACTIVATE);
 }
@@ -417,6 +420,7 @@ void OverlayEditor::syncFields()
         ShowWindow(field, SW_SHOW);
     }
     ShowWindow(m_rtssHeightEdit, isRtss ? SW_SHOW : SW_HIDE);
+    ShowWindow(m_rtssBgEdit, isRtss ? SW_SHOW : SW_HIDE);
     for (HWND field : { m_labelEdit, m_y, m_hexEdit }) {
         ShowWindow(field, SW_SHOW);
     }
@@ -432,6 +436,11 @@ void OverlayEditor::syncFields()
         const std::uint32_t color = edit.textColor.value_or(layer.textColor);
         const std::wstring hex = widen(overlayRgbaHex((color << 8) | (color >> 24)));
         input(m_hexEdit, hex.c_str());
+        const auto background = edit.backgroundColor.value_or(layer.backgroundColor);
+        const std::wstring bgHex = edit.backgroundColor || layer.hasBackground
+            ? widen(overlayRgbaHex((background << 8) | (background >> 24)))
+            : L"";
+        input(m_rtssBgEdit, bgHex.c_str());
         input(m_y, std::to_wstring(edit.size == 0 ? layer.size : edit.size).c_str());
         input(m_labelX, std::to_wstring(edit.x).c_str());
         input(m_valueX, std::to_wstring(edit.y).c_str());
@@ -468,6 +477,7 @@ void OverlayEditor::syncFields()
 
 void OverlayEditor::select(MetricId id, bool value)
 {
+    SetFocus(m_window);
     m_rtssSelected = -1;
     m_selectedRtssLayers.clear();
     m_selected = id;
@@ -721,6 +731,7 @@ void OverlayEditor::alignSelectedRtssLayers(int edge)
 
 void OverlayEditor::selectRtssLayer(int index, bool additive)
 {
+    SetFocus(m_window);
     const auto selected = std::find(
         m_selectedRtssLayers.begin(), m_selectedRtssLayers.end(), static_cast<std::size_t>(index));
     if (!additive) {
@@ -1101,8 +1112,8 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
             ReleaseCapture();
         }
         m_window = nullptr;
-        m_labelEdit = m_labelX = m_valueX = m_y = m_alphaEdit = m_rtssHeightEdit = m_hexEdit = m_numericEdit
-            = m_catalogSearch = nullptr;
+        m_labelEdit = m_labelX = m_valueX = m_y = m_alphaEdit = m_rtssHeightEdit = m_hexEdit = m_rtssBgEdit
+            = m_numericEdit = m_catalogSearch = nullptr;
         m_renderer.shutdown();
         if (m_editBrush) {
             DeleteObject(m_editBrush);
@@ -1216,7 +1227,8 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
         const HWND field = reinterpret_cast<HWND>(lParam);
         if (m_rtssSelected >= 0 && static_cast<std::size_t>(m_rtssSelected) < rtssLayerCount()
             && (field == m_labelEdit || field == m_labelX || field == m_valueX || field == m_y
-                || field == m_alphaEdit || field == m_rtssHeightEdit || field == m_hexEdit)) {
+                || field == m_alphaEdit || field == m_rtssHeightEdit || field == m_hexEdit
+                || field == m_rtssBgEdit)) {
             auto& edit = m_model->settings.overlay.rtssLayerEdits[static_cast<std::size_t>(m_rtssSelected)];
             if (field == m_labelEdit && HIWORD(wParam) == EN_CHANGE && !m_syncing) {
                 wchar_t buffer[257] { };
@@ -1235,6 +1247,23 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
                 } else {
                     MessageBoxW(m_window, L"Введите цвет в формате #RRGGBBAA.", L"Неверный цвет RGBA",
                         MB_OK | MB_ICONWARNING);
+                }
+                syncFields();
+            } else if (field == m_rtssBgEdit && HIWORD(wParam) == EN_KILLFOCUS && !m_syncing) {
+                wchar_t buffer[16] { };
+                GetWindowTextW(field, buffer, 16);
+                std::uint32_t rgba = 0;
+                if (buffer[0] == L'\0') {
+                    if (edit.backgroundColor) {
+                        edit.backgroundColor.reset();
+                        changed(true);
+                    }
+                } else if (parseOverlayRgba(narrow(buffer), rgba)) {
+                    edit.backgroundColor = (rgba >> 8) | (rgba << 24);
+                    changed(true);
+                } else {
+                    MessageBoxW(m_window, L"Фон слоя: #RRGGBBAA или пустое поле (из RTSS).",
+                        L"Неверный цвет RGBA", MB_OK | MB_ICONWARNING);
                 }
                 syncFields();
             } else if (field == m_y && HIWORD(wParam) == EN_KILLFOCUS && !m_syncing) {
@@ -1536,6 +1565,7 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
                         edit.x = edit.y = 0;
                         edit.text.reset();
                         edit.textColor.reset();
+                        edit.backgroundColor.reset();
                         edit.size = 0;
                         edit.width = edit.height = 0;
                         syncFields();
@@ -2279,9 +2309,10 @@ void OverlayEditor::paint()
             TextRole::Small, theme.text);
         m_renderer.text(L"Цвет", Rect { 32.0f, m_inspector.top + 76.0f, 110.0f, m_inspector.top + 98.0f },
             TextRole::Small, theme.text);
-        m_renderer.text(L"Размер %",
-            Rect { 310.0f, m_inspector.top + 76.0f, 405.0f, m_inspector.top + 98.0f }, TextRole::Small,
-            theme.text);
+        m_renderer.text(L"Фон", Rect { 229.0f, m_inspector.top + 76.0f, 260.0f, m_inspector.top + 98.0f },
+            TextRole::Tiny, theme.text);
+        m_renderer.text(L"Шр.%", Rect { 394.0f, m_inspector.top + 76.0f, 450.0f, m_inspector.top + 98.0f },
+            TextRole::Tiny, theme.text);
         const std::array<std::wstring_view, 4> geometry { L"X", L"Y", L"Ш", L"В" };
         for (int field = 0; field < 4; ++field) {
             const float left = 32.0f + field * 116.0f;

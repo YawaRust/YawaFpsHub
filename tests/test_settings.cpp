@@ -980,20 +980,24 @@ namespace {
         saved.overlay.rtssLayerEdits[1].visible = false;
         saved.overlay.rtssLayerEdits[1].text = "GPU <FR> / тест";
         saved.overlay.rtssLayerEdits[1].textColor = 0x80773322u;
+        saved.overlay.rtssLayerEdits[0].backgroundColor = 0x00000000u;
+        saved.overlay.rtssLayerEdits[1].backgroundColor = 0x804488CCu;
         saved.overlay.rtssLayerEdits[1].size = 175;
         saved.overlay.rtssLayerEdits[1].width = 320;
         saved.overlay.rtssLayerEdits[1].height = 48;
         saved.overlay.rtssLayerEdits[2].text = ""; // пустая строка — тоже намеренная правка.
         Settings restored;
         CHECK(parseSettings(serializeSettings(saved), restored, error));
-        CHECK(restored.overlay.rtssLayerEdits[1].x == 23
-            && restored.overlay.rtssLayerEdits[1].y == -7
+        CHECK(restored.overlay.rtssLayerEdits[1].x == 23 && restored.overlay.rtssLayerEdits[1].y == -7
             && !restored.overlay.rtssLayerEdits[1].visible);
         CHECK(restored.overlay.rtssTemplate && *restored.overlay.rtssTemplate == source);
         CHECK(restored.overlay.rtssVisual && restored.overlay.rtssVisual->layers[0].x == -2);
         CHECK(restored.overlay.rtssVisual->availableTags.size() == 1);
         CHECK(restored.overlay.rtssLayerEdits[1].text == saved.overlay.rtssLayerEdits[1].text);
         CHECK(restored.overlay.rtssLayerEdits[1].textColor == 0x80773322u);
+        CHECK(restored.overlay.rtssLayerEdits[0].backgroundColor == 0x00000000u);
+        CHECK(restored.overlay.rtssLayerEdits[1].backgroundColor == 0x804488CCu);
+        CHECK(restored.overlay.rtssLayerEdits[2].backgroundColor == std::nullopt);
         CHECK(restored.overlay.rtssLayerEdits[1].size == 175);
         CHECK(restored.overlay.rtssLayerEdits[1].width == 320
             && restored.overlay.rtssLayerEdits[1].height == 48);
@@ -1011,10 +1015,11 @@ namespace {
         CHECK(importRtssOverlay(externalGraph, imported, error));
         CHECK(imported.rtssOmittedLayers == 1);
         Settings invalidEdits;
-        CHECK(parseSettings("[rtss_layer_edits]\n1 = 2049,0,0\n2 = 0,0,3\n256 = 1,1,1\n",
-            invalidEdits, error));
+        CHECK(
+            parseSettings("[rtss_layer_edits]\n1 = 2049,0,0\n2 = 0,0,3\n256 = 1,1,1\n", invalidEdits, error));
         CHECK(parseSettings("[rtss_layer_text]\n1 = XY\n256 = 4142\n"
                             "[rtss_layer_color]\n1 = GGGGGGGG\n"
+                            "[rtss_layer_background]\n1 = FFFFFFGG\n256 = 00000000\n"
                             "[rtss_layer_size]\n1 = 401\n"
                             "[rtss_layer_extent]\n1 = 3000,40\n2 = 80,-4\n",
             invalidEdits, error));
@@ -1022,13 +1027,13 @@ namespace {
             && invalidEdits.overlay.rtssLayerEdits[2].height == 0);
         CHECK(!invalidEdits.overlay.rtssLayerEdits[1].text
             && !invalidEdits.overlay.rtssLayerEdits[1].textColor
+            && !invalidEdits.overlay.rtssLayerEdits[1].backgroundColor
             && invalidEdits.overlay.rtssLayerEdits[1].size == 0);
-        CHECK(invalidEdits.overlay.rtssLayerEdits[1].visible
-            && invalidEdits.overlay.rtssLayerEdits[1].x == 0
+        CHECK(invalidEdits.overlay.rtssLayerEdits[1].visible && invalidEdits.overlay.rtssLayerEdits[1].x == 0
             && invalidEdits.overlay.rtssLayerEdits[2].visible);
         CHECK(importRtssOverlay(source, restored.overlay, error));
-        CHECK(restored.overlay.rtssLayerEdits[1].visible
-            && restored.overlay.rtssLayerEdits[1].x == 0);
+        CHECK(restored.overlay.rtssLayerEdits[1].visible && restored.overlay.rtssLayerEdits[1].x == 0
+            && !restored.overlay.rtssLayerEdits[1].backgroundColor);
     }
 
     void testRtssGraphUsesLocalHistoryWithoutFabricatedSource()

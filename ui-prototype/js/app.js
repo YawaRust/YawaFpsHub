@@ -413,6 +413,10 @@
     const argb = edit.textColor ?? layer?.color ?? "FFFFFFFF";
     $("#osdRtssColor").value = /^([0-9a-f]{8})$/i.test(argb)
       ? `#${argb.slice(2)}${argb.slice(0, 2)}` : "#FFFFFFFF";
+    const background = edit.backgroundColor ?? layer?.bg ?? "";
+    $("#osdRtssBg").value = /^[0-9a-f]{8}$/i.test(background)
+      ? `#${background.slice(2)}${background.slice(0, 2)}`
+      : /^[0-9a-f]{6}$/i.test(background) ? `#${background}FF` : "";
     $("#osdRtssSize").value = String(edit.size || layer?.size || 100);
     $("#osdRtssWidth").value = String(edit.width || 0);
     $("#osdRtssHeight").value = String(edit.height || 0);
@@ -559,6 +563,9 @@
       const next = { ...edit, x: Math.max(-2048, Math.min(2048, x)),
         y: Math.max(-2048, Math.min(2048, y)),
         visible: action === "visible" ? edit.visible === false : edit.visible !== false };
+      if (action === "reset" || action === "resetBackground") {
+        delete next.backgroundColor;
+      }
       if (action === "reset") {
         delete next.text;
         delete next.textColor;
@@ -586,6 +593,14 @@
         return;
       }
       updateRtss({ textColor: `${hex.slice(7)}${hex.slice(1, 7)}`.toUpperCase() });
+    });
+    $("#osdRtssBg").addEventListener("change", (event) => {
+      const hex = event.target.value.trim();
+      if (!hex) {
+        $("[data-rtss-action=resetBackground]").click();
+      } else if (/^#[0-9a-f]{8}$/i.test(hex)) {
+        updateRtss({ backgroundColor: `${hex.slice(7)}${hex.slice(1, 7)}`.toUpperCase() });
+      } else refreshRtssInspector();
     });
     $("#osdRtssSize").addEventListener("change", (event) => {
       const size = Number(event.target.value);
@@ -2308,7 +2323,7 @@
       const label = field(body, "Text", "").slice(0, 8192);
       const bg = field(body, "BgndColor", "").split(",")
         .find((entry) => /^[0-9a-f]{6}([0-9a-f]{2})?$/i.test(entry)) || "";
-      if (!label && !bg) continue;
+      if (!label && !bg && !number("ExtentX") && !number("ExtentY")) continue;
       const matchedImage = label.match(/^<I=0,0,0,0,(\d+),(\d+)>$/);
       const imageTag = matchedImage && Number(matchedImage[1]) >= 1
         && Number(matchedImage[2]) >= 1 && Number(matchedImage[1]) <= 2048
@@ -2393,7 +2408,7 @@
       node.style.height = `${layerHeight(layer)}px`;
       node.style.fontSize = `${rtssVisual.cellHeight * (edit.size || layer.size) / 100}px`;
       node.style.color = paint(edit.textColor ?? layer.color, "#fff");
-      node.style.backgroundColor = paint(layer.bg, "transparent");
+      node.style.backgroundColor = paint(edit.backgroundColor ?? layer.bg, "transparent");
       const source = edit.text ?? layer.label;
       const imageTag = source.match(/^<I=0,0,0,0,(\d+),(\d+)>$/);
       const imageWidth = imageTag && Number(imageTag[1]);

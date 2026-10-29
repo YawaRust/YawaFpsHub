@@ -64,6 +64,7 @@ private:
     HWND m_alphaEdit = nullptr;
     HWND m_rtssHeightEdit = nullptr;
     HWND m_hexEdit = nullptr;
+    HWND m_rtssBgEdit = nullptr;
     HWND m_numericEdit = nullptr;
     ActionKind m_numericAction = ActionKind::None;
     HWND m_catalogSearch = nullptr;
