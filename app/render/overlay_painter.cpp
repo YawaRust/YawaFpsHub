@@ -1497,7 +1497,7 @@ namespace {
                 format->Release();
             }
         }
-        return Rect { left, top, left + width * fit, top + height * fit };
+        return Rect { left, top, left + width, top + height };
     }
 
     void drawInline(Painter& painter, const OverlaySettings& settings, const OverlayText& text,

@@ -1,0 +1,24 @@
+[Master]
+Implementation=2
+FontFace=Consolas
+FontHeight=-13
+ZoomRatio=8
+[Settings]
+EmbeddedImage=rtss_crop.png
+[General]
+Layers=2
+[Layer0]
+Name=Transparent layout extent
+Text=A
+TextColor=00000000
+PositionX=0
+PositionY=0
+ExtentX=2048
+ExtentY=2048
+[Layer1]
+Name=Visible image at far edge
+Text=<I=0,0,4,0,4,4>
+PositionX=1800
+PositionY=1800
+ExtentX=128
+ExtentY=128
