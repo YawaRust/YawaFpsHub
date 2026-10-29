@@ -1066,7 +1066,7 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                 }
             }
         } else if (section == "rtss_layer_text" || section == "rtss_layer_color"
-            || section == "rtss_layer_size") {
+            || section == "rtss_layer_size" || section == "rtss_layer_extent") {
             const int index = parseInt(key, -1);
             if (index >= 0 && index < 256 && std::to_string(index) == key) {
                 auto& edit = target.overlay.rtssLayerEdits[static_cast<std::size_t>(index)];
@@ -1085,6 +1085,18 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                     const int size = parseInt(value, 0);
                     if (size >= 10 && size <= 400) {
                         edit.size = size;
+                    }
+                } else if (section == "rtss_layer_extent") {
+                    const auto comma = value.find(',');
+                    if (comma != std::string_view::npos
+                        && value.find(',', comma + 1) == std::string_view::npos) {
+                        const auto valid = [](int size) { return size == 0 || (size >= 16 && size <= 2048); };
+                        const int width = parseInt(value.substr(0, comma), -1);
+                        const int height = parseInt(value.substr(comma + 1), -1);
+                        if (valid(width) && valid(height)) {
+                            edit.width = width;
+                            edit.height = height;
+                        }
                     }
                 }
             }
@@ -1175,6 +1187,33 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
         target.overlay.recipe = static_cast<OverlayRecipe>(target.overlay.style);
     }
     return true;
+}
+
+std::string rtssVisibleTemplate(std::string_view text)
+{
+    std::string visible;
+    visible.reserve(std::min<std::size_t>(text.size(), 8192));
+    for (std::size_t at = 0; at < text.size() && visible.size() < 8192;) {
+        if (text[at] == '<') {
+            const std::size_t end = text.find('>', at + 1);
+            if (end != std::string_view::npos && end - at <= 256) {
+                const auto token = text.substr(at, end - at + 1);
+                if (token == "<FR>" || token.starts_with("<G=") || token.starts_with("<I=")) {
+                    visible.append(token);
+                }
+                at = end + 1;
+                continue;
+            }
+        }
+        if (text[at] == '\\' && at + 1 < text.size()) {
+            const char code = text[at + 1];
+            visible += code == 'n' || code == 'r' ? '\n' : code == 't' || code == 'b' ? ' ' : code;
+            at += 2;
+        } else {
+            visible += text[at++];
+        }
+    }
+    return visible;
 }
 
 bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::string& error)
@@ -1740,7 +1779,8 @@ std::string serializeSettings(const Settings& settings)
         }
         text += "\n";
     }
-    for (std::string_view section : { "rtss_layer_text", "rtss_layer_color", "rtss_layer_size" }) {
+    for (std::string_view section :
+        { "rtss_layer_text", "rtss_layer_color", "rtss_layer_size", "rtss_layer_extent" }) {
         bool header = false;
         for (std::size_t index = 0; index < settings.overlay.rtssLayerEdits.size(); ++index) {
             const auto& edit = settings.overlay.rtssLayerEdits[index];
@@ -1757,6 +1797,9 @@ std::string serializeSettings(const Settings& settings)
                 hasValue = true;
             } else if (section == "rtss_layer_size" && edit.size >= 10 && edit.size <= 400) {
                 value = std::to_string(edit.size);
+                hasValue = true;
+            } else if (section == "rtss_layer_extent" && (edit.width > 0 || edit.height > 0)) {
+                value = std::to_string(edit.width) + "," + std::to_string(edit.height);
                 hasValue = true;
             }
             if (!hasValue) {

@@ -115,6 +115,10 @@ private:
     float m_styledRowUnit = 1.0f;
     int m_rtssSelected = -1;
     bool m_rtssDragging = false;
+    bool m_rtssResizing = false;
+    int m_rtssWidthStart = 0;
+    int m_rtssHeightStart = 0;
+    float m_rtssDragUnit = 1.0f;
     bool m_scaleDragging = false;
     bool m_backgroundResizing = false;
     bool m_paddingDragging = false;

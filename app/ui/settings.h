@@ -111,6 +111,8 @@ struct RtssLayerEdit
 {
     int x = 0;
     int y = 0;
+    int width = 0; // 0 — исходный ExtentX, иначе ширина в пикселях RTSS до ZoomRatio.
+    int height = 0;
     bool visible = true;
     // Локальные правки вида: оригинальный .ovl/.ovx остаётся нетронутым.
     std::optional<std::string> text; // UTF-8; исходный RTSS-текст кодируется отдельно (CP1251).
@@ -306,6 +308,8 @@ std::string serializeOverlayRecipeJson(const OverlaySettings& overlay);
 // Импорт только осей и общих цветов; при ошибке overlay остаётся неизменным.
 bool importOverlayRecipeJson(std::string_view json, OverlaySettings& overlay, std::string& error);
 // Поддерживает только однозначно сопоставимые текстовые датчики RTSS OverlayEditor v2.
+// Убирает управляющий гипертекст из предпросмотра, не изменяя оригинальный шаблон.
+std::string rtssVisibleTemplate(std::string_view text);
 bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::string& error);
 // Извлекает OVL из OVX в памяти и хранит исходный пакет для обратного экспорта.
 bool importRtssExchange(std::string_view bytes, OverlaySettings& overlay, std::string& error);

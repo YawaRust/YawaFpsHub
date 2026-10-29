@@ -937,6 +937,17 @@ namespace {
         CHECK(!importRtssOverlay(std::string(1048577, 'x'), settings, error));
     }
 
+    void testRtssHypertextDoesNotExpandPreview()
+    {
+        const std::string original = "<C=FFFFFF><S=180>CPU: %CPU temperature% °C\\n"
+                                     "<C=FF0000><A=1><FR> FPS";
+        const std::string visible = rtssVisibleTemplate(original);
+        CHECK(visible == "CPU: %CPU temperature% °C\n<FR> FPS");
+        CHECK(rtssVisibleTemplate("<G=Frametime,0,0,1,33,0,80>") == "<G=Frametime,0,0,1,33,0,80>");
+        CHECK(rtssVisibleTemplate("<I=0,0,0,0,225,544>") == "<I=0,0,0,0,225,544>");
+        CHECK(original.find("<C=") == 0); // исходные слои при экспорте не переписываются.
+    }
+
     void testRtssVisualLayersPersistWithoutExternalProvider()
     {
         const std::string source = "[Master]\nImplementation=2\nFontFace=Unispace\nFontHeight=-7\n"
@@ -965,6 +976,8 @@ namespace {
         saved.overlay.rtssLayerEdits[1].text = "GPU <FR> / тест";
         saved.overlay.rtssLayerEdits[1].textColor = 0x80773322u;
         saved.overlay.rtssLayerEdits[1].size = 175;
+        saved.overlay.rtssLayerEdits[1].width = 320;
+        saved.overlay.rtssLayerEdits[1].height = 48;
         saved.overlay.rtssLayerEdits[2].text = ""; // пустая строка — тоже намеренная правка.
         Settings restored;
         CHECK(parseSettings(serializeSettings(saved), restored, error));
@@ -977,6 +990,8 @@ namespace {
         CHECK(restored.overlay.rtssLayerEdits[1].text == saved.overlay.rtssLayerEdits[1].text);
         CHECK(restored.overlay.rtssLayerEdits[1].textColor == 0x80773322u);
         CHECK(restored.overlay.rtssLayerEdits[1].size == 175);
+        CHECK(restored.overlay.rtssLayerEdits[1].width == 320
+            && restored.overlay.rtssLayerEdits[1].height == 48);
         CHECK(restored.overlay.rtssLayerEdits[2].text && restored.overlay.rtssLayerEdits[2].text->empty());
         const std::string graph10 = "[Master]\nImplementation=2\n[General]\nLayers=2\nSources=1\n"
                                     "[Source0]\nName=CPU usage\nProvider=HAL\nID=CPU usage\n"
@@ -995,8 +1010,11 @@ namespace {
             invalidEdits, error));
         CHECK(parseSettings("[rtss_layer_text]\n1 = XY\n256 = 4142\n"
                             "[rtss_layer_color]\n1 = GGGGGGGG\n"
-                            "[rtss_layer_size]\n1 = 401\n",
+                            "[rtss_layer_size]\n1 = 401\n"
+                            "[rtss_layer_extent]\n1 = 3000,40\n2 = 80,-4\n",
             invalidEdits, error));
+        CHECK(invalidEdits.overlay.rtssLayerEdits[1].width == 0
+            && invalidEdits.overlay.rtssLayerEdits[2].height == 0);
         CHECK(!invalidEdits.overlay.rtssLayerEdits[1].text
             && !invalidEdits.overlay.rtssLayerEdits[1].textColor
             && invalidEdits.overlay.rtssLayerEdits[1].size == 0);
@@ -1245,6 +1263,7 @@ void runSettingsTests()
     testKeysAreStable();
     testRecipeMigrationAndAxes();
     testRtssImportRecognizesOnlyKnownSources();
+    testRtssHypertextDoesNotExpandPreview();
     testRtssVisualLayersPersistWithoutExternalProvider();
     testRtssGraphUsesLocalHistoryWithoutFabricatedSource();
     testRtssExternalProviderCannotImpersonateHal();

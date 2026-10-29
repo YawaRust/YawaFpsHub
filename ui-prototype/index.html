@@ -713,7 +713,12 @@
                 <input id="osdRtssColor" type="text" maxlength="9" spellcheck="false" aria-label="Цвет текста RTSS-слоя">
                 <label for="osdRtssSize">Размер шрифта, % (10–400)</label>
                 <input id="osdRtssSize" type="number" min="10" max="400" step="1" aria-label="Размер текста RTSS-слоя">
+                <label for="osdRtssWidth">Ширина слоя, px (0 — из RTSS)</label>
+                <input id="osdRtssWidth" type="number" min="0" max="2048" step="1" aria-label="Ширина RTSS-слоя">
+                <label for="osdRtssHeight">Высота слоя, px (0 — из RTSS)</label>
+                <input id="osdRtssHeight" type="number" min="0" max="2048" step="1" aria-label="Высота RTSS-слоя">
                 <span id="osdRtssCoordinates"></span>
+                <small id="osdRtssWarning" hidden>Управляющий гипертекст RTSS показан упрощённо; исходный слой сохранён для экспорта.</small>
                 <div>
                   <button class="btn btn--ghost" type="button" data-rtss-action="left" aria-label="Влево">←</button>
                   <button class="btn btn--ghost" type="button" data-rtss-action="right" aria-label="Вправо">→</button>

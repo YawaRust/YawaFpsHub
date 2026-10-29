@@ -1251,6 +1251,8 @@ namespace {
         };
         std::vector<RtssPlacement> placed;
         placed.reserve(layout.layers.size());
+        float leftEdge = 0.0f;
+        float topEdge = 0.0f;
         float right = 0.0f;
         float bottom = 0.0f;
         for (std::size_t index = 0; index < layout.layers.size(); ++index) {
@@ -1261,8 +1263,12 @@ namespace {
             D2D1_RECT_F imageCrop { };
             const bool imageTag = source.starts_with("<I=");
             const bool imageReady = imageTag && image && rtssImageRect(source, *image, imageCrop);
+            const std::string visible = rtssVisibleTemplate(source);
             std::wstring text = imageTag ? (imageReady ? L"" : L"нет данных")
-                                         : rtssText(layout, source, values, edit.text.has_value());
+                                         : rtssText(layout, visible, values, edit.text.has_value());
+            if (text.empty() && !source.empty() && !imageReady) {
+                text = L"н/д"; // Слой с неподдерживаемым тегом остаётся видимым и выбираемым.
+            }
             int graph = -1;
             const bool fillGraph = source.ends_with(",81>");
             if (source.ends_with(",80>") || source.ends_with(",10>") || fillGraph) {
@@ -1296,39 +1302,51 @@ namespace {
                 continue;
             }
             const int size = edit.size == 0 ? layer.size : edit.size;
-            const float textWidth = static_cast<float>(text.size()) * cellWidth * size / 100.0f;
-            const float nominalWidth = layer.width == 0
-                ? (imageReady ? imageCrop.right * zoom : std::max(textWidth, cellWidth))
+            std::size_t longestLine = 0;
+            std::size_t lines = 1;
+            std::size_t lineLength = 0;
+            for (wchar_t symbol : text) {
+                if (symbol == L'\n') {
+                    longestLine = std::max(longestLine, lineLength);
+                    lineLength = 0;
+                    ++lines;
+                } else {
+                    ++lineLength;
+                }
+            }
+            longestLine = std::max(longestLine, lineLength);
+            const float textWidth = static_cast<float>(longestLine) * cellWidth * size / 100.0f;
+            // Явный Extent задаёт границу слоя: текст и отсутствующие провайдеры не
+            // могут увеличивать весь макет и превращать остальные датчики в пиксельную пыль.
+            const float width = edit.width > 0 ? static_cast<float>(edit.width) * zoom
+                : layer.width == 0
+                ? (imageReady ? imageCrop.right * zoom : std::clamp(textWidth, cellWidth, 1024.0f * zoom))
                 : units(layer.width, false);
-            // Не обрезаем «нет данных» или текст, явно изменённый пользователем.
-            const float width = text.find(L"нет данных") != std::wstring::npos || edit.text || edit.size != 0
-                ? std::max(nominalWidth, textWidth)
-                : nominalWidth;
-            const float nominalHeight = layer.height == 0
-                ? (imageReady ? imageCrop.bottom * zoom : cellHeight * size / 100.0f)
+            const float height = edit.height > 0 ? static_cast<float>(edit.height) * zoom
+                : layer.height == 0
+                ? (imageReady ? imageCrop.bottom * zoom : cellHeight * size / 100.0f * lines)
                 : units(layer.height, true);
-            const float height = edit.size != 0 && !imageReady
-                ? std::max(nominalHeight, cellHeight * size / 100.0f)
-                : nominalHeight;
             float x = units(layer.x, false) + static_cast<float>(edit.x) * zoom;
             float y = units(layer.y, true) + static_cast<float>(edit.y) * zoom;
             x -= width * static_cast<float>(layer.origin % 3) / 2.0f;
             y -= height * static_cast<float>(layer.origin / 3) / 2.0f;
             placed.push_back(
                 { Rect { x, y, x + width, y + height }, text, imageCrop, graph, fillGraph, imageReady });
+            leftEdge = std::min(leftEdge, x);
+            topEdge = std::min(topEdge, y);
             right = std::max(right, x + width);
             bottom = std::max(bottom, y + height);
         }
-        if (right <= 0.0f || bottom <= 0.0f || formats.factory == nullptr) {
+        if (right <= leftEdge || bottom <= topEdge || formats.factory == nullptr) {
             return { };
         }
-        const float fit = std::min({ 1.0f, std::max(1.0f, bounds.width() - 4.0f) / right,
-            std::max(1.0f, bounds.height() - 4.0f) / bottom });
+        const float fit = std::min({ 1.0f, std::max(1.0f, bounds.width() - 4.0f) / (right - leftEdge),
+            std::max(1.0f, bounds.height() - 4.0f) / (bottom - topEdge) });
         if (layerScale != nullptr) {
             *layerScale = zoom * fit;
         }
-        const float width = right * fit;
-        const float height = bottom * fit;
+        const float width = (right - leftEdge) * fit;
+        const float height = (bottom - topEdge) * fit;
         const bool onRight = settings.position == OverlayPosition::TopRight
             || settings.position == OverlayPosition::BottomRight;
         const bool onBottom = settings.position == OverlayPosition::BottomLeft
@@ -1367,12 +1385,14 @@ namespace {
                 continue;
             }
             if (layerBounds != nullptr) {
-                (*layerBounds)[index] = Rect { left + fit * placement.rect.left,
-                    top + fit * placement.rect.top, left + fit * placement.rect.right,
-                    top + fit * placement.rect.bottom };
+                (*layerBounds)[index] = Rect { left + fit * (placement.rect.left - leftEdge),
+                    top + fit * (placement.rect.top - topEdge),
+                    left + fit * (placement.rect.right - leftEdge),
+                    top + fit * (placement.rect.bottom - topEdge) };
             }
-            const D2D1_RECT_F rect = D2D1::RectF(left + placement.rect.left, top + placement.rect.top,
-                left + placement.rect.right, top + placement.rect.bottom);
+            const D2D1_RECT_F rect
+                = D2D1::RectF(left + placement.rect.left - leftEdge, top + placement.rect.top - topEdge,
+                    left + placement.rect.right - leftEdge, top + placement.rect.bottom - topEdge);
             if (layer.hasBackground && layer.backgroundColor >> 24 != 0) {
                 ID2D1SolidColorBrush* brush = nullptr;
                 if (SUCCEEDED(target->CreateSolidColorBrush(

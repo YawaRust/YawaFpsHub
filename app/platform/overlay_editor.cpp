@@ -257,7 +257,7 @@ bool OverlayEditor::open(HWND owner, HINSTANCE instance, AppModel& model, const 
     m_panX = m_panY = 0.0f;
     m_fitPending = true;
     m_focusCanvas = true;
-    m_rtssDragging = false;
+    m_rtssDragging = m_rtssResizing = false;
     m_styledRowDragging = false;
     m_samplingColor = false;
     m_undo.clear();
@@ -496,7 +496,7 @@ void OverlayEditor::recordHistory()
 
 void OverlayEditor::restoreHistory(bool redo)
 {
-    if (m_dragging || m_panning || m_rtssDragging || m_styledRowDragging || m_scaleDragging
+    if (m_dragging || m_panning || m_rtssDragging || m_rtssResizing || m_styledRowDragging || m_scaleDragging
         || m_paddingDragging) {
         return;
     }
@@ -659,7 +659,19 @@ void OverlayEditor::moveRtssLayer(int x, int y)
         return;
     }
     auto& edit = m_model->settings.overlay.rtssLayerEdits[static_cast<std::size_t>(m_rtssSelected)];
-    const float unit = std::max(0.001f, canvasScale() * m_rtssLayerScale);
+    if (m_rtssResizing) {
+        const int width = std::clamp(
+            m_rtssWidthStart + static_cast<int>(std::lround((x - m_rtssStartX) / m_rtssDragUnit)), 16, 2048);
+        const int height = std::clamp(
+            m_rtssHeightStart + static_cast<int>(std::lround((y - m_rtssStartY) / m_rtssDragUnit)), 16, 2048);
+        if (width != edit.width || height != edit.height) {
+            edit.width = width;
+            edit.height = height;
+            changed(false);
+        }
+        return;
+    }
+    const float unit = m_rtssDragUnit;
     const int newX = std::clamp(m_rtssOffsetX + static_cast<int>(std::lround((x - m_rtssStartX) / unit)), -2048, 2048);
     const int newY = std::clamp(m_rtssOffsetY + static_cast<int>(std::lround((y - m_rtssStartY) / unit)), -2048, 2048);
     if (edit.x != newX || edit.y != newY) {
@@ -1369,6 +1381,7 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
                         edit.text.reset();
                         edit.textColor.reset();
                         edit.size = 0;
+                        edit.width = edit.height = 0;
                         syncFields();
                     }
                     changed(true);
@@ -1464,7 +1477,7 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
                 SetCapture(m_window);
                 return 0;
             }
-            if (m_screenPlate.width() > 0.0f && m_screenPlate.height() > 0.0f
+            if (rtssLayerCount() == 0 && m_screenPlate.width() > 0.0f && m_screenPlate.height() > 0.0f
                 && (scaleGrip().contains(static_cast<float>(x), static_cast<float>(y))
                     || paddingGrip().contains(static_cast<float>(x), static_cast<float>(y)))) {
                 m_scaleDragging = scaleGrip().contains(static_cast<float>(x), static_cast<float>(y));
@@ -1508,10 +1521,19 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
                     m_rtssSelected = static_cast<int>(index - 1);
                     m_model->editingLabel = -1;
                     syncFields();
-                    m_rtssDragging = true;
+                    const auto& edit = m_model->settings.overlay.rtssLayerEdits[index - 1];
+                    m_rtssResizing = onCanvas.width() > 22.0f && onCanvas.height() > 22.0f
+                        && x >= onCanvas.right - 12.0f && y >= onCanvas.bottom - 12.0f;
+                    m_rtssDragging = !m_rtssResizing;
+                    m_rtssDragUnit = std::max(0.001f, canvasScale() * m_rtssLayerScale);
+                    m_rtssWidthStart = edit.width > 0
+                        ? edit.width
+                        : static_cast<int>(std::lround(box.width() / m_rtssLayerScale));
+                    m_rtssHeightStart = edit.height > 0
+                        ? edit.height
+                        : static_cast<int>(std::lround(box.height() / m_rtssLayerScale));
                     m_rtssStartX = x;
                     m_rtssStartY = y;
-                    const auto& edit = m_model->settings.overlay.rtssLayerEdits[index - 1];
                     m_rtssOffsetX = edit.x;
                     m_rtssOffsetY = edit.y;
                     SetFocus(m_window);
@@ -1687,7 +1709,7 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
     case WM_MOUSEMOVE: {
         const int x = logicalCoordinate(GET_X_LPARAM(lParam));
         const int y = logicalCoordinate(GET_Y_LPARAM(lParam));
-        if (m_rtssDragging) {
+        if (m_rtssDragging || m_rtssResizing) {
             moveRtssLayer(x, y);
         } else if (m_styledRowDragging) {
             moveStyledRow(x, y);
@@ -1717,9 +1739,9 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
         const int x = logicalCoordinate(GET_X_LPARAM(lParam));
         const int y = logicalCoordinate(GET_Y_LPARAM(lParam));
         if (GetCapture() == m_window) {
-            if (m_rtssDragging) {
+            if (m_rtssDragging || m_rtssResizing) {
                 moveRtssLayer(x, y);
-                m_rtssDragging = false;
+                m_rtssDragging = m_rtssResizing = false;
                 changed(true);
                 ReleaseCapture();
                 return 0;
@@ -1763,9 +1785,9 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
         break;
     }
     case WM_CAPTURECHANGED:
-        if (m_rtssDragging || m_styledRowDragging || m_scaleDragging || m_paddingDragging) {
-            m_rtssDragging = m_styledRowDragging = m_scaleDragging = m_paddingDragging = m_backgroundResizing
-                = false;
+        if (m_rtssDragging || m_rtssResizing || m_styledRowDragging || m_scaleDragging || m_paddingDragging) {
+            m_rtssDragging = m_rtssResizing = m_styledRowDragging = m_scaleDragging = m_paddingDragging
+                = m_backgroundResizing = false;
             changed(true);
         }
         return 0;
@@ -1896,7 +1918,7 @@ void OverlayEditor::paint()
         GetSystemMetrics(SM_CYVIRTUALSCREEN));
     const auto& rtss = m_model->settings.overlay;
     const std::wstring canvasHint = rtssLayerCount() > 0
-        ? L"RTSS: выберите слой на холсте, перетащите или сдвиньте стрелками"
+        ? L"RTSS: тяга — переместить слой · угол слоя — размер · часть тегов упрощена"
         : rtss.rtssOmittedLayers > 0
         ? L"RTSS: " + std::to_wstring(rtss.rtssOmittedLayers) + L" слоёв без связанной метрики"
         : rtss.layout != OverlayLayout::Plates
@@ -1999,8 +2021,12 @@ void OverlayEditor::paint()
         const CanvasAxis horizontal { m_canvas.left, m_panX, screenScale };
         const CanvasAxis vertical { m_canvas.top, m_panY, screenScale };
         if (box.right > box.left) {
-            m_renderer.strokeRoundRect(Rect { horizontal.toCanvas(box.left), vertical.toCanvas(box.top),
-                horizontal.toCanvas(box.right), vertical.toCanvas(box.bottom) }, 3.0f, theme.accent, 1.5f);
+            const Rect selected { horizontal.toCanvas(box.left), vertical.toCanvas(box.top),
+                horizontal.toCanvas(box.right), vertical.toCanvas(box.bottom) };
+            m_renderer.strokeRoundRect(selected, 3.0f, theme.accent, 1.5f);
+            m_renderer.fillRoundRect({ selected.right - 9.0f, selected.bottom - 9.0f, selected.right + 3.0f,
+                                         selected.bottom + 3.0f },
+                2.0f, theme.accent);
         }
     }
     if (m_rtssSelected < 0
@@ -2052,7 +2078,7 @@ void OverlayEditor::paint()
                 Rect { left, top, right, bottom }, 4.0f, theme.accent.withAlpha(0.3f), 1.0f);
         }
     }
-    if (m_screenPlate.width() > 0.0f && m_screenPlate.height() > 0.0f) {
+    if (rtssLayerCount() == 0 && m_screenPlate.width() > 0.0f && m_screenPlate.height() > 0.0f) {
         m_renderer.fillRoundRect(scaleGrip(), 4.0f, theme.accent);
         m_renderer.strokeRoundRect(scaleGrip(), 4.0f, theme.background, 1.0f);
         const Rect padding = paddingGrip();
@@ -2087,8 +2113,9 @@ void OverlayEditor::paint()
         m_renderer.text(L"Размер %",
             Rect { 310.0f, m_inspector.top + 76.0f, 405.0f, m_inspector.top + 98.0f }, TextRole::Small,
             theme.text);
-        m_renderer.text(L"X: " + std::to_wstring(edit.x) + L" px     Y: " + std::to_wstring(edit.y)
-                + L" px · правки только для Yawa",
+        m_renderer.text(L"X: " + std::to_wstring(edit.x) + L"  Y: " + std::to_wstring(edit.y) + L"  Ш: "
+                + (edit.width ? std::to_wstring(edit.width) : L"из RTSS") + L"  В: "
+                + (edit.height ? std::to_wstring(edit.height) : L"из RTSS"),
             Rect { 32.0f, m_inspector.top + 105.0f, 506.0f, m_inspector.top + 130.0f }, TextRole::Tiny,
             theme.textDim);
         const std::array<std::wstring_view, 4> directions { L"←", L"→", L"↑", L"↓" };

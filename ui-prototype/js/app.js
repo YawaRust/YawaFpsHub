@@ -412,6 +412,9 @@
     $("#osdRtssColor").value = /^([0-9a-f]{8})$/i.test(argb)
       ? `#${argb.slice(2)}${argb.slice(0, 2)}` : "#FFFFFFFF";
     $("#osdRtssSize").value = String(edit.size || layer?.size || 100);
+    $("#osdRtssWidth").value = String(edit.width || 0);
+    $("#osdRtssHeight").value = String(edit.height || 0);
+    $("#osdRtssWarning").hidden = !/<(?!FR>|G=|I=)[^>]{1,256}>/i.test(edit.text ?? layer?.label ?? "");
     $("[data-rtss-action=visible]").textContent = edit.visible === false ? "Показать" : "Скрыть";
   }
 
@@ -520,6 +523,8 @@
         delete next.text;
         delete next.textColor;
         delete next.size;
+        delete next.width;
+        delete next.height;
       }
       overlayState.rtssLayerEdits[index] = next;
       store.write("rtssLayerEdits", JSON.stringify(overlayState.rtssLayerEdits));
@@ -550,6 +555,16 @@
       }
       updateRtss({ size });
     });
+    for (const [id, field] of [["osdRtssWidth", "width"], ["osdRtssHeight", "height"]]) {
+      $(`#${id}`).addEventListener("change", (event) => {
+        const size = Number(event.target.value);
+        if (!Number.isInteger(size) || (size !== 0 && (size < 16 || size > 2048))) {
+          refreshRtssInspector();
+          return;
+        }
+        updateRtss({ [field]: size });
+      });
+    }
     const hexInput = $("#osdLayerHex");
     $("#osdColorTarget").addEventListener("change", (event) => {
       colorTarget = event.target.value;
@@ -1454,9 +1469,10 @@
     osd.style.setProperty("--osd-origin-x", `${overlayState.originX}px`);
     osd.style.setProperty("--osd-origin-y", `${overlayState.originY}px`);
     osd.dataset.layout = overlayState.layout;
-    osd.style.width = overlayState.layout === "plates" && overlayState.backgroundWidth !== null
+    const customPlate = overlayState.layout === "plates" && !(overlayState.recipe === "rtss" && originalRtss);
+    osd.style.width = customPlate && overlayState.backgroundWidth !== null
       ? `${overlayState.backgroundWidth}px` : "";
-    osd.style.height = overlayState.layout === "plates" && overlayState.backgroundHeight !== null
+    osd.style.height = customPlate && overlayState.backgroundHeight !== null
       ? `${overlayState.backgroundHeight}px` : "";
     osd.classList.toggle("is-sparkline", overlayState.sparkline && sparklineHistory.length >= 2);
     osd.style.setProperty("--menu-opacity", (overlayState.menuOpacity / 100).toFixed(2));
@@ -1713,8 +1729,9 @@
     const rect = $("#osdPreview").getBoundingClientRect();
     const sceneRect = scene.getBoundingClientRect();
     if (!scene.clientWidth || !scene.clientHeight || !rect.width || !rect.height) return;
-    const zoom = Math.max(0.75, Math.min(4, canvasView.zoom * Math.min(
-      (scene.clientWidth - 28) / rect.width, (scene.clientHeight - 28) / rect.height)));
+    const zoom = Math.max(overlayState.recipe === "rtss" && rtssVisual ? 0.05 : 0.75,
+      Math.min(4, canvasView.zoom * Math.min(
+        (scene.clientWidth - 28) / rect.width, (scene.clientHeight - 28) / rect.height)));
     const centerX = (rect.left + rect.right) / 2 - sceneRect.left;
     const centerY = (rect.top + rect.bottom) / 2 - sceneRect.top;
     canvasView.panX = scene.clientWidth / 2 - (centerX - canvasView.panX) / canvasView.zoom * zoom;
@@ -1827,8 +1844,8 @@
         event.preventDefault();
         return;
       }
-      if (rect.width >= 60 && rect.height >= 45 && event.clientX >= rect.right - 16
-        && event.clientY >= rect.bottom - 16) {
+      if (!(overlayState.recipe === "rtss" && rtssVisual) && rect.width >= 60 && rect.height >= 45
+        && event.clientX >= rect.right - 16 && event.clientY >= rect.bottom - 16) {
         const background = overlayState.layout === "plates" && overlayState.recipe !== "rtss";
         if (background) freeOverlayAnchor();
         drag = { resize: true, background, x: event.clientX, y: event.clientY,
@@ -1848,8 +1865,15 @@
         const index = Number(rtssNode.dataset.rtssLayer);
         const edit = overlayState.rtssLayerEdits[index] || {};
         selectOverlayLayer(`rtss:${index}`);
-        drag = { rtss: index, x: event.clientX, y: event.clientY,
-          layerX: edit.x || 0, layerY: edit.y || 0 };
+        const layer = rtssVisual.layers.find((item) => item.index === index);
+        const bounds = rtssNode.getBoundingClientRect();
+        const resizeRtss = bounds.width > 22 && bounds.height > 22
+          && event.clientX >= bounds.right - 12 && event.clientY >= bounds.bottom - 12;
+        drag = { rtss: index, resizeRtss, x: event.clientX, y: event.clientY,
+          unit: Math.max(.001, rect.width / Math.max(1, osd.offsetWidth) * rtssVisual.zoom),
+          layerX: edit.x || 0, layerY: edit.y || 0,
+          width: edit.width || Math.round(layer.width / rtssVisual.zoom),
+          height: edit.height || Math.round(layer.height / rtssVisual.zoom) };
         overlayHistory.gesture = true;
         osd.setPointerCapture(event.pointerId);
         event.preventDefault();
@@ -1899,12 +1923,13 @@
         return;
       }
       if (drag.rtss !== undefined) {
-        const plate = osd.getBoundingClientRect();
-        const unit = Math.max(.001, plate.width / Math.max(1, osd.offsetWidth) * rtssVisual.zoom);
         const edit = overlayState.rtssLayerEdits[drag.rtss] || {};
-        overlayState.rtssLayerEdits[drag.rtss] = { ...edit,
-          x: Math.max(-2048, Math.min(2048, Math.round(drag.layerX + (event.clientX - drag.x) / unit))),
-          y: Math.max(-2048, Math.min(2048, Math.round(drag.layerY + (event.clientY - drag.y) / unit))) };
+        overlayState.rtssLayerEdits[drag.rtss] = drag.resizeRtss ? { ...edit,
+          width: Math.max(16, Math.min(2048, Math.round(drag.width + (event.clientX - drag.x) / drag.unit))),
+          height: Math.max(16, Math.min(2048, Math.round(drag.height + (event.clientY - drag.y) / drag.unit))) }
+          : { ...edit,
+            x: Math.max(-2048, Math.min(2048, Math.round(drag.layerX + (event.clientX - drag.x) / drag.unit))),
+            y: Math.max(-2048, Math.min(2048, Math.round(drag.layerY + (event.clientY - drag.y) / drag.unit))) };
         applyOverlay();
         return;
       }
@@ -2184,6 +2209,11 @@
     return btoa(chunks.join(""));
   }
 
+  function rtssVisibleTemplate(source) {
+    return source.replace(/<[^>]{1,256}>/g, (tag) => /^<FR>$|^<(G|I)=/.test(tag) ? tag : "")
+      .replace(/\\[nr]/g, "\n").replace(/\\[tb]/g, " ");
+  }
+
   function parseRtssVisual(encoded) {
     const bytes = Uint8Array.from(atob(encoded), (letter) => letter.charCodeAt(0));
     const text = new TextDecoder("windows-1251").decode(bytes);
@@ -2204,23 +2234,26 @@
       const number = (name, fallback = 0) => Math.max(-512, Math.min(2048,
         Number(field(body, name, String(fallback))) || fallback));
       const label = field(body, "Text", "").slice(0, 8192);
-      const bg = field(body, "BgndColor", "").split(",")[0];
+      const bg = field(body, "BgndColor", "").split(",")
+        .find((entry) => /^[0-9a-f]{6}([0-9a-f]{2})?$/i.test(entry)) || "";
       if (!label && !bg) continue;
       const matchedImage = label.match(/^<I=0,0,0,0,(\d+),(\d+)>$/);
       const imageTag = matchedImage && Number(matchedImage[1]) >= 1
         && Number(matchedImage[2]) >= 1 && Number(matchedImage[1]) <= 2048
         && Number(matchedImage[2]) <= 2048 ? matchedImage : null;
+      const visible = rtssVisibleTemplate(label);
+      const longestLine = Math.max(1, ...visible.split("\n").map((line) => line.length));
       const layerWidth = units(number("ExtentX"), false) || (imageTag ? Number(imageTag[1]) * zoom
-        : Math.max(cellWidth, label.length * cellWidth));
+        : Math.min(1024 * zoom, Math.max(cellWidth, longestLine * cellWidth)));
       const layerHeight = units(number("ExtentY"), true) || (imageTag ? Number(imageTag[2]) * zoom
-        : cellHeight * number("Size", 100) / 100);
+        : cellHeight * number("Size", 100) / 100 * visible.split("\n").length);
       const origin = Math.max(0, Math.min(8, number("ExtentOrigin")));
       const x = units(number("PositionX"), false) - layerWidth * (origin % 3) / 2;
       const y = units(number("PositionY"), true) - layerHeight * Math.floor(origin / 3) / 2;
       layers.push({ index: Number(index), name: field(body, "Name", "").slice(0, 96),
         label, bg, color: field(body, "TextColor", "").split(",")[0],
         size: Math.max(10, Math.min(400, number("Size", 100))),
-        x, y, width: layerWidth, height: layerHeight });
+        origin, x, y, width: layerWidth, height: layerHeight });
       width = Math.max(width, x + layerWidth);
       height = Math.max(height, y + layerHeight);
     }
@@ -2254,14 +2287,20 @@
       (layer) => overlayState.rtssLayerEdits[layer.index]?.visible !== false);
     const canvas = document.createElement("div");
     canvas.className = "rtss-visual-canvas";
-    const layerWidth = (layer) => Math.max(layer.width,
-      (overlayState.rtssLayerEdits[layer.index]?.text ?? layer.label).length * rtssVisual.cellHeight * .61);
+    const layerWidth = (layer) => (overlayState.rtssLayerEdits[layer.index]?.width || 0) > 0
+      ? overlayState.rtssLayerEdits[layer.index].width * rtssVisual.zoom : layer.width;
+    const layerHeight = (layer) => (overlayState.rtssLayerEdits[layer.index]?.height || 0) > 0
+      ? overlayState.rtssLayerEdits[layer.index].height * rtssVisual.zoom : layer.height;
+    const layerX = (layer) => layer.x + (layer.width - layerWidth(layer)) * (layer.origin % 3) / 2
+      + (overlayState.rtssLayerEdits[layer.index]?.x || 0) * rtssVisual.zoom;
+    const layerY = (layer) => layer.y + (layer.height - layerHeight(layer)) * Math.floor(layer.origin / 3) / 2
+      + (overlayState.rtssLayerEdits[layer.index]?.y || 0) * rtssVisual.zoom;
+    const minX = Math.min(0, ...visibleLayers.map(layerX));
+    const minY = Math.min(0, ...visibleLayers.map(layerY));
     canvas.style.width = `${Math.max(1, ...visibleLayers.map((layer) =>
-      layer.x + layerWidth(layer) + (overlayState.rtssLayerEdits[layer.index]?.x || 0) * rtssVisual.zoom))}px`;
+      layerX(layer) + layerWidth(layer))) - minX}px`;
     canvas.style.height = `${Math.max(1, ...visibleLayers.map((layer) =>
-      layer.y + Math.max(layer.height, rtssVisual.cellHeight *
-        (overlayState.rtssLayerEdits[layer.index]?.size || layer.size) / 100) +
-        (overlayState.rtssLayerEdits[layer.index]?.y || 0) * rtssVisual.zoom))}px`;
+      layerY(layer) + layerHeight(layer))) - minY}px`;
     canvas.style.fontFamily = `'${rtssVisual.family.replaceAll("'", "")}', Consolas, monospace`;
     canvas.style.fontWeight = String(rtssVisual.weight);
     const paint = (encoded, fallback) => /^[0-9a-f]{6}([0-9a-f]{2})?$/i.test(encoded)
@@ -2276,10 +2315,10 @@
       const node = document.createElement("span");
       node.className = `rtss-visual-layer${selectedLayer === `rtss:${layer.index}` ? " is-selected" : ""}`;
       node.dataset.rtssLayer = String(layer.index);
-      node.style.left = `${layer.x + (edit.x || 0) * rtssVisual.zoom}px`;
-      node.style.top = `${layer.y + (edit.y || 0) * rtssVisual.zoom}px`;
+      node.style.left = `${layerX(layer) - minX}px`;
+      node.style.top = `${layerY(layer) - minY}px`;
       node.style.width = `${layerWidth(layer)}px`;
-      node.style.height = `${Math.max(layer.height, rtssVisual.cellHeight * (edit.size || layer.size) / 100)}px`;
+      node.style.height = `${layerHeight(layer)}px`;
       node.style.fontSize = `${rtssVisual.cellHeight * (edit.size || layer.size) / 100}px`;
       node.style.color = paint(edit.textColor ?? layer.color, "#fff");
       node.style.backgroundColor = paint(layer.bg, "transparent");
@@ -2300,7 +2339,7 @@
           }
         };
         node.replaceChildren(picture);
-      } else node.textContent = source.replace(/<[^>]*>|%[^%]*%/g, (tag) => {
+      } else node.textContent = rtssVisibleTemplate(source).replace(/<[^>]*>|%[^%]*%/g, (tag) => {
         const metric = metrics[tag.toLowerCase()];
         if (!metric) return "нет данных";
         if (tag.toLowerCase() !== "<fr>") {
@@ -2311,6 +2350,7 @@
         }
         return osd.querySelector(`[data-metric="${metric}"]`)?.textContent?.trim() || "нет данных";
       }).replace(/\\[nrtb]/g, " ");
+      if (!node.textContent.trim() && source) node.textContent = "н/д";
       const graph = source.match(/^<G=(Frametime|Framerate 1% Low|CPU usage|GPU1 usage),.*,(10|80|81)>$/);
       if (graph) {
         const external = graph[1] === "CPU usage" || graph[1] === "GPU1 usage";
@@ -2323,17 +2363,17 @@
         if (history?.length >= 2 && history.every((value) => Number.isFinite(value)
           && (external ? value >= 0 : value > 0))) {
           const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-          svg.setAttribute("viewBox", `0 0 ${layer.width} ${layer.height}`);
-          svg.setAttribute("width", String(layer.width));
-          svg.setAttribute("height", String(layer.height));
+          svg.setAttribute("viewBox", `0 0 ${layerWidth(layer)} ${layerHeight(layer)}`);
+          svg.setAttribute("width", String(layerWidth(layer)));
+          svg.setAttribute("height", String(layerHeight(layer)));
           const ceiling = Math.max(graph[1] === "Frametime" ? 33 : external ? 100 : 1, ...history);
           const points = history.map((value, index) =>
-            `${index * layer.width / (history.length - 1)},${layer.height *
+            `${index * layerWidth(layer) / (history.length - 1)},${layerHeight(layer) *
               (1 - Math.min(1, value / ceiling))}`).join(" ");
           const shape = document.createElementNS("http://www.w3.org/2000/svg",
             graph[2] === "81" ? "polygon" : "polyline");
           shape.setAttribute("points", graph[2] === "81"
-            ? `0,${layer.height} ${points} ${layer.width},${layer.height}` : points);
+            ? `0,${layerHeight(layer)} ${points} ${layerWidth(layer)},${layerHeight(layer)}` : points);
           shape.setAttribute(graph[2] === "81" ? "fill" : "stroke", paint(edit.textColor ?? layer.color, "#fff"));
           if (graph[2] !== "81") shape.setAttribute("fill", "none");
           svg.append(shape);
