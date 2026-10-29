@@ -1004,6 +1004,15 @@ namespace {
         CHECK(restored.overlay.rtssLayerEdits[1].width == 320
             && restored.overlay.rtssLayerEdits[1].height == 48);
         CHECK(restored.overlay.rtssLayerEdits[2].text && restored.overlay.rtssLayerEdits[2].text->empty());
+        Settings longText = restored;
+        longText.overlay.rtssLayerEdits[1].text = std::string(8192, 'x');
+        Settings longTextRestored;
+        CHECK(parseSettings(serializeSettings(longText), longTextRestored, error));
+        CHECK(longTextRestored.overlay.rtssLayerEdits[1].text == longText.overlay.rtssLayerEdits[1].text);
+        longText.overlay.rtssLayerEdits[1].text->push_back('x');
+        Settings oversizedRestored;
+        CHECK(parseSettings(serializeSettings(longText), oversizedRestored, error));
+        CHECK(!oversizedRestored.overlay.rtssLayerEdits[1].text);
         restored.overlay.rtssLayerEdits[1].textColor.reset();
         Settings colorReset;
         CHECK(parseSettings(serializeSettings(restored), colorReset, error));

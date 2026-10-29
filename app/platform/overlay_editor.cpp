@@ -424,7 +424,7 @@ void OverlayEditor::syncFields()
     for (HWND field : { m_labelEdit, m_y, m_hexEdit }) {
         ShowWindow(field, SW_SHOW);
     }
-    SendMessageW(m_labelEdit, EM_SETLIMITTEXT, isRtss ? 256 : 64, 0);
+    SendMessageW(m_labelEdit, EM_SETLIMITTEXT, isRtss ? 8192 : 64, 0);
     layout();
     if (isRtss) {
         const auto index = static_cast<std::size_t>(m_rtssSelected);
@@ -1078,8 +1078,10 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
                 const int inspectorX = cursor.x - static_cast<int>(m_inspector.left);
                 const int inspectorY = cursor.y - static_cast<int>(m_inspector.top);
                 if (m_rtssSelected >= 0 && static_cast<std::size_t>(m_rtssSelected) < rtssLayerCount()
-                    && inspectorY >= 132 && inspectorY <= 166
-                    && ((inspectorX >= 410 && inspectorX < 452) || (inspectorX >= 462 && inspectorX < 504))) {
+                    && ((inspectorY >= 40 && inspectorY < 70 && inspectorX >= 12 && inspectorX < 90)
+                        || (inspectorY >= 132 && inspectorY <= 166
+                            && ((inspectorX >= 410 && inspectorX < 452)
+                                || (inspectorX >= 462 && inspectorX < 504))))) {
                     SetCursor(LoadCursorW(nullptr, IDC_HAND));
                     return TRUE;
                 }
@@ -1239,9 +1241,19 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
                 || field == m_rtssBgEdit)) {
             auto& edit = m_model->settings.overlay.rtssLayerEdits[static_cast<std::size_t>(m_rtssSelected)];
             if (field == m_labelEdit && HIWORD(wParam) == EN_CHANGE && !m_syncing) {
-                wchar_t buffer[257] { };
-                GetWindowTextW(field, buffer, 257);
-                edit.text = narrow(buffer);
+                wchar_t buffer[8193] { };
+                GetWindowTextW(field, buffer, 8193);
+                std::string text = narrow(buffer);
+                if (text.size() > 8192) {
+                    const auto& layer = m_model->settings.overlay.rtssVisual->layers[
+                        static_cast<std::size_t>(m_rtssSelected)];
+                    const std::wstring previous = edit.text ? widen(*edit.text) : rtssLayerName(layer.text);
+                    m_syncing = true;
+                    input(m_labelEdit, previous.c_str());
+                    m_syncing = false;
+                    return 0;
+                }
+                edit.text = std::move(text);
                 changed(false);
             } else if (field == m_labelEdit && HIWORD(wParam) == EN_KILLFOCUS && !m_syncing) {
                 changed(true);
@@ -1584,6 +1596,13 @@ LRESULT OverlayEditor::handle(UINT message, WPARAM wParam, LPARAM lParam)
                         syncFields();
                     }
                     changed(true);
+                } else if (localY >= 40 && localY < 70 && localX >= 12 && localX < 90) {
+                    SetFocus(m_window);
+                    if (edit.text) {
+                        edit.text.reset();
+                        syncFields();
+                        changed(true);
+                    }
                 } else if (localY >= 132 && localY <= 166 && localX >= 12 && localX < 405) {
                     const int direction = (localX - 12) / 98;
                     const int step = GetKeyState(VK_SHIFT) < 0 ? 10 : 1;
@@ -2349,8 +2368,8 @@ void OverlayEditor::paint()
         m_renderer.text(edit.visible ? L"Скрыть" : L"Показать",
             Rect { 434.0f, m_inspector.top + 9.0f, 508.0f, m_inspector.top + 32.0f }, TextRole::Tiny,
             theme.warn);
-        m_renderer.text(L"Текст", Rect { 32.0f, m_inspector.top + 43.0f, 110.0f, m_inspector.top + 68.0f },
-            TextRole::Small, theme.text);
+        m_renderer.text(L"Текст ↩", Rect { 32.0f, m_inspector.top + 43.0f, 110.0f, m_inspector.top + 68.0f },
+            TextRole::Small, theme.accent);
         m_renderer.text(L"Цвет", Rect { 32.0f, m_inspector.top + 76.0f, 110.0f, m_inspector.top + 98.0f },
             TextRole::Small, theme.text);
         m_renderer.text(L"Фон", Rect { 229.0f, m_inspector.top + 76.0f, 260.0f, m_inspector.top + 98.0f },

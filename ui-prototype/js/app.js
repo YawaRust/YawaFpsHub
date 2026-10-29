@@ -571,8 +571,10 @@
       if (action === "reset" || action === "resetTextColor") {
         delete next.textColor;
       }
-      if (action === "reset") {
+      if (action === "reset" || action === "resetText") {
         delete next.text;
+      }
+      if (action === "reset") {
         delete next.size;
         delete next.width;
         delete next.height;
@@ -589,7 +591,13 @@
       store.write("rtssLayerEdits", JSON.stringify(overlayState.rtssLayerEdits));
       applyOverlay();
     };
-    $("#osdRtssText").addEventListener("input", (event) => updateRtss({ text: event.target.value }));
+    $("#osdRtssText").addEventListener("input", (event) => {
+      if (new TextEncoder().encode(event.target.value).length > 8192) {
+        refreshRtssInspector();
+        return;
+      }
+      updateRtss({ text: event.target.value });
+    });
     $("#osdRtssColor").addEventListener("change", (event) => {
       const hex = event.target.value.trim();
       if (!hex) {

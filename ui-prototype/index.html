@@ -707,8 +707,9 @@
               </div>
               <div class="workshop-color" id="osdRtssInspector" hidden>
                 <strong id="osdRtssName"></strong>
-                <label for="osdRtssText">Текст слоя</label>
-                <input id="osdRtssText" type="text" maxlength="256" spellcheck="false" aria-label="Текст RTSS-слоя">
+                <label for="osdRtssText">Строка RTSS (до 8192 байт UTF-8)</label>
+                <input id="osdRtssText" type="text" maxlength="8192" spellcheck="false" aria-label="Текст RTSS-слоя">
+                <button class="btn btn--ghost" type="button" data-rtss-action="resetText">Строка из RTSS</button>
                 <label for="osdRtssColor">Цвет текста · #RRGGBBAA</label>
                 <div><input id="osdRtssColorPicker" type="color" value="#ffffff" aria-label="Выбрать цвет текста RTSS-слоя">
                   <input id="osdRtssColor" type="text" maxlength="9" spellcheck="false" aria-label="Цвет текста RTSS-слоя"></div>
