@@ -43,6 +43,11 @@ public:
     void hide();
     void toggle(std::string* error = nullptr);
     bool isVisible() const { return m_visible; }
+    Rect contentBounds() const
+    {
+        return { m_contentRectD2D.left, m_contentRectD2D.top, m_contentRectD2D.right,
+            m_contentRectD2D.bottom };
+    }
     bool hasVisiblePixels() const;
     bool hasPixelColor(std::uint8_t red, std::uint8_t green, std::uint8_t blue) const;
     bool isDragging() const

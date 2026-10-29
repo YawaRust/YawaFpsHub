@@ -2430,6 +2430,9 @@
     const cellWidth = cellHeight * 0.61;
     const units = (value, vertical) => value < 0 ? -value * (vertical ? cellHeight : cellWidth)
       : value * zoom;
+    const family = field(master, "FontFace", "Consolas").slice(0, 96).replaceAll("'", "");
+    const weight = Math.max(100, Math.min(900, Number(field(master, "FontWeight", "400")) || 400));
+    const measure = document.createElement("canvas").getContext("2d");
     const color = (encoded) => encoded.split(",").slice(0, 12)
       .find((entry) => /^[0-9a-f]{6}([0-9a-f]{2})?$/i.test(entry)) || "";
     const count = Math.min(256, Number(text.match(/^Layers=(\d+)\s*$/mi)?.[1] || 0));
@@ -2452,13 +2455,15 @@
         && Number(matchedImage[4]) <= 2048 ? matchedImage : null;
       const visible = rtssVisibleTemplate(label).replace(/<[^>]*>|%[^%]*%/g, "нет данных");
       const size = Math.max(10, Math.min(400, number("Size", 100)));
-      const longestLine = Math.max(1, ...visible.split("\n").map((line) => line.length));
       const extentX = number("ExtentX");
       const extentY = number("ExtentY");
+      const fontSize = cellHeight * size / 100;
+      measure.font = `${weight} ${fontSize}px '${family}', Consolas, monospace`;
       const layerWidth = units(extentX, false) || (imageTag ? Number(imageTag[3]) * zoom
-        : Math.min(1024 * zoom, Math.max(cellWidth, longestLine * cellWidth * size / 100)));
+        : Math.min(1024 * zoom, Math.max(cellWidth,
+          ...visible.split("\n").map((line) => measure.measureText(line).width))));
       const layerHeight = units(extentY, true) || (imageTag ? Number(imageTag[4]) * zoom
-        : cellHeight * size / 100 * visible.split("\n").length);
+        : fontSize * visible.split("\n").length);
       const origin = Math.max(0, Math.min(8, number("ExtentOrigin")));
       const x = units(number("PositionX"), false) - layerWidth * (origin % 3) / 2;
       const y = units(number("PositionY"), true) - layerHeight * Math.floor(origin / 3) / 2;
@@ -2466,7 +2471,7 @@
         label, bg, color: color(field(body, "TextColor", "")),
         size,
         origin, x, y, width: layerWidth, height: layerHeight,
-        autoWidth: !extentX && !imageTag, autoHeight: !extentY && !imageTag });
+        autoWidth: !extentX, autoHeight: !extentY });
       left = Math.min(left, x);
       top = Math.min(top, y);
       right = Math.max(right, x + layerWidth);
@@ -2476,8 +2481,7 @@
       .map(([, body]) => ({ name: field(body, "Name", ""),
         provider: field(body, "Provider", ""), id: field(body, "ID", "") }));
     return { layers, width: right - left, height: bottom - top, cellHeight, zoom, sources,
-      family: field(master, "FontFace", "Consolas").slice(0, 96),
-      weight: Math.max(100, Math.min(900, Number(field(master, "FontWeight", "400")) || 400)) };
+      family, weight };
   }
 
   function renderRtssVisual(osd) {
@@ -2502,18 +2506,49 @@
       (layer) => overlayState.rtssLayerEdits[layer.index]?.visible !== false);
     const canvas = document.createElement("div");
     canvas.className = "rtss-visual-canvas";
+    const metrics = { "<fr>": "fps", "%framerate%": "fps", "%frametime%": "frameMs",
+      "%cpu usage%": "cpu", "%cpu temperature%": "cpuTemp", "%cpu clock%": "cpuClock",
+      "%cpu power%": "cpuPower", "%gpu1 usage%": "gpu", "%gpu1 temperature%": "gpuTemp",
+      "%gpu1 clock%": "gpuClock", "%gpu1 power%": "gpuPower",
+      "%gpu1 memory usage%": "vramUsed", "%total ram%": "ramUsed" };
+    const displayedText = (source) => rtssVisibleTemplate(source).replace(/<[^>]*>|%[^%]*%/g, (tag) => {
+      const metric = metrics[tag.toLowerCase()];
+      if (!metric) return "нет данных";
+      if (tag.toLowerCase() !== "<fr>") {
+        const name = tag.slice(1, -1).toLowerCase();
+        const matching = rtssVisual.sources.filter((entry) => entry.name.toLowerCase() === name);
+        if (!matching.length || matching.some((entry) => entry.provider !== "HAL"
+          || entry.id !== entry.name)) return "нет данных";
+      }
+      const value = osd.querySelector(`[data-metric="${metric}"]`)?.textContent?.trim() || "нет данных";
+      return value === "нет данных" ? value : value.split(/[ %°/]/, 1)[0];
+    }).replace(/\\[nrtb]/g, " ");
+    const measure = document.createElement("canvas").getContext("2d");
+    const family = rtssVisual.family.replaceAll("'", "");
+    const imageRect = (source) => {
+      const tag = source.match(/^<I=0,0,(\d+),(\d+),(\d+),(\d+)>$/);
+      if (!tag) return null;
+      const fields = tag.slice(1).map(Number);
+      return fields[0] <= 2048 && fields[1] <= 2048
+        && fields[2] >= 1 && fields[2] <= 2048 && fields[3] >= 1 && fields[3] <= 2048
+        ? fields : null;
+    };
     const extents = new Map(visibleLayers.map((layer) => {
       const edit = overlayState.rtssLayerEdits[layer.index] || {};
-      const lines = rtssVisibleTemplate(edit.text ?? layer.label)
-        .replace(/<[^>]*>|%[^%]*%/g, "нет данных").split("\n");
+      const source = edit.text ?? layer.label;
+      const lines = displayedText(source).split("\n");
       const size = edit.size || layer.size;
       const cellWidth = rtssVisual.cellHeight * 0.61;
+      const fontSize = rtssVisual.cellHeight * size / 100;
+      const imageTag = imageRect(source);
+      measure.font = `${rtssVisual.weight} ${fontSize}px '${family}', Consolas, monospace`;
       return [layer.index, {
         width: edit.width > 0 ? edit.width * rtssVisual.zoom : layer.autoWidth
-          ? Math.min(1024 * rtssVisual.zoom, Math.max(cellWidth,
-            Math.max(...lines.map((line) => line.length)) * cellWidth * size / 100)) : layer.width,
+          ? imageTag ? imageTag[2] * rtssVisual.zoom
+            : Math.min(1024 * rtssVisual.zoom, Math.max(cellWidth,
+              ...lines.map((line) => measure.measureText(line).width))) : layer.width,
         height: edit.height > 0 ? edit.height * rtssVisual.zoom : layer.autoHeight
-          ? rtssVisual.cellHeight * size / 100 * lines.length : layer.height,
+          ? imageTag ? imageTag[3] * rtssVisual.zoom : fontSize * lines.length : layer.height,
       }];
     }));
     const layerWidth = (layer) => extents.get(layer.index).width;
@@ -2532,11 +2567,6 @@
     canvas.style.fontWeight = String(rtssVisual.weight);
     const paint = (encoded, fallback) => /^[0-9a-f]{6}([0-9a-f]{2})?$/i.test(encoded)
       ? encoded.length === 8 ? `#${encoded.slice(2)}${encoded.slice(0, 2)}` : `#${encoded}` : fallback;
-    const metrics = { "<fr>": "fps", "%framerate%": "fps", "%frametime%": "frameMs",
-      "%cpu usage%": "cpu", "%cpu temperature%": "cpuTemp", "%cpu clock%": "cpuClock",
-      "%cpu power%": "cpuPower", "%gpu1 usage%": "gpu", "%gpu1 temperature%": "gpuTemp",
-      "%gpu1 clock%": "gpuClock", "%gpu1 power%": "gpuPower",
-      "%gpu1 memory usage%": "vramUsed", "%total ram%": "ramUsed" };
     for (const layer of visibleLayers) {
       const edit = overlayState.rtssLayerEdits[layer.index] || {};
       const node = document.createElement("span");
@@ -2550,13 +2580,9 @@
       node.style.color = paint(edit.textColor ?? layer.color, "#fff");
       node.style.backgroundColor = paint(edit.backgroundColor ?? layer.bg, "transparent");
       const source = edit.text ?? layer.label;
-      const imageTag = source.match(/^<I=0,0,(\d+),(\d+),(\d+),(\d+)>$/);
-      const imageX = imageTag && Number(imageTag[1]);
-      const imageY = imageTag && Number(imageTag[2]);
-      const imageWidth = imageTag && Number(imageTag[3]);
-      const imageHeight = imageTag && Number(imageTag[4]);
-      if (rtssImageUrl && imageX <= 2048 && imageY <= 2048
-        && imageWidth >= 1 && imageWidth <= 2048 && imageHeight >= 1 && imageHeight <= 2048) {
+      const imageTag = imageRect(source);
+      if (rtssImageUrl && imageTag) {
+        const [imageX, imageY, imageWidth, imageHeight] = imageTag;
         const picture = document.createElement("img");
         picture.alt = "";
         picture.style.visibility = "hidden";
@@ -2578,18 +2604,8 @@
         picture.onerror = () => { node.textContent = "нет данных"; };
         picture.src = rtssImageUrl;
         node.replaceChildren(picture);
-      } else node.textContent = rtssVisibleTemplate(source).replace(/<[^>]*>|%[^%]*%/g, (tag) => {
-        const metric = metrics[tag.toLowerCase()];
-        if (!metric) return "нет данных";
-        if (tag.toLowerCase() !== "<fr>") {
-          const name = tag.slice(1, -1).toLowerCase();
-          const matching = rtssVisual.sources.filter((source) => source.name.toLowerCase() === name);
-          if (!matching.length || matching.some((source) => source.provider !== "HAL"
-            || source.id !== source.name)) return "нет данных";
-        }
-        return osd.querySelector(`[data-metric="${metric}"]`)?.textContent?.trim() || "нет данных";
-      }).replace(/\\[nrtb]/g, " ");
-      if (!node.textContent.trim() && source) node.textContent = "н/д";
+      } else node.textContent = displayedText(source);
+      if (!node.textContent.trim() && source && !imageTag) node.textContent = "н/д";
       const graph = source.match(/^<G=(Frametime|Framerate 1% Low|CPU usage|GPU1 usage),.*,(10|80|81)>$/);
       if (graph) {
         const external = graph[1] === "CPU usage" || graph[1] === "GPU1 usage";

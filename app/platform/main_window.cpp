@@ -554,8 +554,8 @@ void MainWindow::setOverlayVisible(bool visible)
     }
 }
 
-bool MainWindow::smokeImportRtss(
-    std::string_view package, std::string& error, std::wstring_view path, bool checkImage, bool checkCrop)
+bool MainWindow::smokeImportRtss(std::string_view package, std::string& error, std::wstring_view path,
+    bool checkImage, bool checkCrop, bool checkTextWidth)
 {
     OverlaySettings imported = m_model.settings.overlay;
     const bool parsed = package.starts_with("0CDU") ? importRtssExchange(package, imported, error)
@@ -573,6 +573,10 @@ bool MainWindow::smokeImportRtss(
     }
     if (!m_overlay.hasVisiblePixels()) {
         error = "импорт RTSS создал прозрачный кадр";
+        return false;
+    }
+    if (checkTextWidth && m_overlay.contentBounds().width() < 500.0f) {
+        error = "RTSS-текст с широкими буквами обрезан автоматической шириной слоя";
         return false;
     }
     if (checkCrop && (!m_overlay.hasPixelColor(245, 43, 71) || m_overlay.hasPixelColor(43, 245, 71))) {

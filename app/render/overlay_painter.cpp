@@ -1328,7 +1328,7 @@ namespace {
             longestLine = std::max(longestLine, lineLength);
             float textWidth = static_cast<float>(longestLine) * cellWidth * size / 100.0f;
             float textHeight = cellHeight * size / 100.0f * lines;
-            if (lines > 1 && !text.empty() && formats.factory != nullptr
+            if (!text.empty() && formats.factory != nullptr
                 && ((edit.width == 0 && layer.width == 0) || (edit.height == 0 && layer.height == 0))) {
                 IDWriteTextFormat* format = nullptr;
                 if (SUCCEEDED(formats.factory->CreateTextFormat(family.c_str(), nullptr,

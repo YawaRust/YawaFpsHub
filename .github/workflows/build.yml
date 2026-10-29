@@ -160,6 +160,29 @@ jobs:
           if ($crop.ExitCode -ne 0) { throw "RTSS-спрайт взял неверную область атласа (exit $($crop.ExitCode))" }
           $fit = Start-Process -FilePath $exe -ArgumentList @("--smoke=2", "--smoke-rtss-image", "--smoke-rtss=tests/fixtures/rtss_fit.ovl") -Wait -PassThru
           if ($fit.ExitCode -ne 0) { throw "RTSS-картинка исчезла после вписывания макета (exit $($fit.ExitCode))" }
+          $wide = Start-Process -FilePath $exe -ArgumentList @("--smoke=2", "--smoke-rtss-autowidth", "--smoke-rtss=tests/fixtures/rtss_autowidth.ovl") -Wait -PassThru
+          if ($wide.ExitCode -ne 0) { throw "Автоширина RTSS-текста обрезала широкие буквы (exit $($wide.ExitCode))" }
+
+      - name: Проверить RTSS-слои в демо
+        shell: pwsh
+        run: |
+          $edge = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+          if (-not (Test-Path $edge)) { $edge = "C:\Program Files\Microsoft\Edge\Application\msedge.exe" }
+          $wide = [Convert]::ToBase64String([IO.File]::ReadAllBytes("$PWD/tests/fixtures/rtss_autowidth.ovl"))
+          $image = [Convert]::ToBase64String([IO.File]::ReadAllBytes("$PWD/tests/fixtures/rtss_crop.ovl"))
+          $png = [Convert]::ToBase64String([IO.File]::ReadAllBytes("$PWD/tests/fixtures/rtss_crop.png"))
+          $page = [IO.File]::ReadAllText("$PWD/ui-prototype/index.html")
+          $scripts = "<script>window.rtssSmoke = {wide:'$wide',image:'$image',png:'$png'};</script>" +
+            '<script src="../tests/test_rtss_demo_browser.js"></script><script src="js/app.js"></script>'
+          $page = $page.Replace('<script src="js/app.js"></script>', $scripts)
+          $path = "$PWD/ui-prototype/rtss-smoke.html"
+          [IO.File]::WriteAllText($path, $page)
+          $url = ([Uri]::new($path)).AbsoluteUri + "?view=overlay&nofx=1&shot=1"
+          $profile = Join-Path $env:TEMP "yawa-edge-rtss-smoke"
+          $dom = & $edge "--headless=new" "--disable-gpu" "--no-first-run" "--user-data-dir=$profile" "--virtual-time-budget=6000" "--dump-dom" $url 2>$null | Out-String
+          if ($dom -notmatch 'data-rtss-smoke="pass"') {
+            throw "Демо не показало RTSS-текст/PNG: $($dom | Select-String -Pattern 'data-rtss-(smoke|error)' -AllMatches)"
+          }
 
       - name: Самопроверка приложения
         shell: pwsh
