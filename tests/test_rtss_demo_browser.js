@@ -49,7 +49,9 @@ document.addEventListener("DOMContentLoaded", () => {
       document.querySelector("#osdMenuScene").click();
       const value = await waitFor(() => [...document.querySelectorAll(".rtss-visual-layer")]
         .find((layer) => layer.textContent.startsWith("CPU ")));
-      if (value.textContent !== "CPU 64 C") throw new Error("единицы RTSS-датчика продублированы");
+      if (value.textContent !== "CPU 64 C") {
+        throw new Error(`подстановка RTSS: ${value.textContent}`);
+      }
     } else if (stage === "missing") {
       importLayout(window.rtssSmoke.missing);
       const placeholder = await waitFor(() => [...document.querySelectorAll(".rtss-visual-layer")]
