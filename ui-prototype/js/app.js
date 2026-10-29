@@ -2633,6 +2633,7 @@
           overlayState.metricOrder = [...chosen];
           overlayState.metricRgba = colors;
           saveOverlaySensors(); rebuildOverlaySensors(); applySensorFilter(); applyOverlay();
+          requestAnimationFrame(fitCanvasToOverlay);
           toast(`RTSS: ${omitted} слоёв без связанной метрики, ${resources} ресурсов в пакете; `
             + (persisted ? "сохранено для обратного экспорта" : "сохранено до закрытия вкладки"));
           return;

@@ -216,6 +216,11 @@ void OverlayEditor::close()
 void OverlayEditor::refresh()
 {
     if (m_window) {
+        if (m_model && m_canvasTemplate != m_model->settings.overlay.rtssTemplate) {
+            m_canvasTemplate = m_model->settings.overlay.rtssTemplate;
+            m_fitPending = true;
+            m_rtssSelected = -1;
+        }
         InvalidateRect(m_window, nullptr, FALSE);
     }
 }
@@ -256,6 +261,7 @@ bool OverlayEditor::open(HWND owner, HINSTANCE instance, AppModel& model, const 
     m_canvasZoom = 1.0f;
     m_panX = m_panY = 0.0f;
     m_fitPending = true;
+    m_canvasTemplate = model.settings.overlay.rtssTemplate;
     m_focusCanvas = true;
     m_rtssDragging = m_rtssResizing = false;
     m_styledRowDragging = false;

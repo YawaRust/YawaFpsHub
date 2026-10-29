@@ -89,6 +89,7 @@ private:
     float m_panX = 0.0f;
     float m_panY = 0.0f;
     bool m_fitPending = true;
+    std::shared_ptr<const std::string> m_canvasTemplate;
     bool m_focusCanvas = true;
     float m_rowDragScale = 1.0f;
     bool m_panning = false;
