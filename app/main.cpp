@@ -404,7 +404,8 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, wchar_t* commandLine, int)
             || !window.smokeImportRtss(package, error, filename,
                 arguments.find(L"--smoke-rtss-image") != std::wstring_view::npos,
                 arguments.find(L"--smoke-rtss-crop") != std::wstring_view::npos,
-                arguments.find(L"--smoke-rtss-autowidth") != std::wstring_view::npos)) {
+                arguments.find(L"--smoke-rtss-autowidth") != std::wstring_view::npos,
+                arguments.find(L"--smoke-rtss-missing-image") != std::wstring_view::npos)) {
             log.error("самопроверка RTSS: " + (error.empty() ? "не удалось прочитать файл" : error));
             return 2;
         }

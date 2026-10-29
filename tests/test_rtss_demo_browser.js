@@ -49,6 +49,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const value = await waitFor(() => [...document.querySelectorAll(".rtss-visual-layer")]
       .find((layer) => layer.textContent.startsWith("CPU ")));
     if (value.textContent !== "CPU 64 C") throw new Error("единицы RTSS-датчика продублированы");
+
+    result.rtssStage = "missing-image";
+    importLayout(window.rtssSmoke.missing);
+    const placeholder = await waitFor(() => [...document.querySelectorAll(".rtss-visual-layer")]
+      .find((layer) => layer.textContent === "нет данных"));
+    if (parseFloat(placeholder.style.width) !== 256 || parseFloat(placeholder.style.height) !== 128) {
+      throw new Error("RTSS-слой без PNG потерял размер изображения");
+    }
     result.rtssSmoke = "pass";
   })().catch((error) => {
     result.rtssSmoke = "fail";

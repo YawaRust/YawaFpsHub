@@ -49,7 +49,8 @@ public:
     }
     void setOverlayVisible(bool visible);
     bool smokeImportRtss(std::string_view package, std::string& error, std::wstring_view path = { },
-        bool checkImage = false, bool checkCrop = false, bool checkTextWidth = false);
+        bool checkImage = false, bool checkCrop = false, bool checkTextWidth = false,
+        bool checkMissingImageBounds = false);
     void openEditorForSmoke();
     void scheduleSensorElevation();
     void exportOverlayStyles();

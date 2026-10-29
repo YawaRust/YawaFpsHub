@@ -162,6 +162,8 @@ jobs:
           if ($fit.ExitCode -ne 0) { throw "RTSS-картинка исчезла после вписывания макета (exit $($fit.ExitCode))" }
           $wide = Start-Process -FilePath $exe -ArgumentList @("--smoke=2", "--smoke-rtss-autowidth", "--smoke-rtss=tests/fixtures/rtss_autowidth.ovl") -Wait -PassThru
           if ($wide.ExitCode -ne 0) { throw "Автоширина RTSS-текста обрезала широкие буквы (exit $($wide.ExitCode))" }
+          $missing = Start-Process -FilePath $exe -ArgumentList @("--smoke=2", "--smoke-rtss-missing-image", "--smoke-rtss=tests/fixtures/rtss_missing_image.ovl") -Wait -PassThru
+          if ($missing.ExitCode -ne 0) { throw "RTSS-слой без PNG потерял исходный размер (exit $($missing.ExitCode))" }
 
       - name: Проверить RTSS-слои в демо
         shell: pwsh
@@ -170,9 +172,10 @@ jobs:
           if (-not (Test-Path $edge)) { $edge = "C:\Program Files\Microsoft\Edge\Application\msedge.exe" }
           $wide = [Convert]::ToBase64String([IO.File]::ReadAllBytes("$PWD/tests/fixtures/rtss_autowidth.ovl"))
           $image = [Convert]::ToBase64String([IO.File]::ReadAllBytes("$PWD/tests/fixtures/rtss_crop.ovl"))
+          $missing = [Convert]::ToBase64String([IO.File]::ReadAllBytes("$PWD/tests/fixtures/rtss_missing_image.ovl"))
           $png = [Convert]::ToBase64String([IO.File]::ReadAllBytes("$PWD/tests/fixtures/rtss_crop.png"))
           $page = [IO.File]::ReadAllText("$PWD/ui-prototype/index.html")
-          $scripts = "<script>window.rtssSmoke = {wide:'$wide',image:'$image',png:'$png'};</script>" +
+          $scripts = "<script>window.rtssSmoke = {wide:'$wide',image:'$image',missing:'$missing',png:'$png'};</script>" +
             '<script src="../tests/test_rtss_demo_browser.js"></script><script src="js/app.js"></script>'
           $page = $page.Replace('<script src="js/app.js"></script>', $scripts)
           $path = "$PWD/ui-prototype/rtss-smoke.html"

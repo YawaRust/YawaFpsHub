@@ -1200,7 +1200,7 @@ namespace {
         return raster.pixels.empty() ? nullptr : &raster;
     }
 
-    bool rtssImageRect(std::string_view source, const RtssRaster& raster, D2D1_RECT_F& crop)
+    bool rtssImageRect(std::string_view source, const RtssRaster* raster, D2D1_RECT_F& crop)
     {
         if (!source.starts_with("<I=") || !source.ends_with('>')) {
             return false;
@@ -1221,9 +1221,13 @@ namespace {
                 source.remove_prefix(comma + 1);
             }
         }
-        if (fields[0] || fields[1] || fields[4] == 0 || fields[5] == 0 || fields[2] >= raster.width
-            || fields[3] >= raster.height || fields[4] > raster.width - fields[2]
-            || fields[5] > raster.height - fields[3]) {
+        if (fields[0] || fields[1] || fields[2] > 2048 || fields[3] > 2048 || fields[4] == 0 || fields[5] == 0
+            || fields[4] > 2048 || fields[5] > 2048) {
+            return false;
+        }
+        if (raster
+            && (fields[2] >= raster->width || fields[3] >= raster->height
+                || fields[4] > raster->width - fields[2] || fields[5] > raster->height - fields[3])) {
             return false;
         }
         crop = D2D1::RectF(static_cast<float>(fields[2]), static_cast<float>(fields[3]),
@@ -1270,7 +1274,8 @@ namespace {
                 = edit.text ? std::string_view(*edit.text) : std::string_view(layer.text);
             D2D1_RECT_F imageCrop { };
             const bool imageTag = source.starts_with("<I=");
-            const bool imageReady = imageTag && image && rtssImageRect(source, *image, imageCrop);
+            const bool imageExtent = imageTag && rtssImageRect(source, nullptr, imageCrop);
+            const bool imageReady = imageExtent && image && rtssImageRect(source, image, imageCrop);
             const std::string visible = rtssVisibleTemplate(source);
             std::wstring text = imageTag ? (imageReady ? L"" : L"нет данных")
                                          : rtssText(layout, visible, values, edit.text.has_value());
@@ -1352,11 +1357,11 @@ namespace {
             // Явный Extent задаёт границу слоя: текст и отсутствующие провайдеры не
             // могут увеличивать весь макет и превращать остальные датчики в пиксельную пыль.
             const float width = edit.width > 0 ? static_cast<float>(edit.width) * zoom
-                : layer.width == 0 ? (imageReady ? (imageCrop.right - imageCrop.left) * zoom
-                                                 : std::clamp(textWidth, cellWidth, 1024.0f * zoom))
+                : layer.width == 0 ? (imageExtent ? (imageCrop.right - imageCrop.left) * zoom
+                                                  : std::clamp(textWidth, cellWidth, 1024.0f * zoom))
                                    : units(layer.width, false);
             const float height = edit.height > 0 ? static_cast<float>(edit.height) * zoom
-                : layer.height == 0 ? (imageReady ? (imageCrop.bottom - imageCrop.top) * zoom : textHeight)
+                : layer.height == 0 ? (imageExtent ? (imageCrop.bottom - imageCrop.top) * zoom : textHeight)
                                     : units(layer.height, true);
             float x = units(layer.x, false) + static_cast<float>(edit.x) * zoom;
             float y = units(layer.y, true) + static_cast<float>(edit.y) * zoom;

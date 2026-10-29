@@ -555,7 +555,7 @@ void MainWindow::setOverlayVisible(bool visible)
 }
 
 bool MainWindow::smokeImportRtss(std::string_view package, std::string& error, std::wstring_view path,
-    bool checkImage, bool checkCrop, bool checkTextWidth)
+    bool checkImage, bool checkCrop, bool checkTextWidth, bool checkMissingImageBounds)
 {
     OverlaySettings imported = m_model.settings.overlay;
     const bool parsed = package.starts_with("0CDU") ? importRtssExchange(package, imported, error)
@@ -577,6 +577,11 @@ bool MainWindow::smokeImportRtss(std::string_view package, std::string& error, s
     }
     if (checkTextWidth && m_overlay.contentBounds().width() < 500.0f) {
         error = "RTSS-текст с широкими буквами обрезан автоматической шириной слоя";
+        return false;
+    }
+    if (checkMissingImageBounds
+        && (m_overlay.contentBounds().width() < 250.0f || m_overlay.contentBounds().height() < 125.0f)) {
+        error = "RTSS-слой уменьшился при отсутствии PNG-атласа";
         return false;
     }
     if (checkCrop && (!m_overlay.hasPixelColor(245, 43, 71) || m_overlay.hasPixelColor(43, 245, 71))) {
