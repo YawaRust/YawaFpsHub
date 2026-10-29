@@ -1110,6 +1110,11 @@ namespace {
                 at += 2;
                 continue;
             }
+            if (start == '\n' || start == '\r') {
+                result += L'\n';
+                at += start == '\r' && at + 1 < source.size() && source[at + 1] == '\n' ? 2 : 1;
+                continue;
+            }
             if (static_cast<unsigned char>(start) < 32) {
                 ++at;
                 continue;
@@ -1249,6 +1254,7 @@ namespace {
             return value < 0 ? static_cast<float>(-value) * (vertical ? cellHeight : cellWidth)
                              : static_cast<float>(value) * zoom;
         };
+        const std::wstring family = layout.fontFace.empty() ? L"Consolas" : rtssWide(layout.fontFace);
         std::vector<RtssPlacement> placed;
         placed.reserve(layout.layers.size());
         float leftEdge = 0.0f;
@@ -1318,7 +1324,29 @@ namespace {
                 }
             }
             longestLine = std::max(longestLine, lineLength);
-            const float textWidth = static_cast<float>(longestLine) * cellWidth * size / 100.0f;
+            float textWidth = static_cast<float>(longestLine) * cellWidth * size / 100.0f;
+            float textHeight = cellHeight * size / 100.0f * lines;
+            if (lines > 1 && !text.empty() && formats.factory != nullptr
+                && ((edit.width == 0 && layer.width == 0) || (edit.height == 0 && layer.height == 0))) {
+                IDWriteTextFormat* format = nullptr;
+                if (SUCCEEDED(formats.factory->CreateTextFormat(family.c_str(), nullptr,
+                        static_cast<DWRITE_FONT_WEIGHT>(layout.fontWeight), DWRITE_FONT_STYLE_NORMAL,
+                        DWRITE_FONT_STRETCH_NORMAL, cellHeight * size / 100.0f, L"ru-RU", &format))) {
+                    format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+                    IDWriteTextLayout* measured = nullptr;
+                    if (SUCCEEDED(
+                            formats.factory->CreateTextLayout(text.data(), static_cast<UINT32>(text.size()),
+                                format, 1024.0f * zoom, 8192.0f * zoom, &measured))) {
+                        DWRITE_TEXT_METRICS metrics { };
+                        if (SUCCEEDED(measured->GetMetrics(&metrics))) {
+                            textWidth = metrics.widthIncludingTrailingWhitespace;
+                            textHeight = metrics.height;
+                        }
+                        measured->Release();
+                    }
+                    format->Release();
+                }
+            }
             // Явный Extent задаёт границу слоя: текст и отсутствующие провайдеры не
             // могут увеличивать весь макет и превращать остальные датчики в пиксельную пыль.
             const float width = edit.width > 0 ? static_cast<float>(edit.width) * zoom
@@ -1326,9 +1354,8 @@ namespace {
                 ? (imageReady ? imageCrop.right * zoom : std::clamp(textWidth, cellWidth, 1024.0f * zoom))
                 : units(layer.width, false);
             const float height = edit.height > 0 ? static_cast<float>(edit.height) * zoom
-                : layer.height == 0
-                ? (imageReady ? imageCrop.bottom * zoom : cellHeight * size / 100.0f * lines)
-                : units(layer.height, true);
+                : layer.height == 0              ? (imageReady ? imageCrop.bottom * zoom : textHeight)
+                                                 : units(layer.height, true);
             float x = units(layer.x, false) + static_cast<float>(edit.x) * zoom;
             float y = units(layer.y, true) + static_cast<float>(edit.y) * zoom;
             x -= width * static_cast<float>(layer.origin % 3) / 2.0f;
@@ -1365,7 +1392,6 @@ namespace {
         const float left = std::clamp(anchorX, bounds.left, std::max(bounds.left, bounds.right - width));
         const float top = std::clamp(anchorY, bounds.top, std::max(bounds.top, bounds.bottom - height));
 
-        const std::wstring family = layout.fontFace.empty() ? L"Consolas" : rtssWide(layout.fontFace);
         ID2D1Bitmap* bitmap = nullptr;
         if (image) {
             const auto properties = D2D1::BitmapProperties(
@@ -1456,9 +1482,7 @@ namespace {
             ID2D1SolidColorBrush* brush = nullptr;
             if (SUCCEEDED(target->CreateSolidColorBrush(toD2D(fromRgba(color), opacity), &brush))) {
                 target->DrawTextW(placement.text.data(), static_cast<UINT32>(placement.text.size()), format,
-                    D2D1::RectF(rect.left, rect.top, std::max(rect.right, rect.left + cellWidth),
-                        std::max(rect.bottom, rect.top + cellHeight)),
-                    brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                    rect, brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
                 brush->Release();
             }
         }

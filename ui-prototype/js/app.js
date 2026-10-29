@@ -2328,19 +2328,23 @@
       const imageTag = matchedImage && Number(matchedImage[1]) >= 1
         && Number(matchedImage[2]) >= 1 && Number(matchedImage[1]) <= 2048
         && Number(matchedImage[2]) <= 2048 ? matchedImage : null;
-      const visible = rtssVisibleTemplate(label);
+      const visible = rtssVisibleTemplate(label).replace(/<[^>]*>|%[^%]*%/g, "нет данных");
+      const size = Math.max(10, Math.min(400, number("Size", 100)));
       const longestLine = Math.max(1, ...visible.split("\n").map((line) => line.length));
-      const layerWidth = units(number("ExtentX"), false) || (imageTag ? Number(imageTag[1]) * zoom
-        : Math.min(1024 * zoom, Math.max(cellWidth, longestLine * cellWidth)));
-      const layerHeight = units(number("ExtentY"), true) || (imageTag ? Number(imageTag[2]) * zoom
-        : cellHeight * number("Size", 100) / 100 * visible.split("\n").length);
+      const extentX = number("ExtentX");
+      const extentY = number("ExtentY");
+      const layerWidth = units(extentX, false) || (imageTag ? Number(imageTag[1]) * zoom
+        : Math.min(1024 * zoom, Math.max(cellWidth, longestLine * cellWidth * size / 100)));
+      const layerHeight = units(extentY, true) || (imageTag ? Number(imageTag[2]) * zoom
+        : cellHeight * size / 100 * visible.split("\n").length);
       const origin = Math.max(0, Math.min(8, number("ExtentOrigin")));
       const x = units(number("PositionX"), false) - layerWidth * (origin % 3) / 2;
       const y = units(number("PositionY"), true) - layerHeight * Math.floor(origin / 3) / 2;
       layers.push({ index: Number(index), name: field(body, "Name", "").slice(0, 96),
         label, bg, color: field(body, "TextColor", "").split(",")[0],
-        size: Math.max(10, Math.min(400, number("Size", 100))),
-        origin, x, y, width: layerWidth, height: layerHeight });
+        size,
+        origin, x, y, width: layerWidth, height: layerHeight,
+        autoWidth: !extentX && !imageTag, autoHeight: !extentY && !imageTag });
       width = Math.max(width, x + layerWidth);
       height = Math.max(height, y + layerHeight);
     }
@@ -2374,10 +2378,22 @@
       (layer) => overlayState.rtssLayerEdits[layer.index]?.visible !== false);
     const canvas = document.createElement("div");
     canvas.className = "rtss-visual-canvas";
-    const layerWidth = (layer) => (overlayState.rtssLayerEdits[layer.index]?.width || 0) > 0
-      ? overlayState.rtssLayerEdits[layer.index].width * rtssVisual.zoom : layer.width;
-    const layerHeight = (layer) => (overlayState.rtssLayerEdits[layer.index]?.height || 0) > 0
-      ? overlayState.rtssLayerEdits[layer.index].height * rtssVisual.zoom : layer.height;
+    const extents = new Map(visibleLayers.map((layer) => {
+      const edit = overlayState.rtssLayerEdits[layer.index] || {};
+      const lines = rtssVisibleTemplate(edit.text ?? layer.label)
+        .replace(/<[^>]*>|%[^%]*%/g, "нет данных").split("\n");
+      const size = edit.size || layer.size;
+      const cellWidth = rtssVisual.cellHeight * 0.61;
+      return [layer.index, {
+        width: edit.width > 0 ? edit.width * rtssVisual.zoom : layer.autoWidth
+          ? Math.min(1024 * rtssVisual.zoom, Math.max(cellWidth,
+            Math.max(...lines.map((line) => line.length)) * cellWidth * size / 100)) : layer.width,
+        height: edit.height > 0 ? edit.height * rtssVisual.zoom : layer.autoHeight
+          ? rtssVisual.cellHeight * size / 100 * lines.length : layer.height,
+      }];
+    }));
+    const layerWidth = (layer) => extents.get(layer.index).width;
+    const layerHeight = (layer) => extents.get(layer.index).height;
     const layerX = (layer) => layer.x + (layer.width - layerWidth(layer)) * (layer.origin % 3) / 2
       + (overlayState.rtssLayerEdits[layer.index]?.x || 0) * rtssVisual.zoom;
     const layerY = (layer) => layer.y + (layer.height - layerHeight(layer)) * Math.floor(layer.origin / 3) / 2

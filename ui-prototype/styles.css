@@ -1082,7 +1082,7 @@ body.is-compact .chart-wrap--frames canvas { height: 96px; }
 #osdPreview.is-rtss-visual { padding: 0 !important; border: 0; background: none; box-shadow: none; backdrop-filter: none; }
 #osdPreview.is-rtss-visual > :not(.rtss-visual-canvas) { display: none; }
 .rtss-visual-canvas { position: relative; flex: none; overflow: hidden; }
-.rtss-visual-layer { position: absolute; display: block; white-space: nowrap; overflow: hidden; line-height: 1; }
+.rtss-visual-layer { position: absolute; display: block; white-space: pre; overflow: hidden; line-height: 1; }
 .rtss-visual-layer.is-selected { outline: 1px dashed var(--accent); outline-offset: 2px; }
 .rtss-visual-layer.is-selected::after { content: ""; position: absolute; z-index: 3; right: 0; bottom: 0; width: 10px; height: 10px; background: var(--accent); border-radius: 2px; cursor: nwse-resize; }
 .rtss-visual-layer svg, .rtss-visual-layer img { display: block; max-width: none; }

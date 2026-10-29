@@ -948,6 +948,7 @@ namespace {
                                      "<C=FF0000><A=1><FR> FPS";
         const std::string visible = rtssVisibleTemplate(original);
         CHECK(visible == "CPU: %CPU temperature% °C\n<FR> FPS");
+        CHECK(rtssVisibleTemplate("Первая\\nВторая") == "Первая\nВторая");
         CHECK(rtssVisibleTemplate("<G=Frametime,0,0,1,33,0,80>") == "<G=Frametime,0,0,1,33,0,80>");
         CHECK(rtssVisibleTemplate("<I=0,0,0,0,225,544>") == "<I=0,0,0,0,225,544>");
         CHECK(original.find("<C=") == 0); // исходные слои при экспорте не переписываются.
@@ -961,7 +962,7 @@ namespace {
                                    "[Layer0]\nText=GPU\nPositionX=-2\nPositionY=-4\n"
                                    "ExtentX=-16\nExtentY=-6\nBgndColor=1000000,,0,80000000,0,(Framerate,1)\n"
                                    "[Layer1]\nText=%GPU1 usage%\nPositionX=-12\nTextColor=FFFF8000\n"
-                                   "[Layer2]\nText=<FR> FPS\nExtentOrigin=2\nSize=200\n";
+                                   "[Layer2]\nText=<FR> FPS\\nREADY\nExtentOrigin=2\nSize=200\n";
         OverlaySettings imported;
         std::string error;
         CHECK(importRtssOverlay(source, imported, error));
@@ -971,6 +972,7 @@ namespace {
         CHECK(imported.rtssVisual->layers[0].backgroundColor == 0x80000000u);
         CHECK(imported.rtssVisual->layers[1].textColor == 0xFFFF8000u);
         CHECK(imported.rtssVisual->layers[2].size == 200 && imported.rtssVisual->layers[2].origin == 2);
+        CHECK(rtssVisibleTemplate(imported.rtssVisual->layers[2].text) == "<FR> FPS\nREADY");
         CHECK(imported.rtssVisual->availableTags.size() == 1
             && imported.rtssVisual->availableTags[0].first == "<FR>");
         Settings saved;
