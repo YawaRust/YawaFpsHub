@@ -32,7 +32,16 @@ jobs:
 
       - name: Собрать
         shell: bash
-        run: cmake --build build --config Release --parallel
+        run: cmake --build build --config Release --parallel 4
+
+      - name: Показать ошибку сборки ядра
+        if: failure()
+        shell: bash
+        run: |
+          cmake --build build --config Release --parallel 2 > build-log.txt 2>&1 || true
+          grep -iE 'fatal error:|error:|Killed signal' build-log.txt | head -20 | while IFS= read -r line; do
+            echo "::error title=Сборка ядра::${line}"
+          done
 
       - name: Тесты
         shell: bash
@@ -89,12 +98,105 @@ jobs:
             }
           }
 
+      - name: Проверить встроенный список изменений
+        shell: pwsh
+        run: |
+          Add-Type @"
+          using System;
+          using System.Runtime.InteropServices;
+          public static class YawaResource {
+            [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+            public static extern IntPtr LoadLibraryExW(string file, IntPtr reserved, uint flags);
+            [DllImport("kernel32.dll", ExactSpelling = true)]
+            public static extern IntPtr FindResourceW(IntPtr module, IntPtr name, IntPtr type);
+            [DllImport("kernel32.dll")]
+            public static extern uint SizeofResource(IntPtr module, IntPtr resource);
+            [DllImport("kernel32.dll")]
+            public static extern IntPtr LoadResource(IntPtr module, IntPtr resource);
+            [DllImport("kernel32.dll")]
+            public static extern IntPtr LockResource(IntPtr resource);
+            [DllImport("kernel32.dll")]
+            public static extern bool FreeLibrary(IntPtr module);
+          }
+          "@
+          $exe = (Get-ChildItem -Path .\build -Recurse -Filter YawaFpsHub.exe | Select-Object -First 1).FullName
+          if (-not $exe) { throw "Собранный exe не найден" }
+          $module = [YawaResource]::LoadLibraryExW($exe, [IntPtr]::Zero, 2)
+          if ($module -eq [IntPtr]::Zero) { throw "Не удалось открыть ресурсы exe" }
+          try {
+            $resource = [YawaResource]::FindResourceW($module, [IntPtr]::new(6201), [IntPtr]::new(10))
+            if ($resource -eq [IntPtr]::Zero) { throw "CHANGELOG отсутствует в exe" }
+            $size = [YawaResource]::SizeofResource($module, $resource)
+            if ($size -lt 100 -or $size -gt 131072) { throw "Неверный размер CHANGELOG в exe" }
+            $loaded = [YawaResource]::LoadResource($module, $resource)
+            $pointer = [YawaResource]::LockResource($loaded)
+            if ($pointer -eq [IntPtr]::Zero) { throw "CHANGELOG не прочитан" }
+            $bytes = [byte[]]::new([int]$size)
+            [Runtime.InteropServices.Marshal]::Copy($pointer, $bytes, 0, [int]$size)
+            $hash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes))
+            if ($hash -ne (Get-FileHash CHANGELOG.md -Algorithm SHA256).Hash) {
+              throw "Встроенный CHANGELOG отличается от исходного"
+            }
+          } finally {
+            [void][YawaResource]::FreeLibrary($module)
+          }
+
       - name: Просмотр локального пакета через CLI
         shell: pwsh
         run: |
           $exe = (Get-ChildItem -Path .\build -Recurse -Filter YawaFpsHub.exe | Select-Object -First 1).FullName
           if (-not $exe) { throw "Собранный YawaFpsHub.exe не найден" }
           python tests/test_report_cli.py --exe $exe
+
+      - name: Проверить видимый оверлей после импорта RTSS
+        shell: pwsh
+        run: |
+          $exe = (Get-ChildItem -Path .\build -Recurse -Filter YawaFpsHub.exe | Select-Object -First 1).FullName
+          $process = Start-Process -FilePath $exe -ArgumentList @("--smoke=2", "--smoke-rtss=tests/fixtures/rtss_visual.ovl") -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Импорт RTSS создал невидимый оверлей (exit $($process.ExitCode))" }
+          $image = Start-Process -FilePath $exe -ArgumentList @("--smoke=2", "--smoke-rtss-image", "--smoke-rtss=tests/fixtures/rtss_image.ovl") -Wait -PassThru
+          if ($image.ExitCode -ne 0) { throw "PNG-атлас RTSS не отрисован (exit $($image.ExitCode))" }
+          $crop = Start-Process -FilePath $exe -ArgumentList @("--smoke=2", "--smoke-rtss-crop", "--smoke-rtss=tests/fixtures/rtss_crop.ovl") -Wait -PassThru
+          if ($crop.ExitCode -ne 0) { throw "RTSS-спрайт взял неверную область атласа (exit $($crop.ExitCode))" }
+          $fit = Start-Process -FilePath $exe -ArgumentList @("--smoke=2", "--smoke-rtss-image", "--smoke-rtss=tests/fixtures/rtss_fit.ovl") -Wait -PassThru
+          if ($fit.ExitCode -ne 0) { throw "RTSS-картинка исчезла после вписывания макета (exit $($fit.ExitCode))" }
+          $wide = Start-Process -FilePath $exe -ArgumentList @("--smoke=2", "--smoke-rtss-autowidth", "--smoke-rtss=tests/fixtures/rtss_autowidth.ovl") -Wait -PassThru
+          if ($wide.ExitCode -ne 0) { throw "Автоширина RTSS-текста обрезала широкие буквы (exit $($wide.ExitCode))" }
+          $missing = Start-Process -FilePath $exe -ArgumentList @("--smoke=2", "--smoke-rtss-missing-image", "--smoke-rtss=tests/fixtures/rtss_missing_image.ovl") -Wait -PassThru
+          if ($missing.ExitCode -ne 0) { throw "RTSS-слой без PNG потерял исходный размер (exit $($missing.ExitCode))" }
+
+      - name: Проверить RTSS-слои в демо
+        shell: pwsh
+        run: |
+          $edge = "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"
+          if (-not (Test-Path $edge)) { $edge = "C:\Program Files\Microsoft\Edge\Application\msedge.exe" }
+          $wide = [Convert]::ToBase64String([IO.File]::ReadAllBytes("$PWD/tests/fixtures/rtss_autowidth.ovl"))
+          $image = [Convert]::ToBase64String([IO.File]::ReadAllBytes("$PWD/tests/fixtures/rtss_crop.ovl"))
+          $missing = [Convert]::ToBase64String([IO.File]::ReadAllBytes("$PWD/tests/fixtures/rtss_missing_image.ovl"))
+          $png = [Convert]::ToBase64String([IO.File]::ReadAllBytes("$PWD/tests/fixtures/rtss_crop.png"))
+          $page = [IO.File]::ReadAllText("$PWD/ui-prototype/index.html")
+          $scripts = "<script>window.rtssSmoke = {wide:'$wide',image:'$image',missing:'$missing',png:'$png'};</script>" +
+            '<script src="../tests/test_rtss_demo_browser.js"></script><script src="js/app.js"></script>'
+          $page = $page.Replace('<script src="js/app.js"></script>', $scripts)
+          $path = "$PWD/ui-prototype/rtss-smoke.html"
+          [IO.File]::WriteAllText($path, $page)
+          $server = Start-Process -FilePath (Get-Command python).Source -ArgumentList "-m","http.server","8766","--bind","127.0.0.1","--directory","." -PassThru
+          try {
+            Start-Sleep -Seconds 2
+            foreach ($stage in @("wide", "image", "tagged", "missing")) {
+              $url = "http://127.0.0.1:8766/ui-prototype/rtss-smoke.html?view=overlay&nofx=1&shot=1&rtssStage=$stage"
+              $profile = Join-Path $env:TEMP "yawa-edge-rtss-$stage"
+              $dom = & $edge "--headless=new" "--disable-gpu" "--no-first-run" "--user-data-dir=$profile" "--virtual-time-budget=10000" "--dump-dom" $url 2>$null | Out-String
+              if ($dom -notmatch 'data-rtss-smoke="pass"') {
+                $state = [regex]::Match($dom, '<html[^>]*>').Value
+                Write-Output "::error title=RTSS demo $stage::Edge code $LASTEXITCODE; $state"
+                if (-not $state) { Write-Output "::error title=RTSS demo::$($dom.Substring(0, [Math]::Min(400, $dom.Length)))" }
+                throw "Демо не прошло RTSS-проверку $stage"
+              }
+            }
+          } finally {
+            Stop-Process -Id $server.Id -Force
+          }
 
       - name: Самопроверка приложения
         shell: pwsh
@@ -292,6 +394,7 @@ jobs:
             [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindow(string name, string title);
             [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint flags);
             [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
+            [DllImport("user32.dll")] public static extern bool PostMessageW(IntPtr hwnd, uint msg, IntPtr wParam, IntPtr lParam);
           }
           "@
           $exe = (Get-ChildItem -Path .\build -Recurse -Filter YawaFpsHub.exe | Select-Object -First 1).FullName
@@ -315,8 +418,27 @@ jobs:
             $ok = [YawaEditorShot]::PrintWindow($hwnd, $hdc, 2)
             $graphics.ReleaseHdc($hdc)
             $graphics.Dispose()
-            if ($ok) { $bitmap.Save("$PWD\screenshot-editor.png", [System.Drawing.Imaging.ImageFormat]::Png) }
+            if (-not $ok) { throw "большой холст редактора не снят" }
+            $bitmap.Save("$PWD\screenshot-editor.png", [System.Drawing.Imaging.ImageFormat]::Png)
             $bitmap.Dispose()
+            $click = [IntPtr]::new((50 -shl 16) -bor 64)
+            if (-not [YawaEditorShot]::PostMessageW($hwnd, 0x0201, [IntPtr]::new(1), $click) -or
+                -not [YawaEditorShot]::PostMessageW($hwnd, 0x0202, [IntPtr]::Zero, $click)) {
+              throw "кнопка перехода к настройкам не нажата"
+            }
+            Start-Sleep -Milliseconds 500
+            $bitmap = New-Object System.Drawing.Bitmap $shotWidth, $shotHeight
+            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+            $hdc = $graphics.GetHdc()
+            $ok = [YawaEditorShot]::PrintWindow($hwnd, $hdc, 2)
+            $graphics.ReleaseHdc($hdc)
+            $graphics.Dispose()
+            if (-not $ok) { throw "режим настроек редактора не снят" }
+            $bitmap.Save("$PWD\screenshot-editor-settings.png", [System.Drawing.Imaging.ImageFormat]::Png)
+            $bitmap.Dispose()
+            $focusHash = (Get-FileHash "$PWD\screenshot-editor.png" -Algorithm SHA256).Hash
+            $settingsHash = (Get-FileHash "$PWD\screenshot-editor-settings.png" -Algorithm SHA256).Hash
+            if ($focusHash -eq $settingsHash) { throw "режим холста не переключился" }
           }
           if (-not $process.WaitForExit(20000)) { $process.Kill(); throw "редактор не завершился" }
           if ($process.ExitCode -ne 0) { throw "код выхода редактора: $($process.ExitCode)" }

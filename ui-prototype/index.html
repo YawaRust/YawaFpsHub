@@ -665,7 +665,16 @@
       </section>
 
       <section class="view" data-view="overlay">
-        <div class="grid">
+        <nav class="workshop-nav" aria-label="Разделы редактора">
+          <button type="button" data-editor-section="assemble" class="is-active">Собрать</button>
+          <button type="button" data-editor-section="appearance">Оформить</button>
+          <button type="button" data-editor-section="text">Текст</button>
+          <button type="button" data-editor-section="rows">Строки</button>
+          <button type="button" id="workshopImport" title="Импорт .json, .ovl или .ovx">Импорт</button>
+          <button type="button" id="workshopExport" title="Экспорт JSON-рецепта">Экспорт</button>
+          <button type="button" id="toggleCanvasWorkspace" aria-pressed="true">Настройки →</button>
+        </nav>
+        <div class="grid overlay-grid" id="overlayGrid" data-section="assemble" data-focus="true">
           <div class="overlay-workshop">
             <article class="card workshop-layers">
               <header class="card__head"><div>
@@ -673,7 +682,7 @@
                 <p class="card__sub">Глазик управляет строкой</p>
               </div></header>
               <div id="osdLayers" class="workshop-layers__list"></div>
-              <div class="workshop-color">
+              <div class="workshop-color" id="osdMetricColorEditor">
                 <label for="osdColorTarget">Что окрасить</label>
                 <select id="osdColorTarget">
                   <option value="metric">Выбранный показатель</option>
@@ -693,17 +702,70 @@
                 <input id="osdLayerAlpha" type="range" min="0" max="100" value="100">
                 <button id="osdLayerAuto" class="btn btn--ghost" type="button">Взять из рецепта</button>
                 <button id="osdLayerSample" class="btn btn--ghost" type="button">Пипетка · из предпросмотра</button>
+                <label for="osdMetricTextSize">Размер текста выбранного датчика · <output id="osdMetricTextSizeValue">100 %</output></label>
+                <input id="osdMetricTextSize" type="range" min="70" max="200" step="10" value="100">
+              </div>
+              <div class="workshop-color" id="osdRtssInspector" hidden>
+                <strong id="osdRtssName"></strong>
+                <label for="osdRtssText">Строка RTSS (до 8192 байт UTF-8)</label>
+                <input id="osdRtssText" type="text" maxlength="8192" spellcheck="false" aria-label="Текст RTSS-слоя">
+                <button class="btn btn--ghost" type="button" data-rtss-action="editText">↗ Развернуть строку</button>
+                <button class="btn btn--ghost" type="button" data-rtss-action="resetText">Строка из RTSS</button>
+                <label for="osdRtssColor">Цвет текста · #RRGGBBAA</label>
+                <div><input id="osdRtssColorPicker" type="color" value="#ffffff" aria-label="Выбрать цвет текста RTSS-слоя">
+                  <input id="osdRtssColor" type="text" maxlength="9" spellcheck="false" aria-label="Цвет текста RTSS-слоя"></div>
+                <label for="osdRtssBg">Фон слоя · #RRGGBBAA (пусто — из RTSS)</label>
+                <div><input id="osdRtssBgPicker" type="color" value="#000000" aria-label="Выбрать цвет фона RTSS-слоя">
+                  <input id="osdRtssBg" type="text" maxlength="9" spellcheck="false" aria-label="Цвет фона RTSS-слоя"></div>
+                <div><button class="btn btn--ghost" type="button" data-rtss-action="resetTextColor">Цвет из RTSS</button>
+                  <button class="btn btn--ghost" type="button" data-rtss-action="resetBackground">Фон из RTSS</button></div>
+                <button class="btn btn--ghost" id="osdRtssSample" type="button">Пипетка · цвет текста из предпросмотра</button>
+                <label for="osdRtssSize">Размер шрифта, % (10–400)</label>
+                <input id="osdRtssSize" type="number" min="10" max="400" step="1" aria-label="Размер текста RTSS-слоя">
+                <label for="osdRtssWidth">Ширина слоя, px (0 — из RTSS)</label>
+                <input id="osdRtssWidth" type="number" min="0" max="2048" step="1" aria-label="Ширина RTSS-слоя">
+                <label for="osdRtssHeight">Высота слоя, px (0 — из RTSS)</label>
+                <input id="osdRtssHeight" type="number" min="0" max="2048" step="1" aria-label="Высота RTSS-слоя">
+                <label for="osdRtssX">Смещение X, px (−2048…2048)</label>
+                <input id="osdRtssX" type="number" min="-2048" max="2048" step="1" aria-label="Смещение RTSS-слоя по X">
+                <label for="osdRtssY">Смещение Y, px (−2048…2048)</label>
+                <input id="osdRtssY" type="number" min="-2048" max="2048" step="1" aria-label="Смещение RTSS-слоя по Y">
+                <small id="osdRtssWarning" hidden>Управляющий гипертекст RTSS показан упрощённо; исходный слой сохранён для экспорта.</small>
+                <div>
+                  <button class="btn btn--ghost" type="button" data-rtss-action="left" aria-label="Влево">←</button>
+                  <button class="btn btn--ghost" type="button" data-rtss-action="right" aria-label="Вправо">→</button>
+                  <button class="btn btn--ghost" type="button" data-rtss-action="up" aria-label="Вверх">↑</button>
+                  <button class="btn btn--ghost" type="button" data-rtss-action="down" aria-label="Вниз">↓</button>
+                </div>
+                <div>
+                  <button class="btn btn--ghost" type="button" data-rtss-action="reset">Сбросить правки</button>
+                  <button class="btn btn--ghost" type="button" data-rtss-action="visible">Скрыть</button>
+                </div>
+                <small>Изменяется вид в Yawa; исходный пакет RTSS не меняется.</small>
               </div>
             </article>
             <article class="card workshop-canvas">
             <header class="card__head">
               <div>
                 <h2 class="card__title">Оверлей поверх игры</h2>
-                <p class="card__sub">Тяните плашку · Ctrl+клик — строки · Shift+тяга — сетка 8 px · F10 — скрыть · F11 — угол</p>
+                <p class="card__sub">Тяните строку — позиция · Shift + тяга — порядок · Alt — плашка · F9 — сквозной клик</p>
               </div>
-              <span class="tag tag--live"><i></i>F10</span>
+              <div class="canvas-actions">
+                <button class="btn btn--ghost" id="fitOsdCanvas" type="button" title="Только масштаб и панорама холста; положение оверлея не меняется">Вписать оверлей</button>
+                <button class="btn btn--ghost" id="restoreOsdTemplate" type="button" title="Сбросить раскладку, а для RTSS — правки всех слоёв; оригинал остаётся прежним">Вернуть шаблон</button>
+                <span class="tag tag--live"><i></i>F10</span>
+              </div>
             </header>
 
+            <div class="canvas-align" aria-label="Выравнивание выделенных элементов">
+              <span>Один элемент — по плашке (RTSS — весь оверлей по экрану); Ctrl+клик — несколько, относительно первого:</span>
+              <button type="button" data-align="left">Слева</button>
+              <button type="button" data-align="centerX">Центр X</button>
+              <button type="button" data-align="right">Справа</button>
+              <button type="button" data-align="top">Сверху</button>
+              <button type="button" data-align="centerY">Центр Y</button>
+              <button type="button" data-align="bottom">Снизу</button>
+            </div>
             <div class="game" id="gameScene" tabindex="0" aria-label="Холст оверлея: колесо — масштаб, пробел с перетаскиванием — панорама">
               <div class="game__viewport" id="gameViewport">
                 <div class="game__sky"></div>
@@ -753,6 +815,7 @@
                     <b class="osd__val osd__val--sm" data-metric="vramUsed">9,6</b>
                     <span class="osd__unit">ГБ</span>
                   </div>
+                  <svg class="osd-sparkline" viewBox="0 0 160 24" preserveAspectRatio="none" aria-label="История FPS" role="img"><polyline id="osdSparklinePoints" fill="none" stroke="currentColor" stroke-width="1.5" points=""></polyline></svg>
                 </div>
               </div>
             </div>
@@ -762,7 +825,7 @@
           <article class="card workshop-inspector">
             <header class="card__head">
               <div>
-                <h2 class="card__title">Инспектор · всё оформление</h2>
+                <h2 class="card__title">Оверлей · настройка</h2>
                 <p class="card__sub">Изменения видны сразу в предпросмотре</p>
               </div>
               <div class="segmented segmented--icons" id="osdHistory">
@@ -771,7 +834,8 @@
               </div>
             </header>
 
-            <div class="field">
+            <p class="workshop-quick-hint">Рецепт выше · слои слева · плашку двигайте на холсте. <span id="rtssOmittedHint"></span></p>
+            <div class="field quick-field">
               <span class="field__label">Положение</span>
               <div class="segmented segmented--icons" id="osdPosition">
                 <button class="is-active" data-pos="tl" aria-label="Слева сверху">↖</button>
@@ -782,16 +846,28 @@
               </div>
             </div>
 
-            <div class="field field--monitor">
+            <div class="field quick-field">
+              <button class="btn btn--ghost" id="osdSparkline" type="button" title="Нажмите для выбора следующего показателя">График: выкл</button>
+            </div>
+
+            <div class="field quick-field">
+              <button class="btn btn--ghost" type="button" disabled title="В демо нет проверенного игрового процесса">Профиль игры: нет активной игры</button>
+              <button id="osdMenuScene" class="btn btn--ghost" type="button">Меню: скрыть оверлей · Ctrl+F11</button>
+              <label for="osdMenuOpacity">В меню (0 — скрыть) <output id="osdMenuOpacityValue">0%</output></label>
+              <input id="osdMenuOpacity" type="range" min="0" max="100" value="0">
+            </div>
+
+            <div class="field field--monitor quick-field">
               <label class="switch" for="osdFollowGame">
                 <input type="checkbox" id="osdFollowGame">
                 <span class="switch__track"><span class="switch__knob"></span></span>
                 <span>На мониторе игры</span>
               </label>
-              <small>По умолчанию выключено. В демо без второго монитора положение не меняется.</small>
+              <button class="btn btn--ghost" type="button" disabled title="В демо нет второго экрана">Другой экран →</button>
+              <small>В приложении выбор идёт по подключённым мониторам; исчезнувший экран не заменяется автоматически.</small>
             </div>
 
-            <div class="field">
+            <div class="field quick-field">
               <span class="field__label">Вид</span>
               <div class="segmented" id="osdLayout">
                 <button class="is-active" data-layout="plates">Плитки</button>
@@ -810,7 +886,7 @@
               </div>
             </div>
 
-            <div class="field">
+            <div class="field quick-field">
               <div class="field__label-row">
                 <span class="field__label">Масштаб</span>
                 <b id="osdScaleValue">100%</b>
@@ -826,7 +902,7 @@
               <input class="range" type="range" id="osdTextScale" min="85" max="130" step="5" value="100">
             </div>
 
-            <div class="field">
+            <div class="field quick-field">
               <div class="field__label-row">
                 <span class="field__label">Прозрачность окна</span>
                 <b id="osdOpacityValue">72%</b>
@@ -1024,16 +1100,18 @@
           </article>
           </div>
 
-          <article class="card span-12">
+          <article class="card span-12 workshop-recipes">
             <header class="card__head">
               <div>
                 <h2 class="card__title">Рецепты оформления</h2>
                 <p class="card__sub">16 рецептов · форма, поверхность и шрифт настраиваются независимо</p>
               </div>
               <div class="recipe-transfer">
-                <button class="btn btn--ghost" id="importOsdRecipe" type="button">Импорт JSON</button>
-                <input id="importOsdRecipeFile" type="file" accept=".json,application/json" hidden>
+                <button class="btn btn--ghost" id="importOsdRecipe" type="button">Импорт файла</button>
+                <input id="importOsdRecipeFile" type="file" accept=".json,.ovl,.ovx,.png,application/json" multiple hidden>
                 <button class="btn btn--ghost" id="exportOsdRecipe" type="button">Экспорт JSON</button>
+                <button class="btn btn--ghost" id="exportOsdRtss" type="button">Экспорт .ovl</button>
+                <button class="btn btn--ghost" id="exportOsdOvx" type="button" disabled>Исходный .ovx</button>
               </div>
             </header>
 
@@ -1419,6 +1497,11 @@
               <li><span>Активный адаптер</span><b id="activeGpuName">GeForce RTX 4080</b></li>
               <li><span>Сбор кадров</span><b id="aboutFramesState">работает</b></li>
             </ul>
+            <details class="changelog-preview">
+              <summary class="btn btn--ghost">Что нового</summary>
+              <p>1.0.0 — первый выпуск: один переносимый exe, мониторинг, баланс и редактор оверлея.</p>
+              <p>Полный CHANGELOG встроен в exe и открывается кнопкой «Что нового» в настройках.</p>
+            </details>
           </article>
 
         </div>
@@ -1441,6 +1524,18 @@
     </footer>
   </div>
 </div>
+
+<dialog id="rtssTextDialog" class="rtss-text-dialog" aria-labelledby="rtssTextTitle">
+  <h2 id="rtssTextTitle">Строка RTSS · многострочный редактор</h2>
+  <p>Enter — новая строка · Ctrl+Enter — применить · Esc — отмена</p>
+  <label for="rtssTextArea">Текст выбранного слоя</label>
+  <textarea id="rtssTextArea" maxlength="8192" spellcheck="false"></textarea>
+  <div class="rtss-text-dialog__footer">
+    <output id="rtssTextBytes" aria-live="polite"></output>
+    <button id="rtssTextApply" class="btn" type="button">Применить</button>
+    <button id="rtssTextCancel" class="btn btn--ghost" type="button">Отмена</button>
+  </div>
+</dialog>
 
 <script src="js/sim.js"></script>
 <script src="js/charts.js"></script>

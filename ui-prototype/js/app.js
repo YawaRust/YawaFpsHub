@@ -38,8 +38,9 @@
     write(key, value) {
       try {
         localStorage.setItem(key, value);
+        return true;
       } catch (error) {
-        /* настройки прототипа не критичны */
+        return false; // при file:// хранилище может быть недоступно
       }
     }
   };
@@ -103,12 +104,15 @@
     originX: 0,
     originY: 0,
     followGameMonitor: false,
+    sparkline: false,
+    sparklineMetric: "fps",
     layout: "plates",
     style: "frosted",
     recipe: "frosted",
     surface: null,
     scale: 100,
     opacity: 72,
+    menuOpacity: 0,
     radius: null,
     background: true,
     border: true,
@@ -130,6 +134,7 @@
     // Цвет каждой строки оверлея: null — как в стиле.
     rowColors: { fps: null, cpu: null, gpu: null, ram: null, vram: null },
     metricRgba: {},
+    metricOrder: [],
     customRgba: { value: null, label: null, accent: null,
       fps: null, cpu: null, gpu: null, ram: null, vram: null },
     borderWidth: null,
@@ -140,9 +145,37 @@
     fpsDecimals: null,
     clickThrough: false,
     labels: { ...DEFAULT_LABELS },
-    rowPositions: {}
+    rowPositions: {},
+    metricTextScale: {},
+    backgroundWidth: null,
+    backgroundHeight: null,
+    rtssLayerEdits: {}
   };
 
+  let originalRtss = store.read("rtssOriginal") || "";
+  let originalOvx = store.read("rtssExchange") || "";
+  let rtssImage = store.read("rtssImage") || "";
+  let rtssImageUrl = "";
+  const setRtssImage = (encoded) => {
+    if (rtssImageUrl) URL.revokeObjectURL(rtssImageUrl);
+    rtssImageUrl = "";
+    rtssImage = encoded;
+    try {
+      const bytes = Uint8Array.from(atob(encoded), (symbol) => symbol.charCodeAt(0));
+      if (bytes.length >= 24 && bytes.length <= 4 * 1024 * 1024
+        && String.fromCharCode(...bytes.slice(0, 8)) === "\x89PNG\r\n\x1a\n") {
+        rtssImageUrl = URL.createObjectURL(new Blob([bytes], { type: "image/png" }));
+      }
+    } catch { rtssImage = ""; }
+  };
+  if (rtssImage) setRtssImage(rtssImage);
+  let rtssVisualSource = "";
+  let rtssVisual = null;
+  try {
+    const edits = JSON.parse(store.read("rtssLayerEdits") || "{}");
+    if (edits && typeof edits === "object" && !Array.isArray(edits)) overlayState.rtssLayerEdits = edits;
+  } catch { /* Повреждённые правки не мешают открыть демо. */ }
+  let rtssOmittedLayers = Number(store.read("rtssOmittedLayers") || 0);
   const overlayHistory = { undo: [], redo: [], committed: null, gesture: false, restoring: false };
 
   function recordOverlayHistory() {
@@ -166,7 +199,14 @@
     const other = direction === "undo" ? "redo" : "undo";
     overlayHistory[other].push(JSON.stringify(overlayState));
     const snapshot = source.pop();
+    const previousGraph = overlayState.sparklineMetric;
     Object.assign(overlayState, JSON.parse(snapshot));
+    store.write("rtssLayerEdits", JSON.stringify(overlayState.rtssLayerEdits || {}));
+    renderOverlayLayers();
+    if (previousGraph !== overlayState.sparklineMetric) {
+      sparklineHistory.length = 0;
+      $("#osdSparklinePoints").setAttribute("points", "");
+    }
     overlayHistory.committed = snapshot;
     overlayHistory.restoring = true;
     applyOverlay();
@@ -346,6 +386,7 @@
 
   const OSD_PRIMARY = { fps: "fps", cpu: "cpu", gpu: "gpu", ramUsed: "ram", vramUsed: "vram" };
   let selectedLayer = "fps";
+  const selectedRtssLayers = new Set();
   let colorTarget = "metric";
   const currentRgba = () => colorTarget === "metric"
     ? overlayState.metricRgba[selectedLayer] : overlayState.customRgba[colorTarget];
@@ -357,27 +398,83 @@
   };
   const displayedLayers = new Set(["fps", "fpsLow1", "cpu", "cpuTemp", "gpu", "gpuTemp", "ramUsed", "vramUsed"]);
 
-  function selectOverlayLayer(id) {
+  function refreshRtssInspector() {
+    const isRtss = selectedLayer.startsWith("rtss:") && overlayState.recipe === "rtss" && rtssVisual;
+    $("#osdMetricColorEditor").hidden = Boolean(isRtss);
+    $("#osdRtssInspector").hidden = !isRtss;
+    if (!isRtss) return;
+    const index = Number(selectedLayer.slice(5));
+    const layer = rtssVisual.layers.find((entry) => entry.index === index);
+    const edit = overlayState.rtssLayerEdits[index] || {};
+    $("#osdRtssName").textContent = `RTSS · ${layer?.name || `слой ${index}`}`;
+    $("#osdRtssX").value = String(edit.x || 0);
+    $("#osdRtssY").value = String(edit.y || 0);
+    $("#osdRtssText").value = edit.text ?? layer?.label ?? "";
+    const argb = edit.textColor ?? layer?.color ?? "FFFFFFFF";
+    $("#osdRtssColor").value = /^([0-9a-f]{8})$/i.test(argb)
+      ? `#${argb.slice(2)}${argb.slice(0, 2)}` : "#FFFFFFFF";
+    $("#osdRtssColorPicker").value = $("#osdRtssColor").value.slice(0, 7);
+    const background = edit.backgroundColor ?? layer?.bg ?? "";
+    $("#osdRtssBg").value = /^[0-9a-f]{8}$/i.test(background)
+      ? `#${background.slice(2)}${background.slice(0, 2)}`
+      : /^[0-9a-f]{6}$/i.test(background) ? `#${background}FF` : "";
+    $("#osdRtssBgPicker").value = $("#osdRtssBg").value.slice(0, 7) || "#000000";
+    $("#osdRtssSize").value = String(edit.size || layer?.size || 100);
+    $("#osdRtssWidth").value = String(edit.width || 0);
+    $("#osdRtssHeight").value = String(edit.height || 0);
+    $("#osdRtssWarning").hidden = !/<(?!FR>|G=|I=)[^>]{1,256}>/i.test(edit.text ?? layer?.label ?? "");
+    $("[data-rtss-action=visible]").textContent = edit.visible === false ? "Показать" : "Скрыть";
+  }
+
+  function selectOverlayLayer(id, { toggle = false, reset = false } = {}) {
+    if (id.startsWith("rtss:")) {
+      if (toggle) {
+        if (selectedRtssLayers.has(id) && selectedRtssLayers.size > 1) selectedRtssLayers.delete(id);
+        else selectedRtssLayers.add(id);
+        if (!selectedRtssLayers.has(id)) id = [...selectedRtssLayers].at(-1);
+      } else if (reset || !selectedRtssLayers.has(id)) {
+        selectedRtssLayers.clear();
+        selectedRtssLayers.add(id);
+      }
+    } else selectedRtssLayers.clear();
     selectedLayer = id;
+    refreshRtssInspector();
     const hex = currentRgba() || "#FFFFFFFF";
-    $("#osdLayerName").textContent = colorTarget === "metric"
-      ? sensorRows.get(id)?.sensor.label || id : $("#osdColorTarget").selectedOptions[0].textContent;
+    $("#osdLayerName").textContent = id.startsWith("rtss:")
+      ? `RTSS · слой ${id.slice(5)} (перемещение и глазик)`
+      : colorTarget === "metric"
+        ? sensorRows.get(id)?.sensor.label || id : $("#osdColorTarget").selectedOptions[0].textContent;
     $("#osdLayerHex").value = hex;
     $("#osdLayerPicker").value = hex.slice(0, 7);
     $("#osdLayerAlpha").value = String(Math.round(parseInt(hex.slice(7, 9), 16) / 255 * 100));
     $("#osdLayerAlphaValue").textContent = `${$("#osdLayerAlpha").value}%`;
+    const textSize = overlayState.metricTextScale[id] || 100;
+    $("#osdMetricTextSize").value = String(textSize);
+    $("#osdMetricTextSizeValue").textContent = `${textSize} %`;
+    $("#osdMetricTextSize").disabled = id.startsWith("rtss:");
+    ["osdLayerHex", "osdLayerPicker", "osdLayerAlpha", "osdLayerAuto", "osdLayerSample"]
+      .forEach((field) => { $(`#${field}`).disabled = id.startsWith("rtss:"); });
     $$("#osdLayers .workshop-layer__name").forEach((button) => {
-      button.classList.toggle("is-active", button.dataset.layer === id);
+      button.classList.toggle("is-active", button.dataset.layer === id || selectedRtssLayers.has(button.dataset.layer));
     });
     $$("#osdPreview .osd__row").forEach((row) => {
       row.classList.toggle("is-selected", row.querySelector(`[data-metric="${id}"]`) !== null);
     });
+    $$("#osdPreview .rtss-visual-layer").forEach((node) => {
+      node.classList.toggle("is-selected", selectedRtssLayers.has(`rtss:${node.dataset.rtssLayer}`));
+    });
   }
 
   function renderOverlayLayers() {
+    if (overlayState.recipe !== "rtss") {
+      selectedRtssLayers.clear();
+      if (selectedLayer.startsWith("rtss:")) selectedLayer = "fps";
+    }
     const host = $("#osdLayers");
     host.replaceChildren();
-    for (const [id, entry] of sensorRows) {
+    const primary = [...overlayState.metricOrder, ...sensorRows.keys()];
+    const ordered = [...sensorRows].sort((a, b) => primary.indexOf(a[0]) - primary.indexOf(b[0]));
+    for (const [id, entry] of ordered) {
       if (entry.sensor.pinned) displayedLayers.add(id);
       if (!displayedLayers.has(id)) continue;
       const row = document.createElement("div");
@@ -402,14 +499,210 @@
       row.append(name, eye);
       host.appendChild(row);
     }
+    if (overlayState.recipe === "rtss" && originalRtss && rtssVisual) {
+      for (const layer of rtssVisual.layers) {
+        const id = `rtss:${layer.index}`;
+        const edit = overlayState.rtssLayerEdits[layer.index] || {};
+        const row = document.createElement("div");
+        row.className = "workshop-layer";
+        const name = document.createElement("button");
+        name.type = "button";
+        name.className = "workshop-layer__name";
+        name.dataset.layer = id;
+        name.textContent = `RTSS · ${layer.name || `слой ${layer.index}`}`;
+        name.addEventListener("click", (event) => selectOverlayLayer(id,
+          { toggle: event.ctrlKey, reset: !event.ctrlKey }));
+        const eye = document.createElement("button");
+        eye.type = "button";
+        eye.className = `workshop-layer__eye${edit.visible === false ? "" : " is-on"}`;
+        eye.textContent = edit.visible === false ? "○" : "◉";
+        eye.setAttribute("aria-label", `${edit.visible === false ? "Показать" : "Скрыть"} слой ${layer.index}`);
+        eye.addEventListener("click", () => {
+          overlayState.rtssLayerEdits[layer.index] = { ...edit, visible: edit.visible === false };
+          store.write("rtssLayerEdits", JSON.stringify(overlayState.rtssLayerEdits));
+          applyOverlay();
+          renderOverlayLayers();
+        });
+        row.append(name, eye);
+        host.appendChild(row);
+      }
+    }
     selectOverlayLayer(selectedLayer);
   }
 
+  function moveSelectedRtss(dx, dy) {
+    const edits = [...selectedRtssLayers].map((id) => {
+      const index = Number(id.slice(5));
+      const edit = overlayState.rtssLayerEdits[index] || {};
+      return { index, edit, x: edit.x || 0, y: edit.y || 0 };
+    });
+    for (const item of edits) {
+      dx = Math.max(-2048 - item.x, Math.min(2048 - item.x, dx));
+      dy = Math.max(-2048 - item.y, Math.min(2048 - item.y, dy));
+    }
+    if (!dx && !dy) return;
+    for (const item of edits) {
+      overlayState.rtssLayerEdits[item.index] = { ...item.edit, x: item.x + dx, y: item.y + dy };
+    }
+    store.write("rtssLayerEdits", JSON.stringify(overlayState.rtssLayerEdits));
+    applyOverlay();
+  }
+
   function bindLayerColor() {
+    const dialog = $("#rtssTextDialog");
+    const area = $("#rtssTextArea");
+    let textLayer = null;
+    const measureText = () => {
+      const bytes = new TextEncoder().encode(area.value).length;
+      const valid = bytes <= 8192;
+      const output = $("#rtssTextBytes");
+      output.textContent = `${bytes} / 8192 байт UTF-8`;
+      output.classList.toggle("is-over-limit", !valid);
+      $("#rtssTextApply").disabled = !valid;
+    };
+    area.addEventListener("input", measureText);
+    area.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && event.ctrlKey) {
+        event.preventDefault();
+        $("#rtssTextApply").click();
+      }
+    });
+    $("#rtssTextCancel").addEventListener("click", () => dialog.close());
+    dialog.addEventListener("close", () => { textLayer = null; });
+    $("#osdRtssInspector").addEventListener("click", (event) => {
+      const action = event.target.closest("[data-rtss-action]")?.dataset.rtssAction;
+      if (!action || !selectedLayer.startsWith("rtss:")) return;
+      const index = Number(selectedLayer.slice(5));
+      const edit = overlayState.rtssLayerEdits[index] || {};
+      if (action === "editText") {
+        const layer = rtssVisual?.layers.find((item) => item.index === index);
+        textLayer = selectedLayer;
+        area.value = edit.text ?? layer?.label ?? "";
+        measureText();
+        dialog.showModal();
+        area.focus();
+        return;
+      }
+      const step = event.shiftKey ? 10 : 1;
+      if (["left", "right", "up", "down"].includes(action)) {
+        moveSelectedRtss(action === "left" ? -step : action === "right" ? step : 0,
+          action === "up" ? -step : action === "down" ? step : 0);
+        return;
+      }
+      const x = action === "reset" ? 0 : edit.x || 0;
+      const y = action === "reset" ? 0 : edit.y || 0;
+      const next = { ...edit, x: Math.max(-2048, Math.min(2048, x)),
+        y: Math.max(-2048, Math.min(2048, y)),
+        visible: action === "visible" ? edit.visible === false : edit.visible !== false };
+      if (action === "reset" || action === "resetBackground") {
+        delete next.backgroundColor;
+      }
+      if (action === "reset" || action === "resetTextColor") {
+        delete next.textColor;
+      }
+      if (action === "reset" || action === "resetText") {
+        delete next.text;
+      }
+      if (action === "reset") {
+        delete next.size;
+        delete next.width;
+        delete next.height;
+      }
+      overlayState.rtssLayerEdits[index] = next;
+      store.write("rtssLayerEdits", JSON.stringify(overlayState.rtssLayerEdits));
+      applyOverlay();
+      renderOverlayLayers();
+    });
+    const updateRtss = (patch) => {
+      if (!selectedLayer.startsWith("rtss:")) return;
+      const index = Number(selectedLayer.slice(5));
+      overlayState.rtssLayerEdits[index] = { ...overlayState.rtssLayerEdits[index], ...patch };
+      store.write("rtssLayerEdits", JSON.stringify(overlayState.rtssLayerEdits));
+      applyOverlay();
+    };
+    $("#rtssTextApply").addEventListener("click", () => {
+      if (!textLayer || selectedLayer !== textLayer || !rtssVisual) return;
+      if (new TextEncoder().encode(area.value).length > 8192) return;
+      const index = Number(textLayer.slice(5));
+      const layer = rtssVisual.layers.find((item) => item.index === index);
+      const before = overlayState.rtssLayerEdits[index]?.text ?? layer?.label ?? "";
+      if (before !== area.value) updateRtss({ text: area.value });
+      dialog.close();
+    });
+    $("#osdRtssText").addEventListener("input", (event) => {
+      if (new TextEncoder().encode(event.target.value).length > 8192) {
+        refreshRtssInspector();
+        return;
+      }
+      updateRtss({ text: event.target.value });
+    });
+    $("#osdRtssColor").addEventListener("change", (event) => {
+      const hex = event.target.value.trim();
+      if (!hex) {
+        $("[data-rtss-action=resetTextColor]").click();
+      } else if (/^#[0-9a-f]{8}$/i.test(hex)) {
+        $("#osdRtssColorPicker").value = hex.slice(0, 7);
+        updateRtss({ textColor: `${hex.slice(7)}${hex.slice(1, 7)}`.toUpperCase() });
+      } else refreshRtssInspector();
+    });
+    $("#osdRtssBg").addEventListener("change", (event) => {
+      const hex = event.target.value.trim();
+      if (!hex) {
+        $("[data-rtss-action=resetBackground]").click();
+      } else if (/^#[0-9a-f]{8}$/i.test(hex)) {
+        $("#osdRtssBgPicker").value = hex.slice(0, 7);
+        updateRtss({ backgroundColor: `${hex.slice(7)}${hex.slice(1, 7)}`.toUpperCase() });
+      } else refreshRtssInspector();
+    });
+    for (const [pickerId, hexId, field] of [
+      ["osdRtssColorPicker", "osdRtssColor", "textColor"],
+      ["osdRtssBgPicker", "osdRtssBg", "backgroundColor"]]) {
+      $(`#${pickerId}`).addEventListener("input", (event) => {
+        const current = $(`#${hexId}`).value;
+        const alpha = /^#[0-9a-f]{8}$/i.test(current) && current.slice(7).toUpperCase() !== "00"
+          ? current.slice(7) : "FF";
+        const hex = `${event.target.value}${alpha}`.toUpperCase();
+        $(`#${hexId}`).value = hex;
+        updateRtss({ [field]: `${hex.slice(7)}${hex.slice(1, 7)}` });
+      });
+    }
+    $("#osdRtssSize").addEventListener("change", (event) => {
+      const size = Number(event.target.value);
+      if (!Number.isInteger(size) || size < 10 || size > 400) {
+        refreshRtssInspector();
+        return;
+      }
+      updateRtss({ size });
+    });
+    for (const [id, field] of [["osdRtssX", "x"], ["osdRtssY", "y"],
+      ["osdRtssWidth", "width"], ["osdRtssHeight", "height"]]) {
+      $(`#${id}`).addEventListener("change", (event) => {
+        const value = Number(event.target.value);
+        const position = field === "x" || field === "y";
+        if (event.target.value.trim() === "" || !Number.isInteger(value)
+          || (position ? value < -2048 || value > 2048
+            : value !== 0 && (value < 16 || value > 2048))) {
+          refreshRtssInspector();
+          return;
+        }
+        updateRtss({ [field]: value });
+      });
+    }
     const hexInput = $("#osdLayerHex");
     $("#osdColorTarget").addEventListener("change", (event) => {
       colorTarget = event.target.value;
       selectOverlayLayer(selectedLayer);
+    });
+    $("#osdMetricTextSize").addEventListener("input", (event) => {
+      if (selectedLayer.startsWith("rtss:")) return;
+      const size = Number(event.target.value);
+      overlayState.metricTextScale[selectedLayer] = size;
+      $("#osdMetricTextSizeValue").textContent = `${size} %`;
+      applyOverlay();
+    });
+    $("#osdMetricTextSize").addEventListener("change", () => {
+      store.write("yawa.metricTextScale", JSON.stringify(overlayState.metricTextScale));
+      recordOverlayHistory();
     });
     const picker = $("#osdLayerPicker");
     const alpha = $("#osdLayerAlpha");
@@ -437,19 +730,23 @@
       applyOverlay();
     });
     const sampleButton = $("#osdLayerSample");
+    const rtssSample = $("#osdRtssSample");
     let sampling = false;
-    sampleButton.addEventListener("click", () => {
+    for (const button of [sampleButton, rtssSample]) button.addEventListener("click", () => {
       sampling = !sampling;
-      sampleButton.classList.toggle("is-active", sampling);
+      button.classList.toggle("is-active", sampling);
       if (sampling) toast("Нажмите на текст или плашку предпросмотра. Градиенты недоступны.");
     });
     $("#gameScene").addEventListener("pointerdown", (event) => {
       if (!sampling) return;
       sampling = false;
       sampleButton.classList.remove("is-active");
+      rtssSample.classList.remove("is-active");
       event.preventDefault();
       event.stopImmediatePropagation();
-      const node = event.target.closest("#osdPreview .osd__val, #osdPreview .osd__key, #osdPreview .osd__unit, #osdPreview");
+      const rtss = selectedLayer.startsWith("rtss:");
+      const node = rtss ? event.target.closest("#osdPreview .rtss-visual-layer")
+        : event.target.closest("#osdPreview .osd__val, #osdPreview .osd__key, #osdPreview .osd__unit, #osdPreview");
       if (!node) {
         toast("Здесь цвет задан градиентом; выберите текст или плашку.");
         return;
@@ -463,9 +760,17 @@
       }
       const rgb = channels.slice(0, 3).map((channel) => Math.round(channel).toString(16).padStart(2, "0")).join("");
       const opacity = Math.round((channels[3] ?? 1) * 255).toString(16).padStart(2, "0");
-      setRgba(`#${rgb}${opacity}`.toUpperCase());
-      selectOverlayLayer(selectedLayer);
-      applyOverlay();
+      if (rtss) {
+        const current = $("#osdRtssColor").value;
+        const alpha = /^#[0-9a-f]{8}$/i.test(current) && current.slice(7).toUpperCase() !== "00"
+          ? current.slice(7) : "FF";
+        updateRtss({ textColor: `${alpha}${rgb}`.toUpperCase() });
+        refreshRtssInspector();
+      } else {
+        setRgba(`#${rgb}${opacity}`.toUpperCase());
+        selectOverlayLayer(selectedLayer);
+        applyOverlay();
+      }
     }, true);
   }
 
@@ -476,9 +781,15 @@
 
   function rebuildOverlaySensors() {
     const host = $("#osdPreview");
+    const sparkline = host.querySelector(".osd-sparkline");
     host.replaceChildren();
+    const paddingGrip = document.createElement("span");
+    paddingGrip.className = "osd__padding-grip";
+    paddingGrip.title = "Тянуть для настройки отступов";
+    paddingGrip.setAttribute("aria-label", "Отступы оверлея");
+    host.append(paddingGrip);
     const sensors = [...sensorRows.values()].map((entry) => entry.sensor);
-    const primary = Object.keys(OSD_PRIMARY);
+    const primary = [...overlayState.metricOrder, ...Object.keys(OSD_PRIMARY)];
     sensors.sort((a, b) => {
       const ai = primary.indexOf(a.id);
       const bi = primary.indexOf(b.id);
@@ -504,6 +815,7 @@
       row.append(label, value, unit);
       host.appendChild(row);
     }
+    if (sparkline) host.appendChild(sparkline);
     for (const [id, field] of Object.entries(OSD_PRIMARY)) {
       const toggle = $(`[data-osd-toggle="${field}"]`);
       if (toggle) toggle.checked = Boolean(sensorRows.get(id)?.sensor.pinned);
@@ -1080,7 +1392,7 @@
           <b>${disk.name}${disk.driveLetter ? ` · ${disk.driveLetter}` : ""}</b>
           <span>${[disk.interfaceType, disk.mediaType, disk.totalGb ? `${Math.round(disk.totalGb)} ГБ` : "",
             disk.freeGb ? `свободно ${Math.round(disk.freeGb)} ГБ` : "", disk.fileSystem].filter(Boolean).join(" · ")}</span>
-          <span>NVMe SMART: нет данных для этого диска</span>
+          <span title="NVMe SMART: износ — оценка контроллера; объём записи приблизителен. Нет данных не означает нулевой износ.">NVMe SMART: нет данных для этого диска</span>
         </li>`).join("") || '<li><span>нет данных</span></li>';
     }
   }
@@ -1088,8 +1400,22 @@
   let lastSnapshot = null;
   let systemRendered = false;
 
+  const sparklineHistory = [];
   function onData(snap) {
     lastSnapshot = snap;
+    const reading = snap.sensors.get(overlayState.sparklineMetric)?.value;
+    if (overlayState.sparkline && Number.isFinite(reading) && reading >= 0) {
+      sparklineHistory.push(reading);
+      if (sparklineHistory.length > 32) sparklineHistory.shift();
+      const low = Math.min(...sparklineHistory);
+      const span = Math.max(1, Math.max(...sparklineHistory) - low);
+      $("#osdSparklinePoints").setAttribute("points", sparklineHistory.map((value, index) =>
+        `${index * 160 / Math.max(1, sparklineHistory.length - 1)},${22 - 16 * (value - low) / span}`).join(" "));
+    } else if (overlayState.sparkline) {
+      sparklineHistory.length = 0;
+      $("#osdSparklinePoints").setAttribute("points", "");
+    }
+    $("#osdPreview").classList.toggle("is-sparkline", overlayState.sparkline && sparklineHistory.length >= 2);
     updateMetrics(snap);
     updateBars(snap);
     updateCores(snap);
@@ -1124,6 +1450,7 @@
     $$(".view").forEach((node) => node.classList.toggle("is-active", node.dataset.view === name));
     $("#viewEyebrow").textContent = view.eyebrow;
     $("#viewTitle").textContent = view.title;
+    if (name === "overlay") requestAnimationFrame(fitCanvasToOverlay);
 
     if (lastSnapshot) {
       requestAnimationFrame(() => {
@@ -1279,6 +1606,22 @@
     osd.style.setProperty("--osd-origin-x", `${overlayState.originX}px`);
     osd.style.setProperty("--osd-origin-y", `${overlayState.originY}px`);
     osd.dataset.layout = overlayState.layout;
+    const customPlate = overlayState.layout === "plates" && !(overlayState.recipe === "rtss" && originalRtss);
+    osd.style.width = customPlate && overlayState.backgroundWidth !== null
+      ? `${overlayState.backgroundWidth}px` : "";
+    osd.style.height = customPlate && overlayState.backgroundHeight !== null
+      ? `${overlayState.backgroundHeight}px` : "";
+    osd.classList.toggle("is-sparkline", overlayState.sparkline && sparklineHistory.length >= 2);
+    osd.style.setProperty("--menu-opacity", (overlayState.menuOpacity / 100).toFixed(2));
+    $("#osdMenuOpacity").value = String(overlayState.menuOpacity);
+    $("#osdMenuOpacityValue").textContent = `${overlayState.menuOpacity}%`;
+    $("#osdMenuScene").textContent = osd.classList.contains("is-menu-scene")
+      ? "Вернуть оверлей · Ctrl+F11"
+      : `Меню: ${overlayState.menuOpacity === 0 ? "скрыть" : "приглушить"} оверлей · Ctrl+F11`;
+    const graphNames = { fps: "FPS", cpu: "CPU", gpu: "GPU", frameMs: "кадр" };
+    const graphName = graphNames[overlayState.sparklineMetric] || "FPS";
+    $("#osdSparkline").textContent = overlayState.sparkline ? `График: ${graphName}` : "График: выкл";
+    $("#osdSparklinePoints").closest("svg").setAttribute("aria-label", `История: ${graphName}`);
     osd.dataset.style = overlayState.style;
     osd.dataset.surface = overlayState.surface || "";
     osd.style.setProperty("--osd-scale", (overlayState.scale / 100).toFixed(2));
@@ -1290,6 +1633,8 @@
     osd.style.padding = overlayState.padding === null
       ? ""
       : `${overlayState.padding}px ${overlayState.padding + 2}px`;
+    osd.style.setProperty("--osd-pad-x", `${(overlayState.padding ?? 9) + 2}px`);
+    osd.style.setProperty("--osd-pad-y", `${overlayState.padding ?? 9}px`);
     osd.style.rowGap = overlayState.rowGap === null ? "" : `${overlayState.rowGap}px`;
 
     // Цвета по элементам: значения и подписи независимо от пресета.
@@ -1363,8 +1708,18 @@
     osd.querySelectorAll(".osd__row").forEach((row) => {
       const position = overlayState.rowPositions[row.dataset.osdItem] || { x: 0, y: 0 };
       row.style.translate = `${position.x}px ${position.y}px`;
+      const metrics = [...row.querySelectorAll("[data-metric]")];
+      const size = overlayState.metricTextScale[metrics[0]?.dataset.metric] || 100;
+      row.toggleAttribute("data-custom-text", size !== 100);
+      row.style.setProperty("--row-text", ((overlayState.textScale / 100) * (size / 100)).toFixed(3));
+      for (const metric of metrics.slice(1)) {
+        const textSize = overlayState.metricTextScale[metric.dataset.metric] || 100;
+        metric.toggleAttribute("data-custom-text", textSize !== size);
+        metric.style.setProperty("--metric-text", ((overlayState.textScale / 100) * (textSize / 100)).toFixed(3));
+      }
     });
 
+    renderRtssVisual(osd);
     fitOverlay();
     const radiusValue = $("#osdRadiusValue");
     if (radiusValue) radiusValue.textContent = `${overlayState.radius === null ? 8 : overlayState.radius} px`;
@@ -1381,6 +1736,7 @@
       radius.value = String(shown);
       radius.style.setProperty("--fill", `${(shown / 24) * 100}%`);
     }
+    refreshRtssInspector();
     recordOverlayHistory();
   }
 
@@ -1388,6 +1744,9 @@
   // нужны после сброса пресета и после любой внешней правки состояния.
   function syncOsdControls() {
     $("#osdFollowGame").checked = overlayState.followGameMonitor;
+    $("#osdSparkline").textContent = overlayState.sparkline ? `График: ${
+      { fps: "FPS", cpu: "CPU", gpu: "GPU", frameMs: "кадр" }[overlayState.sparklineMetric] || "FPS"}`
+      : "График: выкл";
     $$("#osdSurface button").forEach((button) => button.classList.toggle("is-active",
       button.dataset.surface === overlayState.surface));
     $$("#osdStyles .style-tile").forEach((tile) => tile.classList.toggle("is-active",
@@ -1502,8 +1861,48 @@
     applyOverlay();
   }
 
+  function fitCanvasToOverlay() {
+    const scene = $("#gameScene");
+    const rect = $("#osdPreview").getBoundingClientRect();
+    const sceneRect = scene.getBoundingClientRect();
+    if (!scene.clientWidth || !scene.clientHeight || !rect.width || !rect.height) return;
+    const zoom = Math.max(overlayState.recipe === "rtss" && rtssVisual ? 0.05 : 0.75,
+      Math.min(4, canvasView.zoom * Math.min(
+        (scene.clientWidth - 28) / rect.width, (scene.clientHeight - 28) / rect.height)));
+    const centerX = (rect.left + rect.right) / 2 - sceneRect.left;
+    const centerY = (rect.top + rect.bottom) / 2 - sceneRect.top;
+    canvasView.panX = scene.clientWidth / 2 - (centerX - canvasView.panX) / canvasView.zoom * zoom;
+    canvasView.panY = scene.clientHeight / 2 - (centerY - canvasView.panY) / canvasView.zoom * zoom;
+    canvasView.zoom = zoom;
+    updateCanvasView();
+  }
+
   function bindCanvasView() {
     const scene = $("#gameScene");
+    $("#fitOsdCanvas").addEventListener("click", fitCanvasToOverlay);
+    $("#restoreOsdTemplate").addEventListener("click", () => {
+      if (overlayState.recipe === "rtss" && originalRtss) {
+        if (!Object.keys(overlayState.rtssLayerEdits).length) {
+          toast("Правок RTSS-слоёв нет");
+          return;
+        }
+        overlayState.rtssLayerEdits = {};
+        store.write("rtssLayerEdits", "{}");
+        renderOverlayLayers();
+      } else {
+        if (!Object.keys(overlayState.rowPositions).length
+          && overlayState.backgroundWidth === null && overlayState.backgroundHeight === null) {
+          toast("Раскладка уже соответствует шаблону");
+          return;
+        }
+        overlayState.rowPositions = {};
+        overlayState.backgroundWidth = null;
+        overlayState.backgroundHeight = null;
+      }
+      applyOverlay();
+      requestAnimationFrame(fitCanvasToOverlay);
+      toast("Раскладка возвращена к шаблону");
+    });
     let pan = null;
     scene.addEventListener("wheel", (event) => {
       event.preventDefault();
@@ -1573,12 +1972,119 @@
     const markRows = () => osd.querySelectorAll(".osd__row").forEach((node) => {
       node.classList.toggle("is-selected", selected.has(node.dataset.osdItem));
     });
+    $(".canvas-align").addEventListener("click", (event) => {
+      const edge = event.target.closest("[data-align]")?.dataset.align;
+      if (!edge) return;
+      const axis = edge === "top" || edge === "centerY" || edge === "bottom" ? "y" : "x";
+      const position = (rect) => edge === "left" ? rect.left : edge === "right" ? rect.right
+        : edge === "top" ? rect.top : edge === "bottom" ? rect.bottom
+          : axis === "x" ? (rect.left + rect.right) / 2 : (rect.top + rect.bottom) / 2;
+      if (overlayState.recipe === "rtss" && rtssVisual) {
+        const layers = [...selectedRtssLayers].map((id) =>
+          osd.querySelector(`.rtss-visual-layer[data-rtss-layer="${id.slice(5)}"]`)).filter(Boolean);
+        if (layers.length < 2) {
+          const plate = osd.getBoundingClientRect();
+          const scene = $("#gameScene").getBoundingClientRect();
+          const viewport = osd.offsetParent.getBoundingClientRect();
+          const fraction = edge === "left" || edge === "top" ? 0
+            : edge === "right" || edge === "bottom" ? 1 : 0.5;
+          const vertical = axis === "y";
+          const start = vertical ? scene.top : scene.left;
+          const extent = vertical ? scene.height : scene.width;
+          const size = vertical ? plate.height : plate.width;
+          const target = start + 18 + (extent - 36 - size) * fraction;
+          const current = vertical ? plate.top : plate.left;
+          if (Math.abs(target - current) < 0.5) return;
+          freeOverlayAnchor();
+          const origin = Math.max(0, Math.round((target
+            - (vertical ? viewport.top : viewport.left)) / canvasView.zoom));
+          overlayState[vertical ? "originY" : "originX"] = origin;
+          applyOverlay();
+          return;
+        }
+        const reference = layers[0].getBoundingClientRect();
+        const unit = Math.max(.001, osd.getBoundingClientRect().width / Math.max(1, osd.offsetWidth)
+          * rtssVisual.zoom);
+        for (const layer of layers.slice(1)) {
+          const index = Number(layer.dataset.rtssLayer);
+          const edit = overlayState.rtssLayerEdits[index] || {};
+          overlayState.rtssLayerEdits[index] = { ...edit,
+            [axis]: Math.max(-2048, Math.min(2048,
+              Math.round((edit[axis] || 0) + (position(reference) - position(layer.getBoundingClientRect())) / unit))) };
+        }
+        store.write("rtssLayerEdits", JSON.stringify(overlayState.rtssLayerEdits));
+        applyOverlay();
+        return;
+      }
+      const rows = [...osd.querySelectorAll(".osd__row")]
+        .filter((row) => selected.has(row.dataset.osdItem) && !row.classList.contains("is-hidden"));
+      if (!rows.length) { toast("Выберите видимую строку."); return; }
+      const reference = rows.length === 1 ? osd.getBoundingClientRect() : rows[0].getBoundingClientRect();
+      const unit = Math.max(.001, osd.getBoundingClientRect().width / Math.max(1, osd.offsetWidth));
+      for (const row of rows.length === 1 ? rows : rows.slice(1)) {
+        const offset = overlayState.rowPositions[row.dataset.osdItem] || { x: 0, y: 0 };
+        overlayState.rowPositions[row.dataset.osdItem] = { ...offset,
+          [axis]: Math.round(offset[axis] + (position(reference) - position(row.getBoundingClientRect())) / unit) };
+      }
+      applyOverlay();
+      recordOverlayHistory();
+    });
 
     osd.addEventListener("pointerdown", (event) => {
       if (event.button !== 0) return;
+      const rect = osd.getBoundingClientRect();
+      if (event.target.closest(".osd__padding-grip") && overlayState.recipe !== "rtss") {
+        drag = { padding: true, x: event.clientX, y: event.clientY,
+          start: overlayState.padding ?? 9, unit: rect.width / Math.max(1, osd.offsetWidth) };
+        overlayHistory.gesture = true;
+        osd.setPointerCapture(event.pointerId);
+        event.preventDefault();
+        return;
+      }
+      if (!(overlayState.recipe === "rtss" && rtssVisual) && rect.width >= 60 && rect.height >= 45
+        && event.clientX >= rect.right - 16 && event.clientY >= rect.bottom - 16) {
+        const background = overlayState.layout === "plates" && overlayState.recipe !== "rtss";
+        if (background) freeOverlayAnchor();
+        drag = { resize: true, background, x: event.clientX, y: event.clientY,
+          width: rect.width, height: rect.height, scale: overlayState.scale,
+          baseWidth: overlayState.backgroundWidth ?? osd.offsetWidth,
+          baseHeight: overlayState.backgroundHeight ?? osd.offsetHeight,
+          unit: Math.max(.001, rect.width / Math.max(1, osd.offsetWidth)) };
+        overlayHistory.gesture = true;
+        osd.setPointerCapture(event.pointerId);
+        osd.classList.add("is-resizing");
+        event.preventDefault();
+        return;
+      }
+      const rtssNode = !event.altKey && overlayState.recipe === "rtss"
+        ? event.target.closest(".rtss-visual-layer") : null;
+      if (rtssNode) {
+        const index = Number(rtssNode.dataset.rtssLayer);
+        const edit = overlayState.rtssLayerEdits[index] || {};
+        const id = `rtss:${index}`;
+        selectOverlayLayer(id, { toggle: event.ctrlKey, reset: !selectedRtssLayers.has(id) });
+        if (event.ctrlKey) { event.preventDefault(); return; }
+        const layer = rtssVisual.layers.find((item) => item.index === index);
+        const bounds = rtssNode.getBoundingClientRect();
+        const resizeRtss = bounds.width > 22 && bounds.height > 22
+          && event.clientX >= bounds.right - 12 && event.clientY >= bounds.bottom - 12;
+        drag = { rtss: index, resizeRtss, x: event.clientX, y: event.clientY,
+          unit: Math.max(.001, rect.width / Math.max(1, osd.offsetWidth) * rtssVisual.zoom),
+          offsets: [...selectedRtssLayers].map((item) => {
+            const layerEdit = overlayState.rtssLayerEdits[Number(item.slice(5))] || {};
+            return { index: Number(item.slice(5)), x: layerEdit.x || 0, y: layerEdit.y || 0 };
+          }),
+          width: edit.width || Math.round(layer.width / rtssVisual.zoom),
+          height: edit.height || Math.round(layer.height / rtssVisual.zoom) };
+        overlayHistory.gesture = true;
+        osd.setPointerCapture(event.pointerId);
+        event.preventDefault();
+        return;
+      }
       const row = overlayState.layout === "plates" && !event.altKey
         ? event.target.closest(".osd__row") : null;
-      if (row) selectOverlayLayer(row.querySelector("[data-metric]")?.dataset.metric || "fps");
+      if (row) selectOverlayLayer(event.target.closest("[data-metric]")?.dataset.metric
+        || row.querySelector("[data-metric]")?.dataset.metric || "fps");
       if (row && event.ctrlKey) {
         if (selected.has(row.dataset.osdItem)) selected.delete(row.dataset.osdItem);
         else selected.add(row.dataset.osdItem);
@@ -1587,19 +2093,21 @@
         return;
       }
       if (row) {
-        if (!selected.has(row.dataset.osdItem)) {
-          selected.clear();
-          selected.add(row.dataset.osdItem);
-        }
+        selected.clear();
+        selected.add(row.dataset.osdItem);
         markRows();
-      } else freeOverlayAnchor();
-      drag = {
-        x: event.clientX, y: event.clientY, row,
-        rows: row ? [...selected].map((key) => ({ key,
-          x: overlayState.rowPositions[key]?.x || 0,
-          y: overlayState.rowPositions[key]?.y || 0 })) : [],
-        originX: overlayState.originX, originY: overlayState.originY
-      };
+        const position = overlayState.rowPositions[row.dataset.osdItem] || { x: 0, y: 0 };
+        drag = event.shiftKey ? { reorder: row } : {
+          row, x: event.clientX, y: event.clientY,
+          startX: position.x, startY: position.y,
+          unit: Math.max(.001, rect.width / Math.max(1, osd.offsetWidth)),
+          bounds: row.getBoundingClientRect(), screen: osd.offsetParent.getBoundingClientRect()
+        };
+      } else {
+        freeOverlayAnchor();
+        drag = { x: event.clientX, y: event.clientY,
+          originX: overlayState.originX, originY: overlayState.originY };
+      }
       overlayHistory.gesture = true;
       guides.classList.add("is-active");
       osd.setPointerCapture(event.pointerId);
@@ -1609,71 +2117,146 @@
 
     osd.addEventListener("pointermove", (event) => {
       if (!drag) return;
+      if (drag.padding) {
+        const unit = Math.max(.001, drag.unit);
+        overlayState.padding = Math.max(0, Math.min(28,
+          Math.round(drag.start + ((event.clientX - drag.x) + (event.clientY - drag.y)) / (2 * unit))));
+        applyOverlay();
+        return;
+      }
+      if (drag.rtss !== undefined) {
+        const edit = overlayState.rtssLayerEdits[drag.rtss] || {};
+        if (drag.resizeRtss) {
+          overlayState.rtssLayerEdits[drag.rtss] = { ...edit,
+            width: Math.max(16, Math.min(2048, Math.round(drag.width + (event.clientX - drag.x) / drag.unit))),
+            height: Math.max(16, Math.min(2048, Math.round(drag.height + (event.clientY - drag.y) / drag.unit))) };
+        } else {
+          let dx = Math.round((event.clientX - drag.x) / drag.unit);
+          let dy = Math.round((event.clientY - drag.y) / drag.unit);
+          for (const start of drag.offsets) {
+            dx = Math.max(-2048 - start.x, Math.min(2048 - start.x, dx));
+            dy = Math.max(-2048 - start.y, Math.min(2048 - start.y, dy));
+          }
+          if (dx === 0 && dy === 0) return;
+          for (const start of drag.offsets) {
+            overlayState.rtssLayerEdits[start.index] = { ...overlayState.rtssLayerEdits[start.index],
+              x: start.x + dx, y: start.y + dy };
+          }
+        }
+        applyOverlay();
+        return;
+      }
+      if (drag.resize) {
+        if (drag.background) {
+          overlayState.backgroundWidth = Math.max(80, Math.min(2000,
+            Math.round(drag.baseWidth + (event.clientX - drag.x) / drag.unit)));
+          overlayState.backgroundHeight = Math.max(40, Math.min(1600,
+            Math.round(drag.baseHeight + (event.clientY - drag.y) / drag.unit)));
+        } else {
+          const deltaX = (event.clientX - drag.x) / Math.max(1, drag.width);
+          const deltaY = (event.clientY - drag.y) / Math.max(1, drag.height);
+          overlayState.scale = Math.max(70, Math.min(160,
+            Math.round(drag.scale * (1 + (deltaX + deltaY) / 2))));
+          syncOsdControls();
+        }
+        applyOverlay();
+        return;
+      }
+      if (drag.reorder) {
+        const target = document.elementFromPoint(event.clientX, event.clientY)?.closest(".osd__row");
+        if (!target || target === drag.reorder || !osd.contains(target)) return;
+        const rows = [...osd.querySelectorAll(".osd__row")];
+        if (rows.indexOf(drag.reorder) < rows.indexOf(target)) target.after(drag.reorder);
+        else target.before(drag.reorder);
+        overlayState.metricOrder = [...osd.querySelectorAll(".osd__row")]
+          .map((item) => item.querySelector("[data-metric]")?.dataset.metric).filter(Boolean);
+        applyOverlay();
+        return;
+      }
+      if (drag.row) {
+        const dx = Math.round((event.clientX - drag.x) / drag.unit);
+        const dy = Math.round((event.clientY - drag.y) / drag.unit);
+        if (dx === 0 && dy === 0) return;
+        const bounds = drag.bounds;
+        const screen = drag.screen;
+        const x = Math.max(-2048, Math.min(2048, drag.startX + dx));
+        const y = Math.max(-2048, Math.min(2048, drag.startY + dy));
+        const minX = Math.min(drag.startX, drag.startX + (screen.left - bounds.left) / drag.unit);
+        const maxX = Math.max(drag.startX, drag.startX + (screen.right - bounds.right) / drag.unit);
+        const minY = Math.min(drag.startY, drag.startY + (screen.top - bounds.top) / drag.unit);
+        const maxY = Math.max(drag.startY, drag.startY + (screen.bottom - bounds.bottom) / drag.unit);
+        overlayState.rowPositions[drag.row.dataset.osdItem] = {
+          x: Math.round(Math.max(minX, Math.min(maxX, x))),
+          y: Math.round(Math.max(minY, Math.min(maxY, y)))
+        };
+        applyOverlay();
+        return;
+      }
       const screen = osd.offsetParent.getBoundingClientRect();
       const plate = osd.getBoundingClientRect();
-      if (drag.row) {
-        const scale = plate.width / Math.max(1, osd.offsetWidth);
-        const primary = drag.rows.find((item) => item.key === drag.row.dataset.osdItem);
-        let nextX = primary.x + (event.clientX - drag.x) / scale;
-        let nextY = primary.y + (event.clientY - drag.y) / scale;
-        let guideY = null;
-        if (event.shiftKey) {
-          nextX = grid(nextX);
-          nextY = grid(nextY);
-        } else {
-          const others = [...osd.querySelectorAll(".osd__row:not(.is-hidden)")]
-            .filter((item) => !selected.has(item.dataset.osdItem));
-          const baseline = others.map((item) => item.offsetTop
-            + (overlayState.rowPositions[item.dataset.osdItem]?.y || 0) - drag.row.offsetTop);
-          const snapped = snap(nextY, 0, baseline);
-          nextY = snapped.value;
-          guideY = snapped.guide;
-        }
-        const dx = nextX - primary.x;
-        const dy = nextY - primary.y;
-        drag.rows.forEach((item) => {
-          const position = { x: item.x + dx, y: item.y + dy };
-          overlayState.rowPositions[item.key] = position;
-          const node = osd.querySelector(`[data-osd-item="${item.key}"]`);
-          if (node) node.style.translate = `${position.x}px ${position.y}px`;
-        });
-        showGuide("x", null);
-        showGuide("y", guideY === null ? null : (plate.top - screen.top) / canvasView.zoom
-          + (drag.row.offsetTop + guideY) * (scale / canvasView.zoom));
-      } else {
-        const width = screen.width / canvasView.zoom;
-        const height = screen.height / canvasView.zoom;
-        const plateWidth = plate.width / canvasView.zoom;
-        const plateHeight = plate.height / canvasView.zoom;
-        let x = drag.originX + (event.clientX - drag.x) / canvasView.zoom;
-        let y = drag.originY + (event.clientY - drag.y) / canvasView.zoom;
-        const xSnap = event.shiftKey ? { value: grid(x), guide: null }
-          : snap(x, plateWidth, [0, width * .05, width / 2, width * .95, width]);
-        const ySnap = event.shiftKey ? { value: grid(y), guide: null }
-          : snap(y, plateHeight, [0, height * .05, height / 2, height * .95, height]);
-        x = Math.max(0, Math.min(width - plateWidth, xSnap.value));
-        y = Math.max(0, Math.min(height - plateHeight, ySnap.value));
-        overlayState.originX = x;
-        overlayState.originY = y;
-        showGuide("x", xSnap.guide);
-        showGuide("y", ySnap.guide);
-        applyOverlay();
-      }
+      const width = screen.width / canvasView.zoom;
+      const height = screen.height / canvasView.zoom;
+      const plateWidth = plate.width / canvasView.zoom;
+      const plateHeight = plate.height / canvasView.zoom;
+      let x = drag.originX + (event.clientX - drag.x) / canvasView.zoom;
+      let y = drag.originY + (event.clientY - drag.y) / canvasView.zoom;
+      const xSnap = event.shiftKey ? { value: grid(x), guide: null }
+        : snap(x, plateWidth, [0, width * .05, width / 2, width * .95, width]);
+      const ySnap = event.shiftKey ? { value: grid(y), guide: null }
+        : snap(y, plateHeight, [0, height * .05, height / 2, height * .95, height]);
+      x = Math.max(0, Math.min(width - plateWidth, xSnap.value));
+      y = Math.max(0, Math.min(height - plateHeight, ySnap.value));
+      overlayState.originX = x;
+      overlayState.originY = y;
+      showGuide("x", xSnap.guide);
+      showGuide("y", ySnap.guide);
+      applyOverlay();
     });
 
     const release = (event) => {
       if (!drag) return;
+      const reordered = Boolean(drag.reorder);
+      if (drag.rtss !== undefined) store.write("rtssLayerEdits", JSON.stringify(overlayState.rtssLayerEdits));
+      if (drag.background) {
+        store.write("yawa.backgroundWidth", String(overlayState.backgroundWidth));
+        store.write("yawa.backgroundHeight", String(overlayState.backgroundHeight));
+      }
       drag = null;
       overlayHistory.gesture = false;
       recordOverlayHistory();
       guides.classList.remove("is-active");
       showGuide("x", null);
       showGuide("y", null);
-      osd.classList.remove("is-dragging");
+      osd.classList.remove("is-dragging", "is-resizing");
       if (osd.hasPointerCapture(event.pointerId)) osd.releasePointerCapture(event.pointerId);
+      if (reordered) rebuildOverlaySensors();
     };
     osd.addEventListener("pointerup", release);
     osd.addEventListener("pointercancel", release);
+    document.addEventListener("keydown", (event) => {
+      if (!$("[data-view=overlay]").classList.contains("is-active") || !selectedLayer.startsWith("rtss:")
+        || event.target.closest("input, textarea, select") || !event.key.startsWith("Arrow")) return;
+      const step = event.shiftKey ? 10 : 1;
+      const dx = event.key === "ArrowLeft" ? -step : event.key === "ArrowRight" ? step : 0;
+      const dy = event.key === "ArrowUp" ? -step : event.key === "ArrowDown" ? step : 0;
+      if (!dx && !dy) return;
+      moveSelectedRtss(dx, dy);
+      event.preventDefault();
+    });
+    osd.addEventListener("wheel", (event) => {
+      if (!event.ctrlKey && !event.shiftKey) return;
+      const step = event.deltaY < 0 ? 1 : -1;
+      if (event.ctrlKey && event.shiftKey) {
+        overlayState.rowGap = Math.max(0, Math.min(14, (overlayState.rowGap ?? 3) + step * 2));
+      } else if (event.ctrlKey) {
+        overlayState.scale = Math.max(70, Math.min(160, overlayState.scale + step * 5));
+      } else {
+        overlayState.padding = Math.max(0, Math.min(28, (overlayState.padding ?? 10) + step * 2));
+      }
+      event.preventDefault();
+      applyOverlay();
+      syncOsdControls();
+    }, { passive: false });
   }
 
   function bindOsdChrome() {
@@ -1825,6 +2408,323 @@
     return data;
   }
 
+  function rtssBase64(bytes) {
+    const chunks = [];
+    for (let offset = 0; offset < bytes.length; offset += 8192) {
+      chunks.push(String.fromCharCode(...bytes.slice(offset, offset + 8192)));
+    }
+    return btoa(chunks.join(""));
+  }
+
+  function rtssVisibleTemplate(source) {
+    return source.replace(/<[^>]{1,256}>/g, (tag) => /^<FR>$|^<(G|I)=/.test(tag) ? tag : "")
+      .replace(/\\[nr]/g, "\n").replace(/\\[tb]/g, " ");
+  }
+
+  function parseRtssVisual(encoded) {
+    const bytes = Uint8Array.from(atob(encoded), (letter) => letter.charCodeAt(0));
+    const text = new TextDecoder("windows-1251").decode(bytes);
+    const master = text.match(/^\[Master\]([\s\S]*?)(?=^\[|$(?![\s\S]))/mi)?.[1] || "";
+    const field = (body, name, fallback) => body.match(new RegExp(`^${name}=(.*)$`, "mi"))?.[1]?.trim() ?? fallback;
+    const zoom = Math.max(1, Math.min(8, Number(field(master, "ZoomRatio", "1")) || 1));
+    const fontHeight = Math.max(4, Math.min(64, Math.abs(Number(field(master, "FontHeight", "-13"))) || 13));
+    const cellHeight = zoom * fontHeight;
+    const cellWidth = cellHeight * 0.61;
+    const units = (value, vertical) => value < 0 ? -value * (vertical ? cellHeight : cellWidth)
+      : value * zoom;
+    const family = field(master, "FontFace", "Consolas").slice(0, 96).replaceAll("'", "");
+    const weight = Math.max(100, Math.min(900, Number(field(master, "FontWeight", "400")) || 400));
+    const measure = document.createElement("canvas").getContext("2d");
+    const color = (encoded) => encoded.split(",").slice(0, 12)
+      .find((entry) => /^[0-9a-f]{6}([0-9a-f]{2})?$/i.test(entry)) || "";
+    const count = Math.min(256, Number(text.match(/^Layers=(\d+)\s*$/mi)?.[1] || 0));
+    const layers = [];
+    let left = 0;
+    let top = 0;
+    let right = 0;
+    let bottom = 0;
+    for (const [, index, body] of text.matchAll(/^\[Layer(\d+)\]\s*$([\s\S]*?)(?=^\[|$(?![\s\S]))/gmi)) {
+      if (Number(index) >= count) continue;
+      const number = (name, fallback = 0) => Math.max(-512, Math.min(2048,
+        Number(field(body, name, String(fallback))) || fallback));
+      const label = field(body, "Text", "").slice(0, 8192);
+      const bg = color(field(body, "BgndColor", ""));
+      if (!label && !bg && !number("ExtentX") && !number("ExtentY")) continue;
+      const matchedImage = label.match(/^<I=0,0,(\d+),(\d+),(\d+),(\d+)>$/);
+      const imageTag = matchedImage && Number(matchedImage[1]) <= 2048
+        && Number(matchedImage[2]) <= 2048 && Number(matchedImage[3]) >= 1
+        && Number(matchedImage[4]) >= 1 && Number(matchedImage[3]) <= 2048
+        && Number(matchedImage[4]) <= 2048 ? matchedImage : null;
+      const visible = rtssVisibleTemplate(label).replace(/<[^>]*>|%[^%]*%/g, "нет данных");
+      const size = Math.max(10, Math.min(400, number("Size", 100)));
+      const extentX = number("ExtentX");
+      const extentY = number("ExtentY");
+      const fontSize = cellHeight * size / 100;
+      measure.font = `${weight} ${fontSize}px '${family}', Consolas, monospace`;
+      const layerWidth = units(extentX, false) || (imageTag ? Number(imageTag[3]) * zoom
+        : Math.min(1024 * zoom, Math.max(cellWidth,
+          ...visible.split("\n").map((line) => measure.measureText(line).width))));
+      const layerHeight = units(extentY, true) || (imageTag ? Number(imageTag[4]) * zoom
+        : fontSize * visible.split("\n").length);
+      const origin = Math.max(0, Math.min(8, number("ExtentOrigin")));
+      const x = units(number("PositionX"), false) - layerWidth * (origin % 3) / 2;
+      const y = units(number("PositionY"), true) - layerHeight * Math.floor(origin / 3) / 2;
+      layers.push({ index: Number(index), name: field(body, "Name", "").slice(0, 96),
+        label, bg, color: color(field(body, "TextColor", "")),
+        size,
+        origin, x, y, width: layerWidth, height: layerHeight,
+        autoWidth: !extentX, autoHeight: !extentY });
+      left = Math.min(left, x);
+      top = Math.min(top, y);
+      right = Math.max(right, x + layerWidth);
+      bottom = Math.max(bottom, y + layerHeight);
+    }
+    const sources = [...text.matchAll(/^\[Source\d+\]\s*$([\s\S]*?)(?=^\[|$(?![\s\S]))/gmi)]
+      .map(([, body]) => ({ name: field(body, "Name", ""),
+        provider: field(body, "Provider", ""), id: field(body, "ID", "") }));
+    return { layers, width: right - left, height: bottom - top, cellHeight, zoom, sources,
+      family, weight };
+  }
+
+  function renderRtssVisual(osd) {
+    const visualActive = overlayState.recipe === "rtss" && Boolean(originalRtss);
+    const wasVisual = osd.classList.contains("is-rtss-visual");
+    osd.classList.toggle("is-rtss-visual", visualActive);
+    osd.querySelector(".rtss-visual-canvas")?.remove();
+    if (!visualActive) {
+      if (wasVisual) renderOverlayLayers();
+      return;
+    }
+    if (rtssVisualSource !== originalRtss) {
+      rtssVisualSource = originalRtss;
+      try { rtssVisual = parseRtssVisual(originalRtss); } catch { rtssVisual = null; }
+      renderOverlayLayers();
+    }
+    if (!rtssVisual?.layers.length) {
+      osd.classList.remove("is-rtss-visual");
+      return;
+    }
+    const visibleLayers = rtssVisual.layers.filter(
+      (layer) => overlayState.rtssLayerEdits[layer.index]?.visible !== false);
+    const canvas = document.createElement("div");
+    canvas.className = "rtss-visual-canvas";
+    const metrics = { "<fr>": "fps", "%framerate%": "fps", "%frametime%": "frameMs",
+      "%cpu usage%": "cpu", "%cpu temperature%": "cpuTemp", "%cpu clock%": "cpuClock",
+      "%cpu power%": "cpuPower", "%gpu1 usage%": "gpu", "%gpu1 temperature%": "gpuTemp",
+      "%gpu1 clock%": "gpuClock", "%gpu1 power%": "gpuPower",
+      "%gpu1 memory usage%": "vramUsed", "%total ram%": "ramUsed" };
+    const displayedText = (source) => rtssVisibleTemplate(source).replace(/<[^>]*>|%[^%]*%/g, (tag) => {
+      const metric = metrics[tag.toLowerCase()];
+      if (!metric) return "нет данных";
+      if (tag.toLowerCase() !== "<fr>") {
+        const name = tag.slice(1, -1).toLowerCase();
+        const matching = rtssVisual.sources.filter((entry) => entry.name.toLowerCase() === name);
+        if (!matching.length || matching.some((entry) => entry.provider !== "HAL"
+          || entry.id !== entry.name)) return "нет данных";
+      }
+      const value = osd.querySelector(`[data-metric="${metric}"]`)?.textContent?.trim() || "нет данных";
+      return value === "нет данных" ? value : value.split(/[ %°/]/, 1)[0];
+    }).replace(/\\[nrtb]/g, " ");
+    const measure = document.createElement("canvas").getContext("2d");
+    const family = rtssVisual.family.replaceAll("'", "");
+    const imageRect = (source) => {
+      const tag = source.match(/^<I=0,0,(\d+),(\d+),(\d+),(\d+)>$/);
+      if (!tag) return null;
+      const fields = tag.slice(1).map(Number);
+      return fields[0] <= 2048 && fields[1] <= 2048
+        && fields[2] >= 1 && fields[2] <= 2048 && fields[3] >= 1 && fields[3] <= 2048
+        ? fields : null;
+    };
+    const extents = new Map(visibleLayers.map((layer) => {
+      const edit = overlayState.rtssLayerEdits[layer.index] || {};
+      const source = edit.text ?? layer.label;
+      const lines = displayedText(source).split("\n");
+      const size = edit.size || layer.size;
+      const cellWidth = rtssVisual.cellHeight * 0.61;
+      const fontSize = rtssVisual.cellHeight * size / 100;
+      const imageTag = imageRect(source);
+      measure.font = `${rtssVisual.weight} ${fontSize}px '${family}', Consolas, monospace`;
+      return [layer.index, {
+        width: edit.width > 0 ? edit.width * rtssVisual.zoom : layer.autoWidth
+          ? imageTag ? imageTag[2] * rtssVisual.zoom
+            : Math.min(1024 * rtssVisual.zoom, Math.max(cellWidth,
+              ...lines.map((line) => measure.measureText(line).width))) : layer.width,
+        height: edit.height > 0 ? edit.height * rtssVisual.zoom : layer.autoHeight
+          ? imageTag ? imageTag[3] * rtssVisual.zoom : fontSize * lines.length : layer.height,
+      }];
+    }));
+    const layerWidth = (layer) => extents.get(layer.index).width;
+    const layerHeight = (layer) => extents.get(layer.index).height;
+    const layerX = (layer) => layer.x + (layer.width - layerWidth(layer)) * (layer.origin % 3) / 2
+      + (overlayState.rtssLayerEdits[layer.index]?.x || 0) * rtssVisual.zoom;
+    const layerY = (layer) => layer.y + (layer.height - layerHeight(layer)) * Math.floor(layer.origin / 3) / 2
+      + (overlayState.rtssLayerEdits[layer.index]?.y || 0) * rtssVisual.zoom;
+    const minX = Math.min(0, ...visibleLayers.map(layerX));
+    const minY = Math.min(0, ...visibleLayers.map(layerY));
+    canvas.style.width = `${Math.max(1, ...visibleLayers.map((layer) =>
+      layerX(layer) + layerWidth(layer))) - minX}px`;
+    canvas.style.height = `${Math.max(1, ...visibleLayers.map((layer) =>
+      layerY(layer) + layerHeight(layer))) - minY}px`;
+    canvas.style.fontFamily = `'${rtssVisual.family.replaceAll("'", "")}', Consolas, monospace`;
+    canvas.style.fontWeight = String(rtssVisual.weight);
+    const paint = (encoded, fallback) => /^[0-9a-f]{6}([0-9a-f]{2})?$/i.test(encoded)
+      ? encoded.length === 8 ? `#${encoded.slice(2)}${encoded.slice(0, 2)}` : `#${encoded}` : fallback;
+    for (const layer of visibleLayers) {
+      const edit = overlayState.rtssLayerEdits[layer.index] || {};
+      const node = document.createElement("span");
+      node.className = `rtss-visual-layer${selectedRtssLayers.has(`rtss:${layer.index}`) ? " is-selected" : ""}`;
+      node.dataset.rtssLayer = String(layer.index);
+      node.style.left = `${layerX(layer) - minX}px`;
+      node.style.top = `${layerY(layer) - minY}px`;
+      node.style.width = `${layerWidth(layer)}px`;
+      node.style.height = `${layerHeight(layer)}px`;
+      node.style.fontSize = `${rtssVisual.cellHeight * (edit.size || layer.size) / 100}px`;
+      node.style.color = paint(edit.textColor ?? layer.color, "#fff");
+      node.style.backgroundColor = paint(edit.backgroundColor ?? layer.bg, "transparent");
+      const source = edit.text ?? layer.label;
+      const imageTag = imageRect(source);
+      if (rtssImageUrl && imageTag) {
+        const [imageX, imageY, imageWidth, imageHeight] = imageTag;
+        const picture = document.createElement("img");
+        picture.alt = "";
+        picture.style.visibility = "hidden";
+        picture.onload = () => {
+          if (picture.naturalWidth > 2048 || picture.naturalHeight > 2048
+            || imageX + imageWidth > picture.naturalWidth
+            || imageY + imageHeight > picture.naturalHeight) {
+            node.textContent = "нет данных";
+            return;
+          }
+          const scaleX = layerWidth(layer) / imageWidth;
+          const scaleY = layerHeight(layer) / imageHeight;
+          picture.style.width = `${picture.naturalWidth * scaleX}px`;
+          picture.style.height = `${picture.naturalHeight * scaleY}px`;
+          picture.style.marginLeft = `${-imageX * scaleX}px`;
+          picture.style.marginTop = `${-imageY * scaleY}px`;
+          picture.style.visibility = "visible";
+        };
+        picture.onerror = () => { node.textContent = "нет данных"; };
+        picture.src = rtssImageUrl;
+        node.replaceChildren(picture);
+      } else node.textContent = displayedText(source);
+      if (!node.textContent.trim() && source && !imageTag) node.textContent = "н/д";
+      const graph = source.match(/^<G=(Frametime|Framerate 1% Low|CPU usage|GPU1 usage),.*,(10|80|81)>$/);
+      if (graph) {
+        const external = graph[1] === "CPU usage" || graph[1] === "GPU1 usage";
+        const matching = rtssVisual.sources.filter((entry) => entry.name === graph[1]);
+        const available = !external || (matching.length > 0 && matching.every((entry) =>
+          entry.provider === "HAL" && entry.id === graph[1]));
+        const sensor = { Frametime: "frameMs", "Framerate 1% Low": "fpsLow1",
+          "CPU usage": "cpu", "GPU1 usage": "gpu" }[graph[1]];
+        const history = available ? lastSnapshot?.sensors.get(sensor)?.history?.slice(-32) : null;
+        if (history?.length >= 2 && history.every((value) => Number.isFinite(value)
+          && (external ? value >= 0 : value > 0))) {
+          const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+          svg.setAttribute("viewBox", `0 0 ${layerWidth(layer)} ${layerHeight(layer)}`);
+          svg.setAttribute("width", String(layerWidth(layer)));
+          svg.setAttribute("height", String(layerHeight(layer)));
+          const ceiling = Math.max(graph[1] === "Frametime" ? 33 : external ? 100 : 1, ...history);
+          const points = history.map((value, index) =>
+            `${index * layerWidth(layer) / (history.length - 1)},${layerHeight(layer) *
+              (1 - Math.min(1, value / ceiling))}`).join(" ");
+          const shape = document.createElementNS("http://www.w3.org/2000/svg",
+            graph[2] === "81" ? "polygon" : "polyline");
+          shape.setAttribute("points", graph[2] === "81"
+            ? `0,${layerHeight(layer)} ${points} ${layerWidth(layer)},${layerHeight(layer)}` : points);
+          shape.setAttribute(graph[2] === "81" ? "fill" : "stroke", paint(edit.textColor ?? layer.color, "#fff"));
+          if (graph[2] !== "81") shape.setAttribute("fill", "none");
+          svg.append(shape);
+          node.replaceChildren(svg);
+        }
+      }
+      canvas.append(node);
+    }
+    osd.append(canvas);
+  }
+
+  function unpackOvx(bytes) {
+    const error = () => { throw new Error("Повреждённый или неподдерживаемый RTSS .ovx"); };
+    const signature = (array, at) => String.fromCharCode(...array.slice(at, at + 4));
+    if (bytes.length < 26 || bytes.length > 8 * 1024 * 1024
+      || signature(bytes, 0) !== "0CDU" || signature(bytes, 20) !== "0WZL") error();
+    const header = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    const size = header.getUint32(4, true);
+    if (size < 22 || size > 24 * 1024 * 1024 || header.getUint32(8, true) !== bytes.length - 24) error();
+    const compressed = bytes.subarray(24);
+    const output = new Uint8Array(size);
+    const dictionary = Array.from({ length: 4096 }, (_, code) => code < 256 ? Uint8Array.of(code) : null);
+    let bitOffset = 0;
+    let written = 0;
+    let width = 9;
+    let nextCode = 258;
+    let previous = null;
+    let started = false;
+    let finished = false;
+    while (bitOffset + width <= compressed.length * 8) {
+      let code = 0;
+      for (let bit = 0; bit < width; ++bit) {
+        const at = bitOffset + bit;
+        code |= ((compressed[at >> 3] >> (at & 7)) & 1) << bit;
+      }
+      bitOffset += width;
+      if (code === 256) {
+        nextCode = 258; width = 9; previous = null; started = true;
+        continue;
+      }
+      if (!started) error();
+      if (code === 257) { finished = true; break; }
+      if (code > nextCode || (code === nextCode && !previous)) error();
+      const value = code === nextCode ? Uint8Array.from([...previous, previous[0]]) : dictionary[code];
+      if (!value || !value.length || value.length > size - written) error();
+      output.set(value, written);
+      written += value.length;
+      if (previous && nextCode < 4096) {
+        dictionary[nextCode] = Uint8Array.from([...previous, value[0]]);
+        nextCode++;
+        if (nextCode === (1 << width) && width < 12) width++;
+      }
+      previous = value;
+    }
+    if (!finished || written !== size) error();
+    for (; bitOffset < compressed.length * 8; ++bitOffset) {
+      if ((compressed[bitOffset >> 3] >> (bitOffset & 7)) & 1) error();
+    }
+    if (signature(output, 0) !== "0AZS") error();
+    const archive = new DataView(output.buffer);
+    const count = archive.getUint32(8, true);
+    if (archive.getUint32(4, true) !== size || count < 1 || count > 64) error();
+    const names = new Set();
+    let cursor = 12;
+    let layout = null;
+    let resources = 0;
+    const images = new Map();
+    for (let index = 0; index < count; ++index) {
+      if (cursor + 8 > size) error();
+      const entry = archive.getUint32(cursor, true);
+      const length = archive.getUint32(cursor + 4, true);
+      cursor += 8;
+      if (entry > size - cursor || length > entry || entry - length < 2 || entry - length > 257
+        || output[cursor + entry - 1] !== 0) error();
+      const nameBytes = output.subarray(cursor + length, cursor + entry - 1);
+      if (nameBytes.includes(0)) error();
+      const name = new TextDecoder("windows-1251").decode(nameBytes);
+      if (!name || name.includes("..") || /[\\/:]/.test(name) || names.has(name)) error();
+      names.add(name);
+      if (name.toLowerCase().endsWith(".ovl")) {
+        if (layout || length > 1024 * 1024) error();
+        layout = output.slice(cursor, cursor + length);
+      } else {
+        resources++;
+        if (name.toLowerCase().endsWith(".png") && length <= 4 * 1024 * 1024) {
+          images.set(name.toLowerCase(), output.slice(cursor, cursor + length));
+        }
+      }
+      cursor += entry;
+    }
+    if (cursor !== size || !layout?.length) error();
+    return { layout, resources, images };
+  }
+
   function bindOsdStyles() {
     const gallery = $("#osdStyles");
     gallery.querySelectorAll(".style-tile").forEach((tile) => { tile.dataset.recipe = tile.dataset.style; });
@@ -1883,11 +2783,122 @@
       applyOverlay();
     });
     const fileInput = $("#importOsdRecipeFile");
+    $("#exportOsdOvx").disabled = !originalOvx;
+    $("#rtssOmittedHint").textContent = rtssOmittedLayers
+      ? `RTSS: ${rtssOmittedLayers} слоёв без связанной метрики` : "";
     $("#importOsdRecipe").addEventListener("click", () => fileInput.click());
     fileInput.addEventListener("change", async () => {
-      const file = fileInput.files?.[0];
+      const file = [...(fileInput.files || [])].find((entry) => /\.(json|ovl|ovx)$/i.test(entry.name));
       if (!file) return;
       try {
+        const isOvx = file.name.toLowerCase().endsWith(".ovx");
+        if (isOvx || file.name.toLowerCase().endsWith(".ovl")) {
+          if (file.size > (isOvx ? 8 * 1024 * 1024 : 1024 * 1024)) {
+            throw new Error("Файл RTSS слишком большой");
+          }
+          const inputBytes = new Uint8Array(await file.arrayBuffer());
+          const { layout: bytes, resources, images } = isOvx ? unpackOvx(inputBytes)
+            : { layout: inputBytes, resources: 0, images: new Map() };
+          const text = new TextDecoder("windows-1251").decode(bytes);
+          const settingsBody = text.match(/^\[Settings\]([\s\S]*?)(?=^\[|$(?![\s\S]))/mi)?.[1] || "";
+          const embedded = settingsBody.match(/^EmbeddedImage=(.*)$/mi)?.[1]?.trim() || "";
+          let image = null;
+          if (/^[^/\\:]+\.png$/i.test(embedded) && !embedded.includes("..")) {
+            image = images.get(embedded.toLowerCase()) || null;
+            if (!image && !isOvx) {
+              const sibling = [...fileInput.files].find((entry) =>
+                entry.name.toLowerCase() === embedded.toLowerCase() && entry.size <= 4 * 1024 * 1024);
+              if (sibling) image = new Uint8Array(await sibling.arrayBuffer());
+            }
+          }
+          if (image && (image.length < 24 || image.length > 4 * 1024 * 1024
+            || String.fromCharCode(...image.slice(0, 8)) !== "\x89PNG\r\n\x1a\n")) image = null;
+          const missingImage = Boolean(embedded && !image);
+          if (!/^Implementation=2\s*$/mi.test(text) || !/^Layers=([1-9]\d*)\s*$/mi.test(text)) {
+            throw new Error("Ожидался текстовый шаблон RTSS OverlayEditor v2");
+          }
+          const layers = Number(text.match(/^Layers=(\d+)\s*$/mi)[1]);
+          if (layers > 256) throw new Error("Слишком много слоёв RTSS");
+          const known = new Map([["<fr>", "fps"], ["%framerate%", "fps"],
+            ["%frametime%", "frameMs"], ["%cpu usage%", "cpu"],
+            ["%cpu temperature%", "cpuTemp"], ["%cpu clock%", "cpuClock"],
+            ["%cpu power%", "cpuPower"], ["%gpu1 usage%", "gpu"],
+            ["%gpu1 temperature%", "gpuTemp"], ["%gpu1 clock%", "gpuClock"],
+            ["%gpu1 power%", "gpuPower"], ["%gpu1 memory usage%", "vramUsed"],
+            ["%total ram%", "ramUsed"]]);
+          const count = Number(text.match(/^Sources=(\d+)\s*$/mi)?.[1] ?? -1);
+          const sourceSections = [...text.matchAll(/^\[Source(\d+)\]\s*$([\s\S]*?)(?=^\[|$(?![\s\S]))/gmi)];
+          const sources = sourceSections.filter(([, index]) => Number(index) < count).map(([, , body]) => ({
+            name: body.match(/^Name=(.*)$/mi)?.[1]?.trim(),
+            provider: body.match(/^Provider=(.*)$/mi)?.[1]?.trim(),
+            id: body.match(/^ID=(.*)$/mi)?.[1]?.trim()
+          }));
+          const hasHal = (tag) => {
+            if (tag === "<fr>") return true;
+            const name = tag.slice(1, -1);
+            const matches = sources.filter((source) => source.name?.toLowerCase() === name);
+            return matches.length > 0 && matches.every((source) => source.provider === "HAL"
+              && source.id === source.name);
+          };
+          const chosen = new Set();
+          const colors = {};
+          let omitted = 0;
+          const sections = [...text.matchAll(/^\[Layer(\d+)\]\s*$([\s\S]*?)(?=^\[|$(?![\s\S]))/gmi)];
+          for (const [, index, body] of sections) {
+            if (Number(index) >= layers) continue;
+            const line = body.match(/^Text=(.*)$/mi)?.[1]?.trim().toLowerCase();
+            const encoded = body.match(/^TextColor=([A-Fa-f0-9]{6}(?:[A-Fa-f0-9]{2})?)\s*$/mi)?.[1];
+            let recognized = false;
+            for (const [tag, metric] of known) {
+              if (!line?.includes(tag) || !hasHal(tag)) continue;
+              recognized = true;
+              if (!chosen.has(metric) && encoded) {
+                colors[metric] = encoded.length === 8
+                  ? `#${encoded.slice(2)}${encoded.slice(0, 2)}`.toUpperCase()
+                  : `#${encoded}FF`.toUpperCase();
+              }
+              chosen.add(metric);
+            }
+            if (!recognized) omitted++;
+          }
+          if (!sections.some(([, index]) => Number(index) < layers)) {
+            throw new Error("В шаблоне нет слоёв RTSS");
+          }
+          const preflight = parseRtssVisual(rtssBase64(bytes));
+          if (!preflight.layers.length || preflight.width <= 0 || preflight.height <= 0
+            || !preflight.layers.some((layer) => layer.label || layer.bg)) {
+            throw new Error("RTSS-макет не даёт видимого кадра. Текущий оверлей не изменён");
+          }
+          if (!window.confirm(`Это предварительная отрисовка, не копия RTSS 1:1. ${omitted} слоёв `
+              + "без связанной метрики. Фон, текст и координаты переносятся, "
+              + "графики и сложные теги частичны, PNG-атлас рисуется только для поддерживаемого тега. "
+              + (missingImage ? `PNG «${embedded}» не найден: слои изображения покажут «нет данных». ` : "")
+              + "Для .ovl выберите макет и его PNG одновременно. Открыть макет?")) return;
+          setRtssImage(image ? rtssBase64(image) : "");
+          store.write("rtssImage", rtssImage);
+          originalRtss = rtssBase64(bytes);
+          originalOvx = isOvx ? rtssBase64(inputBytes) : "";
+          overlayState.rtssLayerEdits = {};
+          selectedRtssLayers.clear();
+          selectedLayer = "fps";
+          store.write("rtssLayerEdits", "{}");
+          rtssOmittedLayers = omitted;
+          const persisted = store.write("rtssOriginal", originalRtss)
+            && store.write("rtssExchange", originalOvx);
+          store.write("rtssOmittedLayers", String(omitted));
+          $("#exportOsdOvx").disabled = !originalOvx;
+          $("#rtssOmittedHint").textContent = omitted
+            ? `RTSS: ${omitted} слоёв без связанной метрики` : "";
+          gallery.querySelector('[data-recipe="rtss"]').click();
+          for (const [id, entry] of sensorRows) entry.sensor.pinned = chosen.has(id);
+          overlayState.metricOrder = [...chosen];
+          overlayState.metricRgba = colors;
+          saveOverlaySensors(); rebuildOverlaySensors(); applySensorFilter(); applyOverlay();
+          requestAnimationFrame(fitCanvasToOverlay);
+          toast(`RTSS: ${omitted} слоёв без связанной метрики, ${resources} ресурсов в пакете; `
+            + (persisted ? "сохранено для обратного экспорта" : "сохранено до закрытия вкладки"));
+          return;
+        }
         if (file.size > 16384) throw new Error("Файл рецепта слишком большой (предел 16 КБ)");
         const data = parseOverlayRecipeJson(await file.text());
         const fonts = ["sans", "mono", "condensed", "dense"];
@@ -1915,6 +2926,66 @@
       } finally {
         fileInput.value = "";
       }
+    });
+    $("#exportOsdOvx").addEventListener("click", () => {
+      if (!originalOvx) return;
+      const bytes = Uint8Array.from(atob(originalOvx), (symbol) => symbol.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "rtss-original.ovx";
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast("Исходный .ovx сохранён без изменений; правки Yawa в него не включены");
+    });
+    $("#exportOsdRtss").addEventListener("click", () => {
+      if (originalRtss && window.confirm("Экспортировать исходный RTSS .ovl без изменений?\n"
+          + "ОК — оригинал; Отмена — новый .ovl только из показателей Yawa.\n"
+          + "Правки мастерской не изменяют оригинал; внешние картинки зависят от своих путей.")) {
+        const bytes = Uint8Array.from(atob(originalRtss), (symbol) => symbol.charCodeAt(0));
+        const url = URL.createObjectURL(new Blob([bytes], { type: "application/octet-stream" }));
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "rtss-original.ovl";
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        toast("Исходный RTSS .ovl экспортирован без изменений");
+        return;
+      }
+      const sources = new Map([["fps", ["<FR>", "", "FPS"]],
+        ["frameMs", ["%Frametime%", "Frametime", "ms"]],
+        ["cpu", ["%CPU usage%", "CPU usage", "%"]],
+        ["cpuTemp", ["%CPU temperature%", "CPU temperature", "C"]],
+        ["cpuClock", ["%CPU clock%", "CPU clock", "MHz"]],
+        ["cpuPower", ["%CPU power%", "CPU power", "W"]],
+        ["gpu", ["%GPU1 usage%", "GPU1 usage", "%"]],
+        ["gpuTemp", ["%GPU1 temperature%", "GPU1 temperature", "C"]],
+        ["gpuClock", ["%GPU1 clock%", "GPU1 clock", "MHz"]],
+        ["gpuPower", ["%GPU1 power%", "GPU1 power", "W"]],
+        ["vramUsed", ["%GPU1 memory usage%", "GPU1 memory usage", "MB"]],
+        ["ramUsed", ["%Total RAM%", "Total RAM", "MB"]]]);
+      const ordered = [...new Set([...overlayState.metricOrder, ...sensorRows.keys()])];
+      const rows = ordered.filter((id) => sensorRows.get(id)?.sensor.pinned && sources.has(id));
+      if (!rows.length) { toast("Нет показателей для экспорта в RTSS"); return; }
+      const sourceRows = rows.filter((id) => sources.get(id)[1]);
+      let text = `[Master]\r\nImplementation=2\r\nFontFace=Consolas\r\nFontHeight=-9\r\nFontWeight=400\r\nZoomRatio=3\r\n[Settings]\r\nRefreshPeriod=1000\r\n[General]\r\nSources=${sourceRows.length}\r\nTables=0\r\nLayers=${rows.length}\r\n`;
+      sourceRows.forEach((id, index) => {
+        const [, name, units] = sources.get(id);
+        text += `[Source${index}]\r\nName=${name}\r\nUnits=${units}\r\nFormat=\r\nFormula=\r\nProvider=HAL\r\nID=${name}\r\n`;
+      });
+      rows.forEach((id, index) => {
+        const [tag, name] = sources.get(id);
+        const rgba = overlayState.metricRgba[id];
+        const color = /^#[0-9A-Fa-f]{8}$/.test(rgba) ? `${rgba.slice(7)}${rgba.slice(1, 7)}` : "FFFFFFFF";
+        text += `[Layer${index}]\r\nName=${name || "Framerate"}\r\nText=${tag}\r\nPositionX=4\r\nPositionY=${5 + index * 14}\r\nExtentX=0\r\nExtentY=0\r\nExtentOrigin=0\r\nFixedAlignment=1\r\nTextColor=${color}\r\n`;
+      });
+      const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "yawa-overlay.ovl";
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast("Экспортированы только датчики RTSS HAL и FPS; проверьте шаблон в RTSS");
     });
     $("#exportOsdRecipe").addEventListener("click", () => {
       const { recipe, style, layout, surface, font, scale } = overlayState;
@@ -2025,6 +3096,34 @@
     $("#osdFollowGame").addEventListener("change", (event) => {
       overlayState.followGameMonitor = event.target.checked;
       recordOverlayHistory();
+    });
+    $("#osdSparkline").addEventListener("click", () => {
+      const choices = ["fps", "cpu", "gpu", "frameMs"];
+      if (!overlayState.sparkline) {
+        overlayState.sparkline = true;
+        overlayState.sparklineMetric = choices[0];
+      } else {
+        const next = choices.indexOf(overlayState.sparklineMetric) + 1;
+        if (next === choices.length) overlayState.sparkline = false;
+        else overlayState.sparklineMetric = choices[next];
+      }
+      sparklineHistory.length = 0;
+      $("#osdSparklinePoints").setAttribute("points", "");
+      applyOverlay();
+    });
+    $("#osdMenuScene").addEventListener("click", () => {
+      $("#osdPreview").classList.toggle("is-menu-scene");
+      applyOverlay();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.ctrlKey && event.key === "F11" && $("[data-view=overlay]").classList.contains("is-active")) {
+        event.preventDefault();
+        $("#osdMenuScene").click();
+      }
+    });
+    $("#osdMenuOpacity").addEventListener("input", (event) => {
+      overlayState.menuOpacity = Number(event.target.value);
+      applyOverlay();
     });
 
     $("#osdLayout").addEventListener("click", (event) => {
@@ -2350,6 +3449,18 @@
   }
 
   function restorePreferences() {
+    try {
+      const sizes = JSON.parse(store.read("yawa.metricTextScale") || "{}");
+      overlayState.metricTextScale = Object.fromEntries(Object.entries(sizes)
+        .filter(([id, size]) => sensorRows.has(id) && Number.isInteger(size) && size >= 70 && size <= 200));
+    } catch (error) { overlayState.metricTextScale = {}; }
+    for (const [field, key, min, max] of [
+      ["backgroundWidth", "yawa.backgroundWidth", 80, 2000],
+      ["backgroundHeight", "yawa.backgroundHeight", 40, 1600]
+    ]) {
+      const number = Number(store.read(key));
+      if (Number.isInteger(number) && number >= min && number <= max) overlayState[field] = number;
+    }
     const accent = store.read("yawa.accent");
     if (accent) applyAccent(accent);
 
@@ -2395,6 +3506,38 @@
     document.body.classList.add("no-fx");
   }
 
+  const workshopFields = $$(".workshop-inspector > .field");
+  let textFields = false;
+  workshopFields.forEach((field) => {
+    if (field.querySelector("#osdFont")) textFields = true;
+    if (field.querySelector("#osdOffsetValue")) textFields = false;
+    field.dataset.editorPanel = textFields ? "text" : "appearance";
+  });
+  const showWorkshopSection = (section) => {
+    $("#overlayGrid").dataset.section = section;
+    $$(".workshop-nav button").forEach((button) => {
+      button.classList.toggle("is-active", button.dataset.editorSection === section);
+    });
+    workshopFields.forEach((field) => {
+      field.classList.toggle("is-visible", section === "assemble" ? field.classList.contains("quick-field")
+        : section !== "rows" && field.dataset.editorPanel === section);
+    });
+  };
+  $(".workshop-nav").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-editor-section]");
+    if (button) showWorkshopSection(button.dataset.editorSection);
+  });
+  showWorkshopSection("assemble");
+  $("#workshopImport").addEventListener("click", () => $("#importOsdRecipeFile").click());
+  $("#workshopExport").addEventListener("click", () => $("#exportOsdRecipe").click());
+  $("#toggleCanvasWorkspace").addEventListener("click", (event) => {
+    const focused = $("#overlayGrid").dataset.focus !== "true";
+    $("#overlayGrid").dataset.focus = String(focused);
+    event.currentTarget.textContent = focused ? "Настройки →" : "Большой холст →";
+    event.currentTarget.setAttribute("aria-pressed", String(focused));
+    requestAnimationFrame(fitCanvasToOverlay);
+  });
+
   bindPause();
   bindAccents();
   bindOverlay();
@@ -2412,6 +3555,7 @@
   bindPerfLegend();
   bindDiagnosisPreview();
   restorePreferences();
+  requestAnimationFrame(fitCanvasToOverlay);
   overlayHistory.undo = [];
   overlayHistory.redo = [];
   overlayHistory.committed = JSON.stringify(overlayState);

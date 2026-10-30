@@ -70,6 +70,50 @@ inline int originOnMonitor(int origin, int monitorStart)
     return std::max(0, origin - monitorStart);
 }
 
+inline int resizeRtssExtent(int start, int pixels, float scale)
+{
+    const int delta = static_cast<int>(std::lround(static_cast<float>(pixels) / std::max(0.001f, scale)));
+    return delta == 0 ? start : std::clamp(start + delta, 16, 2048);
+}
+
+// Сдвиг к левой/центральной/правой или верхней/средней/нижней границе опорной строки.
+inline float alignCanvasEdge(
+    float referenceStart, float referenceEnd, float itemStart, float itemEnd, int edge)
+{
+    const float fraction = edge == 0 ? 0.0f : edge == 1 ? 0.5f : 1.0f;
+    return referenceStart + (referenceEnd - referenceStart) * fraction - itemStart
+        - (itemEnd - itemStart) * fraction;
+}
+
+// Не телепортируем строку при нулевом сдвиге, даже если она уже выходит за экран.
+inline int clampDraggedRow(int candidate, int start, int minimumDelta, int maximumDelta)
+{
+    return std::clamp(candidate, start + std::min(0, minimumDelta), start + std::max(0, maximumDelta));
+}
+
+struct CanvasFit
+{
+    float zoom = 1.0f;
+    float panX = 0.0f;
+    float panY = 0.0f;
+};
+
+// Масштабируется только вид холста; экранные координаты и настройки оверлея не меняются.
+inline CanvasFit fitCanvasContent(
+    ScreenBox content, float viewportWidth, float viewportHeight, float desktopWidth)
+{
+    if (content.right <= content.left || content.bottom <= content.top || viewportWidth <= 32.0f
+        || viewportHeight <= 32.0f || desktopWidth <= 0.0f) {
+        return { };
+    }
+    const float baseScale = viewportWidth / desktopWidth;
+    const float fitScale = std::min((viewportWidth - 28.0f) / (content.right - content.left),
+        (viewportHeight - 28.0f) / (content.bottom - content.top));
+    const float zoom = std::clamp(fitScale / baseScale, 0.15f, 20.0f);
+    return { zoom, viewportWidth * 0.5f - (content.left + content.right) * 0.5f * baseScale * zoom,
+        viewportHeight * 0.5f - (content.top + content.bottom) * 0.5f * baseScale * zoom };
+}
+
 // Ось холста в пикселях окна; screenCoord — пиксели виртуального экрана.
 struct CanvasAxis
 {

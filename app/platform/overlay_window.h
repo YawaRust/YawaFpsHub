@@ -10,6 +10,7 @@
 #include <d2d1.h>
 #include <dwrite.h>
 
+#include <cstdint>
 #include <functional>
 #include <optional>
 #include <string>
@@ -31,6 +32,7 @@ public:
     void destroy();
 
     void setSettings(const OverlaySettings& settings);
+    void setMenuSceneOpacity(std::optional<int> opacity);
     void setGameMonitor(const RECT* monitor);
     void setAccent(Accent accent);
     void setContent(const MetricStore& store, const FpsSummary& fps, const std::wstring& gpuName);
@@ -41,13 +43,35 @@ public:
     void hide();
     void toggle(std::string* error = nullptr);
     bool isVisible() const { return m_visible; }
-    bool isDragging() const { return m_dragging; }
+    Rect contentBounds() const
+    {
+        return { m_contentRectD2D.left, m_contentRectD2D.top, m_contentRectD2D.right,
+            m_contentRectD2D.bottom };
+    }
+    bool hasVisiblePixels() const;
+    bool hasPixelColor(std::uint8_t red, std::uint8_t green, std::uint8_t blue) const;
+    bool isDragging() const
+    {
+        return m_dragging || m_resizing || m_paddingDragging || m_layerDragging || m_layerResizing
+            || m_rowDragging;
+    }
 
     void repaint();
 
     // Перетаскивание прямо по оверлею: Ctrl + левая кнопка мыши. Координаты —
     // origin_x/y в свободном режиме, offset_x/y в угловом (finished — отпускание).
     void setMoveHandler(std::function<void(int offsetX, int offsetY, bool finished)> handler);
+    void setDirectEditHandler(std::function<void(int scale, int padding, int rowGap, bool finished)> handler);
+    void setBackgroundEditHandler(
+        std::function<void(int width, int height, int originX, int originY, bool finished)> handler);
+    void setLayerEditHandler(std::function<void(std::size_t index, int x, int y, bool finished)> handler);
+    void setLayerExtentHandler(
+        std::function<void(std::size_t index, int width, int height, bool finished)> handler);
+    void setRowEditHandler(
+        std::function<void(MetricId id, OverlayRowPosition position, bool finished)> handler);
+    void setRowReorderHandler(std::function<void(MetricId moved, MetricId before, bool finished)> handler);
+    void setStyledRowEditHandler(
+        std::function<void(MetricId id, OverlayRowOffset offset, bool finished)> handler);
     // Окно приложения: правый клик по оверлею показывает его, чтобы не искать в трее.
     void setOwnerWindow(HWND owner) { m_owner = owner; }
 
@@ -71,6 +95,21 @@ private:
     void beginDrag(int screenX, int screenY);
     void updateDrag(int screenX, int screenY);
     void endDrag();
+    bool onResizeCorner(int x, int y) const;
+    bool onPaddingGrip(int x, int y) const;
+    void updateResize(int x, int y);
+    void finishResize();
+    void updatePadding(int x, int y);
+    void finishPadding();
+    int layerAt(int x, int y) const;
+    int layerResizeAt(int x, int y) const;
+    void updateLayerDrag(int x, int y);
+    void finishLayerDrag();
+    void updateLayerResize(int x, int y);
+    void finishLayerResize();
+    std::optional<MetricId> rowAt(int x, int y) const;
+    void updateRowDrag(int x, int y);
+    void finishRowDrag();
     void startAnimation(const OverlaySettings& from, bool fadeContent);
     void tickAnimation();
     OverlaySettings animatedSettings() const;
@@ -91,6 +130,7 @@ private:
     UINT m_bitmapHeight = 0;
 
     OverlaySettings m_settings;
+    std::optional<int> m_menuSceneOpacity;
     Theme m_theme = makeTheme(Accent::Mint);
 
     MetricStore m_store;
@@ -105,6 +145,50 @@ private:
 
     // Перетаскивание и плавные переходы.
     std::function<void(int, int, bool)> m_onMove;
+    std::function<void(int, int, int, bool)> m_onDirectEdit;
+    std::function<void(int, int, int, int, bool)> m_onBackgroundEdit;
+    std::function<void(std::size_t, int, int, bool)> m_onLayerEdit;
+    std::function<void(std::size_t, int, int, bool)> m_onLayerExtent;
+    std::vector<Rect> m_rtssLayerBounds;
+    float m_rtssLayerScale = 1.0f;
+    bool m_layerDragging = false;
+    bool m_layerResizing = false;
+    int m_layerHover = -1;
+    std::size_t m_layerIndex = 0;
+    POINT m_layerDragOrigin{};
+    int m_layerStartX = 0;
+    int m_layerStartY = 0;
+    int m_layerStartWidth = 0;
+    int m_layerStartHeight = 0;
+    int m_layerSavedWidth = 0;
+    int m_layerSavedHeight = 0;
+    float m_layerDragScale = 1.0f;
+    std::function<void(MetricId, OverlayRowPosition, bool)> m_onRowEdit;
+    std::function<void(MetricId, MetricId, bool)> m_onRowReorder;
+    std::function<void(MetricId, OverlayRowOffset, bool)> m_onStyledRowEdit;
+    std::vector<OverlayRowBounds> m_rowBounds;
+    float m_rowUnit = 1.0f;
+    bool m_rowDragging = false;
+    bool m_rowReordering = false;
+    MetricId m_rowDragId = MetricId::Fps;
+    POINT m_rowDragOrigin { };
+    OverlayRowPosition m_rowStart { };
+    OverlayRowOffset m_styleRowStart { };
+    Rect m_rowStartBounds { };
+    float m_rowDragScale = 1.0f;
+    bool m_resizing = false;
+    POINT m_resizeOrigin{};
+    int m_resizeScale = 100;
+    bool m_backgroundResizing = false;
+    int m_backgroundStartWidth = 0;
+    int m_backgroundStartHeight = 0;
+    float m_backgroundUnit = 1.0f;
+    float m_resizeWidth = 1.0f;
+    float m_resizeHeight = 1.0f;
+    bool m_paddingDragging = false;
+    POINT m_paddingOrigin { };
+    int m_paddingStart = 10;
+    bool m_showEditHandles = false;
     bool m_dragging = false;
     POINT m_dragOrigin{};
     int m_dragOffsetX = 0;

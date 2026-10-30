@@ -45,6 +45,7 @@ add_library(yawa_metrics STATIC
     app/report/package_reader.cpp
     app/report/html_report.cpp
     app/ui/settings.cpp
+    app/ui/rtss_exchange.cpp
     app/ui/overlay_recipe_json.cpp
 )
 

@@ -31,6 +31,9 @@ namespace {
 
     void writePng32(std::string& png, std::size_t offset, std::uint32_t value)
     {
+        CHECK(offset <= png.size() && png.size() - offset >= 4);
+        if (offset > png.size() || png.size() - offset < 4)
+            return;
         for (int index = 0; index < 4; ++index)
             png[offset + static_cast<std::size_t>(index)] = static_cast<char>(value >> ((3 - index) * 8));
     }

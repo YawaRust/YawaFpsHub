@@ -25,6 +25,10 @@ enum class ActionKind : std::uint8_t {
     SetTargetHz,
     SetStyle,
     ToggleFollowGameMonitor,
+    CycleOverlayMonitor,
+    CycleSparkline,
+    ToggleMenuScene,
+    ToggleGameProfile,
     SetPosition,
     SetLayout,
     SetOverlaySurface,
@@ -41,9 +45,11 @@ enum class ActionKind : std::uint8_t {
     ToggleCompact,
     ToggleTray,
     OpenSettingsFolder,
+    ShowChangelog,
     ResetSettings,
     SetScale,
     SetOpacity,
+    SetMenuOpacity,
     ToggleMetric,
     ToggleSensor,
     EnableCpuSensors,
@@ -130,6 +136,9 @@ struct AppModel
     bool etwRunning = false;
     bool paused = false;
     bool overlayVisible = false;
+    bool menuScene = false;
+    bool hasGameProfile = false;
+    std::wstring profileGameName;
     // Текст последней ошибки оверлея: показывается в статус-баре вместо подсказок.
     std::wstring overlayError;
     View view = View::Dashboard;
@@ -188,6 +197,7 @@ inline bool isSliderAction(ActionKind action)
     switch (action) {
     case ActionKind::SetScale:
     case ActionKind::SetOpacity:
+    case ActionKind::SetMenuOpacity:
     case ActionKind::SetOverlayRadius:
     case ActionKind::SetOverlayTextScale:
     case ActionKind::SetOverlayBgOpacity:

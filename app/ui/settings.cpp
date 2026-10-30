@@ -1,11 +1,13 @@
 #include "ui/settings.h"
 #include "metrics/overlay_metric.h"
+#include "ui/rtss_exchange.h"
 
 #include <algorithm>
 #include <cctype>
 #include <charconv>
 #include <cmath>
 #include <utility>
+#include <vector>
 
 namespace yawa {
 namespace {
@@ -15,6 +17,8 @@ namespace {
     constexpr int kMinScale = 70;
     constexpr int kMaxScale = 160;
     constexpr std::size_t kMaxLabelLength = 10;
+    constexpr std::size_t kMaxRtssBytes = 1024 * 1024;
+    constexpr std::size_t kMaxRtssExchangeBytes = 8 * 1024 * 1024;
 
     struct StyleKey
     {
@@ -60,6 +64,49 @@ namespace {
         { "clean", OverlayStyle::Mono, OverlayLayout::Gauge, OverlaySurface::Plate, 1, 100, false },
     } };
 
+    struct RtssMetric
+    {
+        MetricId id;
+        std::string_view tag;
+        std::string_view source;
+        std::string_view unit;
+    };
+
+    constexpr std::array<RtssMetric, 13> kRtssMetrics { {
+        { MetricId::Fps, "<FR>", "", "FPS" },
+        { MetricId::Fps, "%Framerate%", "Framerate", "FPS" },
+        { MetricId::FrameTime, "%Frametime%", "Frametime", "ms" },
+        { MetricId::CpuLoad, "%CPU usage%", "CPU usage", "%" },
+        { MetricId::CpuTemp, "%CPU temperature%", "CPU temperature", "C" },
+        { MetricId::CpuClock, "%CPU clock%", "CPU clock", "MHz" },
+        { MetricId::CpuPower, "%CPU power%", "CPU power", "W" },
+        { MetricId::GpuLoad, "%GPU1 usage%", "GPU1 usage", "%" },
+        { MetricId::GpuTemp, "%GPU1 temperature%", "GPU1 temperature", "C" },
+        { MetricId::GpuClock, "%GPU1 clock%", "GPU1 clock", "MHz" },
+        { MetricId::GpuPower, "%GPU1 power%", "GPU1 power", "W" },
+        { MetricId::VramUsed, "%GPU1 memory usage%", "GPU1 memory usage", "MB" },
+        { MetricId::RamUsed, "%Total RAM%", "Total RAM", "MB" },
+    } };
+
+    void attachRtssImage(OverlaySettings& overlay, const RtssExchange& exchange)
+    {
+        if (!overlay.rtssVisual || overlay.rtssVisual->embeddedImage.empty()) {
+            return;
+        }
+        const std::string& wanted = overlay.rtssVisual->embeddedImage;
+        const auto image = std::find_if(
+            exchange.images.begin(), exchange.images.end(), [&wanted](const auto& file) {
+                return file.first.size() == wanted.size()
+                    && std::equal(file.first.begin(), file.first.end(), wanted.begin(),
+                        [](unsigned char a, unsigned char b) { return std::tolower(a) == std::tolower(b); });
+            });
+        if (image != exchange.images.end()) {
+            auto visual = std::make_shared<RtssVisualLayout>(*overlay.rtssVisual);
+            visual->imageBytes = std::make_shared<const std::string>(image->second);
+            overlay.rtssVisual = std::move(visual);
+        }
+    }
+
     std::string_view trim(std::string_view text)
     {
         while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())) != 0) {
@@ -69,6 +116,36 @@ namespace {
             text.remove_suffix(1);
         }
         return text;
+    }
+
+    std::string hexEncode(std::string_view bytes)
+    {
+        constexpr char digits[] = "0123456789ABCDEF";
+        std::string encoded;
+        encoded.reserve(bytes.size() * 2);
+        for (unsigned char byte : bytes) {
+            encoded.push_back(digits[byte >> 4]);
+            encoded.push_back(digits[byte & 15]);
+        }
+        return encoded;
+    }
+
+    std::string hexDecode(std::string_view encoded, std::size_t maxBytes)
+    {
+        if (encoded.size() > 2 * maxBytes || encoded.size() % 2 != 0) {
+            return { };
+        }
+        std::string bytes;
+        bytes.reserve(encoded.size() / 2);
+        for (std::size_t index = 0; index < encoded.size(); index += 2) {
+            unsigned int byte = 0;
+            const auto parsed = std::from_chars(encoded.data() + index, encoded.data() + index + 2, byte, 16);
+            if (parsed.ec != std::errc { } || parsed.ptr != encoded.data() + index + 2) {
+                return { };
+            }
+            bytes.push_back(static_cast<char>(byte));
+        }
+        return bytes;
     }
 
     int parseInt(std::string_view text, int fallback)
@@ -228,6 +305,31 @@ void enableOverlayPixelLayout(OverlaySettings& settings)
         ++row;
     }
     settings.pixelLayout = true;
+}
+
+void restoreOverlayTemplate(OverlaySettings& settings)
+{
+    if (settings.recipe == OverlayRecipe::Rtss && settings.rtssTemplate && settings.rtssVisual) {
+        settings.rtssLayerEdits = {};
+        return;
+    }
+    settings.pixelLayout = false;
+    settings.rowPositions = {};
+    settings.styleRowOffsets = {};
+    settings.backgroundWidthPx = -1;
+    settings.backgroundHeightPx = -1;
+}
+
+OverlayRowPosition moveOverlayRow(OverlayRowPosition start, int deltaX, int deltaY)
+{
+    const int dx = std::clamp(
+        deltaX, -std::min(start.labelX, start.valueX), 470 - std::max(start.labelX, start.valueX));
+    return { start.labelX + dx, start.valueX + dx, std::clamp(start.y + deltaY, 0, 1490) };
+}
+
+OverlayRowOffset moveOverlayRowOffset(OverlayRowOffset start, int deltaX, int deltaY)
+{
+    return { std::clamp(start.x + deltaX, -2048, 2048), std::clamp(start.y + deltaY, -2048, 2048) };
 }
 
 int scaledOverlayOffset(int offset, double sourceExtent, double targetExtent)
@@ -595,6 +697,7 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
 
     // Рецепт применяется до любых явных полей независимо от порядка строк INI:
     // старые ключи layout/font/background и глазики должны иметь приоритет.
+    std::shared_ptr<const std::string> standaloneImage;
     bool hasRecipe = false;
     bool hasSurface = false;
     bool customSurface = false;
@@ -714,6 +817,15 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                     = std::clamp(parseInt(value, target.overlay.monitorOriginY), 0, 32768);
             } else if (key == "follow_game_monitor") {
                 target.overlay.followGameMonitor = parseBool(value, target.overlay.followGameMonitor);
+            } else if (key == "fps_sparkline") {
+                target.overlay.showSparkline = parseBool(value, target.overlay.showSparkline);
+            } else if (key == "sparkline_metric") {
+                const MetricInfo* metric = findMetricByKey(value);
+                if (metric != nullptr
+                    && (metric->id == MetricId::Fps || metric->id == MetricId::FrameTime
+                        || metric->id == MetricId::CpuLoad || metric->id == MetricId::GpuLoad)) {
+                    target.overlay.sparklineMetric = metric->id;
+                }
             } else if (key == "recipe") {
                 // Уже применён до чтения всех ручных параметров.
             } else if (key == "layout") {
@@ -728,6 +840,9 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
             } else if (key == "opacity") {
                 target.overlay.opacityPercent
                     = std::clamp(parseInt(value, target.overlay.opacityPercent), 0, 100);
+            } else if (key == "menu_opacity") {
+                target.overlay.menuOpacityPercent
+                    = std::clamp(parseInt(value, target.overlay.menuOpacityPercent), 0, 100);
             } else if (key == "offset_x") {
                 target.overlay.offsetX = std::clamp(parseInt(value, target.overlay.offsetX), -8192, 8192);
             } else if (key == "pixel_layout") {
@@ -761,6 +876,14 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                 target.overlay.paddingPx = std::clamp(parseInt(value, target.overlay.paddingPx), -1, 28);
             } else if (key == "row_gap") {
                 target.overlay.rowGapPx = std::clamp(parseInt(value, target.overlay.rowGapPx), -1, 14);
+            } else if (key == "background_width") {
+                const int width = parseInt(value, -1);
+                if (width == -1 || (width >= 80 && width <= 2000))
+                    target.overlay.backgroundWidthPx = width;
+            } else if (key == "background_height") {
+                const int height = parseInt(value, -1);
+                if (height == -1 || (height >= 40 && height <= 1600))
+                    target.overlay.backgroundHeightPx = height;
             } else if (key == "value_color") {
                 target.overlay.valueColor = std::clamp(parseInt(value, target.overlay.valueColor), -1, 5);
             } else if (key == "label_color") {
@@ -877,6 +1000,26 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                     }
                 }
             }
+        } else if (section == "overlay_style_offsets") {
+            const auto entry = std::find_if(kMetricTable.begin(), kMetricTable.end(),
+                [&key](const MetricInfo& info) { return info.key == key; });
+            const std::size_t comma = value.find(',');
+            if (entry != kMetricTable.end() && comma != std::string_view::npos
+                && value.find(',', comma + 1) == std::string_view::npos) {
+                const int x = parseInt(trim(value.substr(0, comma)), 2049);
+                const int y = parseInt(trim(value.substr(comma + 1)), 2049);
+                if (x >= -2048 && x <= 2048 && y >= -2048 && y <= 2048) {
+                    target.overlay.styleRowOffsets[static_cast<std::size_t>(entry->id)] = { x, y };
+                }
+            }
+        } else if (section == "overlay_metric_text_scale") {
+            const auto entry = std::find_if(kMetricTable.begin(), kMetricTable.end(),
+                [&key](const MetricInfo& info) { return info.key == key; });
+            if (entry != kMetricTable.end()) {
+                const int size = parseInt(value, 0);
+                if (size >= 70 && size <= 200)
+                    target.overlay.metricTextScalePercent[static_cast<std::size_t>(entry->id)] = size;
+            }
         } else if (section == "overlay_metric_colors" || section == "overlay_metric_rgba") {
             const auto entry = std::find_if(kMetricTable.begin(), kMetricTable.end(),
                 [&key](const MetricInfo& info) { return info.key == key; });
@@ -895,6 +1038,85 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
                 [&key](const MetricInfo& info) { return info.key == key; });
             if (entry != kMetricTable.end()) {
                 setOverlayMetricLabel(target.overlay, entry->id, std::string(value));
+            }
+        } else if (section == "rtss_original") {
+            if (key == "template_hex" || key == "exchange_hex") {
+                const std::size_t limit = key == "exchange_hex" ? kMaxRtssExchangeBytes : kMaxRtssBytes;
+                std::string decoded = hexDecode(value, limit);
+                if (!decoded.empty()) {
+                    auto original = std::make_shared<const std::string>(std::move(decoded));
+                    if (key == "exchange_hex") {
+                        target.overlay.rtssExchange = std::move(original);
+                    } else {
+                        target.overlay.rtssTemplate = std::move(original);
+                    }
+                }
+            } else if (key == "image_hex") {
+                std::string decoded = hexDecode(value, 4 * 1024 * 1024);
+                if (!decoded.empty()) {
+                    standaloneImage = std::make_shared<const std::string>(std::move(decoded));
+                }
+            } else if (key == "omitted_layers") {
+                target.overlay.rtssOmittedLayers = std::clamp(parseInt(value, 0), 0, 256);
+            } else if (key == "resources") {
+                target.overlay.rtssResources = std::clamp(parseInt(value, 0), 0, 63);
+            }
+        } else if (section == "rtss_layer_edits") {
+            const int index = parseInt(key, -1);
+            const std::size_t first = value.find(',');
+            const std::size_t second = first == std::string_view::npos ? first : value.find(',', first + 1);
+            if (index >= 0 && index < 256 && std::to_string(index) == key
+                && second != std::string_view::npos && value.find(',', second + 1) == std::string_view::npos) {
+                const int x = parseInt(trim(value.substr(0, first)), 2049);
+                const int y = parseInt(trim(value.substr(first + 1, second - first - 1)), 2049);
+                const int visible = parseInt(trim(value.substr(second + 1)), -1);
+                if (x >= -2048 && x <= 2048 && y >= -2048 && y <= 2048 && (visible == 0 || visible == 1)) {
+                    auto& edit = target.overlay.rtssLayerEdits[static_cast<std::size_t>(index)];
+                    edit.x = x;
+                    edit.y = y;
+                    edit.visible = visible == 1;
+                }
+            }
+        } else if (section == "rtss_layer_text" || section == "rtss_layer_color"
+            || section == "rtss_layer_background" || section == "rtss_layer_size"
+            || section == "rtss_layer_extent") {
+            const int index = parseInt(key, -1);
+            if (index >= 0 && index < 256 && std::to_string(index) == key) {
+                auto& edit = target.overlay.rtssLayerEdits[static_cast<std::size_t>(index)];
+                if (section == "rtss_layer_text" && value.size() <= 2 * 8192 && value.size() % 2 == 0) {
+                    const std::string decoded = hexDecode(value, 8192);
+                    if (value.empty() || !decoded.empty()) {
+                        edit.text = decoded;
+                    }
+                } else if ((section == "rtss_layer_color" || section == "rtss_layer_background")
+                    && value.size() == 8) {
+                    std::uint32_t color = 0;
+                    const auto parsed = std::from_chars(value.data(), value.data() + value.size(), color, 16);
+                    if (parsed.ec == std::errc { } && parsed.ptr == value.data() + value.size()) {
+                        if (section == "rtss_layer_color") {
+                            edit.textColor = color;
+                        } else {
+                            edit.backgroundColor = color;
+                        }
+                    }
+                } else if (section == "rtss_layer_size") {
+                    const int size = parseInt(value, 0);
+                    if (size >= 10 && size <= 400) {
+                        edit.size = size;
+                    }
+                } else if (section == "rtss_layer_extent") {
+                    const auto comma = value.find(',');
+                    if (comma != std::string_view::npos
+                        && value.find(',', comma + 1) == std::string_view::npos) {
+                        const auto valid = [](int size) { return size == 0 || (size >= 16 && size <= 2048); };
+                        const int width = parseInt(value.substr(0, comma), -1);
+                        const int height = parseInt(value.substr(comma + 1), -1);
+                        if (valid(width) && valid(height)) {
+                            edit.width = width;
+                            edit.height = height;
+                        }
+                    }
+                }
             }
         } else if (section == "hotkeys") {
             if (key == "overlay") {
@@ -935,6 +1157,39 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
         }
     }
 
+    if (target.overlay.rtssTemplate) {
+        OverlaySettings visualSettings;
+        std::string visualError;
+        if (importRtssOverlay(*target.overlay.rtssTemplate, visualSettings, visualError)) {
+            target.overlay.rtssVisual = std::move(visualSettings.rtssVisual);
+            if (standaloneImage && !target.overlay.rtssExchange
+                && !target.overlay.rtssVisual->embeddedImage.empty()) {
+                auto visual = std::make_shared<RtssVisualLayout>(*target.overlay.rtssVisual);
+                visual->imageBytes = std::move(standaloneImage);
+                target.overlay.rtssVisual = std::move(visual);
+            }
+        } else {
+            target.overlay.rtssTemplate.reset();
+        }
+    }
+    if (!target.overlay.rtssTemplate) {
+        target.overlay.rtssOmittedLayers = 0;
+        target.overlay.rtssExchange.reset();
+        target.overlay.rtssVisual.reset();
+    }
+    if (target.overlay.rtssExchange) {
+        RtssExchange package;
+        std::string packageError;
+        if (!unpackRtssExchange(*target.overlay.rtssExchange, package, packageError)
+            || package.layout != *target.overlay.rtssTemplate) {
+            target.overlay.rtssExchange.reset();
+        } else {
+            attachRtssImage(target.overlay, package);
+        }
+    }
+    if (!target.overlay.rtssExchange) {
+        target.overlay.rtssResources = 0;
+    }
     if (!hasMetricSelection) {
         for (std::size_t index = 0; index < kLabelCount; ++index) {
             target.overlay.metrics[static_cast<std::size_t>(kOverlayPrimaryMetrics[index])]
@@ -950,6 +1205,406 @@ bool parseSettings(std::string_view text, Settings& target, std::string& error)
         target.overlay.recipe = static_cast<OverlayRecipe>(target.overlay.style);
     }
     return true;
+}
+
+std::string rtssVisibleTemplate(std::string_view text)
+{
+    std::string visible;
+    visible.reserve(std::min<std::size_t>(text.size(), 8192));
+    for (std::size_t at = 0; at < text.size() && visible.size() < 8192;) {
+        if (text[at] == '<') {
+            const std::size_t end = text.find('>', at + 1);
+            if (end != std::string_view::npos && end - at <= 256) {
+                const auto token = text.substr(at, end - at + 1);
+                if (token == "<FR>" || token.starts_with("<G=") || token.starts_with("<I=")) {
+                    visible.append(token);
+                }
+                at = end + 1;
+                continue;
+            }
+        }
+        if (text[at] == '\\' && at + 1 < text.size()) {
+            const char code = text[at + 1];
+            visible += code == 'n' || code == 'r' ? '\n' : code == 't' || code == 'b' ? ' ' : code;
+            at += 2;
+        } else {
+            visible += text[at++];
+        }
+    }
+    return visible;
+}
+
+bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::string& error)
+{
+    error.clear();
+    if (text.size() > kMaxRtssBytes || text.find('\0') != std::string_view::npos) {
+        error = "Шаблон RTSS слишком большой или содержит двоичные данные";
+        return false;
+    }
+
+    struct RtssSource
+    {
+        std::string name;
+        std::string provider;
+        std::string id;
+    };
+    const auto original = std::make_shared<const std::string>(text);
+    auto visual = std::make_shared<RtssVisualLayout>();
+    visual->layers.resize(256);
+    const auto coordinate = [](std::string_view value, int fallback) {
+        return std::clamp(parseInt(value, fallback), -512, 2048);
+    };
+    const auto decodeColor = [](std::string_view encoded, std::uint32_t fallback) {
+        // У RTSS условный цвет начинается с управляющих полей, затем идут
+        // цветовые значения. Берём первое буквальное значение, не вычисляя условие.
+        for (int index = 0; index < 12 && !encoded.empty(); ++index) {
+            const auto comma = encoded.find(',');
+            const std::string_view candidate = encoded.substr(0, comma);
+            if (candidate.size() == 6 || candidate.size() == 8) {
+                std::uint32_t parsed = 0;
+                const auto result
+                    = std::from_chars(candidate.data(), candidate.data() + candidate.size(), parsed, 16);
+                if (result.ec == std::errc { } && result.ptr == candidate.data() + candidate.size()) {
+                    return candidate.size() == 6 ? parsed | 0xFF000000u : parsed;
+                }
+            }
+            if (comma == std::string_view::npos) {
+                break;
+            }
+            encoded.remove_prefix(comma + 1);
+        }
+        return fallback;
+    };
+    std::array<bool, kMetricCount> selected { };
+    std::array<std::string, 256> layerTexts { };
+    std::array<std::string, 256> layerColors { };
+    std::array<RtssSource, 256> sources { };
+    std::array<std::optional<std::uint32_t>, kMetricCount> colors { };
+    std::vector<MetricId> order;
+    std::string section;
+    bool version = false;
+    int layers = -1;
+    bool validLayers = false;
+    int sourceCount = -1;
+    int omitted = 0;
+    std::array<bool, 256> layerPresent { };
+    while (!text.empty()) {
+        const auto end = text.find('\n');
+        std::string_view line = trim(end == std::string_view::npos ? text : text.substr(0, end));
+        text = end == std::string_view::npos ? std::string_view { } : text.substr(end + 1);
+        if (line.empty() || line.front() == ';' || line.front() == '#') {
+            continue;
+        }
+        if (line.front() == '[' && line.back() == ']') {
+            section.assign(line.substr(1, line.size() - 2));
+            if (section.size() > 5 && section.substr(0, 5) == "Layer") {
+                const std::string_view number = std::string_view(section).substr(5);
+                const int index = parseInt(number, -1);
+                if (index >= 0 && index < 256 && std::to_string(index) == number) {
+                    layerPresent[static_cast<std::size_t>(index)] = true;
+                }
+            }
+            continue;
+        }
+        const auto equals = line.find('=');
+        if (equals == std::string_view::npos) {
+            continue;
+        }
+        const std::string_view key = trim(line.substr(0, equals));
+        const std::string_view value = trim(line.substr(equals + 1));
+        if (section == "Master" && key == "Implementation") {
+            version = value == "2";
+        } else if (section == "Master" && key == "FontFace" && value.size() <= 96) {
+            visual->fontFace = value;
+        } else if (section == "Master" && key == "FontHeight") {
+            visual->fontHeight = std::clamp(std::abs(std::clamp(parseInt(value, -13), -64, 64)), 4, 64);
+        } else if (section == "Master" && key == "FontWeight") {
+            visual->fontWeight = std::clamp(parseInt(value, 400), 100, 900);
+        } else if (section == "Master" && key == "ZoomRatio") {
+            visual->zoom = std::clamp(parseInt(value, 1), 1, 8);
+        } else if (section == "Settings" && key == "EmbeddedImage" && value.size() >= 5 && value.size() <= 256
+            && value.find("..") == std::string_view::npos
+            && value.find_first_of("/\\:") == std::string_view::npos) {
+            std::string extension(value.substr(value.size() - 4));
+            std::transform(extension.begin(), extension.end(), extension.begin(),
+                [](unsigned char symbol) { return static_cast<char>(std::tolower(symbol)); });
+            if (extension == ".png") {
+                visual->embeddedImage = value;
+            }
+        } else if (section == "General" && key == "Layers") {
+            layers = parseInt(value, -1);
+            validLayers = layers >= 1 && layers <= 256 && std::to_string(layers) == value;
+        } else if (section == "General" && key == "Sources") {
+            sourceCount = parseInt(value, -1);
+            if (sourceCount < 0 || sourceCount > 256 || std::to_string(sourceCount) != value) {
+                sourceCount = -1;
+            }
+        } else if (section.size() > 6 && section.substr(0, 6) == "Source") {
+            const std::string_view number = std::string_view(section).substr(6);
+            const int index = parseInt(number, -1);
+            if (index < 0 || index >= 256 || std::to_string(index) != number) {
+                continue;
+            }
+            RtssSource& source = sources[static_cast<std::size_t>(index)];
+            if (key == "Name") {
+                source.name = value;
+            } else if (key == "Provider") {
+                source.provider = value;
+            } else if (key == "ID") {
+                source.id = value;
+            }
+        } else if (section.size() > 5 && section.substr(0, 5) == "Layer") {
+            const std::string_view layerNumber = std::string_view(section).substr(5);
+            const int index = parseInt(layerNumber, -1);
+            if (index < 0 || index >= 256 || std::to_string(index) != layerNumber) {
+                continue;
+            }
+            RtssVisualLayer& layer = visual->layers[static_cast<std::size_t>(index)];
+            if (key == "Name" && value.size() <= 256) {
+                layer.name = value;
+            } else if (key == "Text") {
+                layerTexts[static_cast<std::size_t>(index)] = value;
+                if (value.size() <= 8192) {
+                    layer.text = value;
+                }
+            } else if (key == "TextColor") {
+                layerColors[static_cast<std::size_t>(index)] = value;
+                layer.textColor = decodeColor(value, 0xFFFFFFFFu);
+            } else if (key == "BgndColor") {
+                layer.backgroundColor = decodeColor(value, 0);
+                layer.hasBackground = true;
+            } else if (key == "VisibilitySource" && value.size() <= 256) {
+                layer.visibilitySource = value;
+            } else if (key == "PositionX") {
+                layer.x = coordinate(value, 0);
+            } else if (key == "PositionY") {
+                layer.y = coordinate(value, 0);
+            } else if (key == "ExtentX") {
+                layer.width = coordinate(value, 0);
+            } else if (key == "ExtentY") {
+                layer.height = coordinate(value, 0);
+            } else if (key == "ExtentOrigin") {
+                layer.origin = std::clamp(parseInt(value, 0), 0, 8);
+            } else if (key == "Size") {
+                layer.size = std::clamp(parseInt(value, 100), 10, 400);
+            }
+        }
+    }
+    if (!version || !validLayers
+        || std::none_of(
+            layerPresent.begin(), layerPresent.begin() + layers, [](bool present) { return present; })) {
+        error = "Неподдерживаемый шаблон RTSS OverlayEditor";
+        return false;
+    }
+    visual->layers.resize(static_cast<std::size_t>(layers));
+    const auto availableSource = [&](const RtssMetric& metric) {
+        if (metric.source.empty()) {
+            return true; // <FR> выдаёт сам RTSS, не [SourceN].
+        }
+        bool found = false;
+        const int count = std::max(0, sourceCount);
+        for (int index = 0; index < count; ++index) {
+            const RtssSource& source = sources[static_cast<std::size_t>(index)];
+            if (source.name != metric.source) {
+                continue;
+            }
+            if (source.provider != "HAL" || source.id != metric.source) {
+                return false; // Дубликат у внешнего провайдера делает тег неоднозначным.
+            }
+            found = true;
+        }
+        return found;
+    };
+    for (const RtssMetric& metric : kRtssMetrics) {
+        if (availableSource(metric)) {
+            visual->availableTags.emplace_back(metric.tag, metric.id);
+        }
+    }
+    for (int index = 0; index < layers; ++index) {
+        std::string lowered = layerTexts[static_cast<std::size_t>(index)];
+        std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+            [](unsigned char letter) { return static_cast<char>(std::tolower(letter)); });
+        const auto& layer = visual->layers[static_cast<std::size_t>(index)];
+        const bool graphMode
+            = layer.text.ends_with(",10>") || layer.text.ends_with(",80>") || layer.text.ends_with(",81>");
+        bool recognized = graphMode
+            && (layer.text.starts_with("<G=Frametime,") || layer.text.starts_with("<G=Framerate 1% Low,"));
+        if (graphMode) {
+            for (const RtssMetric& metric : kRtssMetrics) {
+                if ((layer.text.starts_with("<G=CPU usage,") && metric.tag == "%CPU usage%")
+                    || (layer.text.starts_with("<G=GPU1 usage,") && metric.tag == "%GPU1 usage%")) {
+                    recognized |= availableSource(metric);
+                }
+            }
+        }
+        for (const RtssMetric& source : kRtssMetrics) {
+            std::string tag(source.tag);
+            std::transform(tag.begin(), tag.end(), tag.begin(),
+                [](unsigned char letter) { return static_cast<char>(std::tolower(letter)); });
+            if (lowered.find(tag) != std::string::npos && availableSource(source)) {
+                recognized = true;
+                const auto slot = static_cast<std::size_t>(source.id);
+                if (!selected[slot]) {
+                    order.push_back(source.id);
+                    const std::string& encoded = layerColors[static_cast<std::size_t>(index)];
+                    if (encoded.size() == 6 || encoded.size() == 8) {
+                        std::uint32_t color = 0;
+                        const auto parsed
+                            = std::from_chars(encoded.data(), encoded.data() + encoded.size(), color, 16);
+                        if (parsed.ec == std::errc { } && parsed.ptr == encoded.data() + encoded.size()) {
+                            const std::uint32_t alpha = encoded.size() == 8 ? color >> 24 : 0xFFu;
+                            colors[slot] = ((color & 0xFFFFFFu) << 8) | alpha;
+                        }
+                    }
+                }
+                selected[slot] = true;
+            }
+        }
+        omitted += layerPresent[static_cast<std::size_t>(index)] && !recognized;
+    }
+    OverlaySettings imported = overlay;
+    applyOverlayRecipe(imported, OverlayRecipe::Rtss);
+    imported.metrics = selected;
+    imported.metricRgba = colors;
+    imported.rtssTemplate = original;
+    imported.rtssExchange.reset();
+    imported.rtssVisual = std::move(visual);
+    imported.rtssLayerEdits = {};
+    imported.rtssOmittedLayers = omitted;
+    imported.rtssResources = 0;
+    std::array<bool, kMetricCount> placed { };
+    std::size_t output = 0;
+    for (MetricId id : order) {
+        imported.order[output++] = id;
+        placed[static_cast<std::size_t>(id)] = true;
+    }
+    for (MetricId id : defaultOverlayOrder()) {
+        if (!placed[static_cast<std::size_t>(id)]) {
+            imported.order[output++] = id;
+        }
+    }
+    overlay = std::move(imported);
+    return true;
+}
+
+bool importRtssExchange(std::string_view bytes, OverlaySettings& overlay, std::string& error)
+{
+    RtssExchange package;
+    if (!unpackRtssExchange(bytes, package, error)) {
+        return false;
+    }
+    OverlaySettings imported = overlay;
+    if (!importRtssOverlay(package.layout, imported, error)) {
+        return false;
+    }
+    imported.rtssExchange = std::make_shared<const std::string>(bytes);
+    imported.rtssResources = package.resources;
+    attachRtssImage(imported, package);
+    overlay = std::move(imported);
+    return true;
+}
+
+std::string serializeRtssOverlay(const OverlaySettings& overlay)
+{
+    std::vector<const RtssMetric*> rows;
+    std::array<bool, kMetricCount> seen { };
+    for (MetricId id : overlay.order) {
+        const std::size_t slot = static_cast<std::size_t>(id);
+        if (slot >= kMetricCount || seen[slot] || !overlay.metrics[slot]) {
+            continue;
+        }
+        seen[slot] = true;
+        const auto source = std::find_if(kRtssMetrics.begin(), kRtssMetrics.end(),
+            [id](const RtssMetric& metric) { return metric.id == id; });
+        if (source != kRtssMetrics.end()) {
+            rows.push_back(&*source);
+        }
+    }
+    if (rows.empty()) {
+        return { };
+    }
+    const std::size_t sources = static_cast<std::size_t>(std::count_if(
+        rows.begin(), rows.end(), [](const RtssMetric* metric) { return !metric->source.empty(); }));
+    std::string text = "[Master]\r\nImplementation=2\r\nFontFace=Consolas\r\nFontHeight=-9\r\n"
+                       "FontWeight=400\r\nZoomRatio=3\r\n[Settings]\r\nRefreshPeriod=1000\r\n"
+                       "[General]\r\nSources="
+        + std::to_string(sources) + "\r\nTables=0\r\nLayers=" + std::to_string(rows.size()) + "\r\n";
+    std::size_t sourceIndex = 0;
+    for (const RtssMetric* metric : rows) {
+        if (metric->source.empty()) {
+            continue;
+        }
+        text += "[Source" + std::to_string(sourceIndex++) + "]\r\nName=" + std::string(metric->source)
+            + "\r\nUnits=" + std::string(metric->unit)
+            + "\r\nFormat=\r\nFormula=\r\nProvider=HAL\r\nID=" + std::string(metric->source) + "\r\n";
+    }
+    for (std::size_t index = 0; index < rows.size(); ++index) {
+        const RtssMetric& metric = *rows[index];
+        text += "[Layer" + std::to_string(index)
+            + "]\r\nName=" + std::string(metric.source.empty() ? "Framerate" : metric.source)
+            + "\r\nText=" + std::string(metric.tag)
+            + "\r\nPositionX=4\r\nPositionY=" + std::to_string(5 + static_cast<int>(index) * 14)
+            + "\r\nExtentX=0\r\nExtentY=0\r\nExtentOrigin=0\r\nFixedAlignment=1\r\nTextColor=";
+        const auto color = overlay.metricRgba[static_cast<std::size_t>(metric.id)];
+        if (color) {
+            const std::string rgba = overlayRgbaHex(*color);
+            text += rgba.substr(7, 2) + rgba.substr(1, 6);
+        } else {
+            text += "FFFFFFFF";
+        }
+        text += "\r\n";
+    }
+    return text;
+}
+
+void copyOverlayPlacement(OverlaySettings& target, const OverlaySettings& source)
+{
+    target.position = source.position;
+    target.anchorMode = source.anchorMode;
+    target.originX = source.originX;
+    target.originY = source.originY;
+    target.savedMonitorId = source.savedMonitorId;
+    target.monitorOriginX = source.monitorOriginX;
+    target.monitorOriginY = source.monitorOriginY;
+    target.followGameMonitor = source.followGameMonitor;
+    target.offsetX = source.offsetX;
+    target.offsetY = source.offsetY;
+    target.clickThrough = source.clickThrough;
+}
+
+OverlaySettings overlayForGame(const OverlaySettings& base, const OverlaySettings& profile)
+{
+    OverlaySettings result = profile;
+    copyOverlayPlacement(result, base);
+    return result;
+}
+
+std::string gameProfileKey(std::wstring_view processName)
+{
+    if (processName.size() < 5 || processName.size() > 80) {
+        return { };
+    }
+    std::string key;
+    constexpr char hex[] = "0123456789ABCDEF";
+    for (wchar_t letter : processName) {
+        if (letter > 127) {
+            key.push_back('%');
+            const auto code = static_cast<std::uint32_t>(letter);
+            for (int shift = 20; shift >= 0; shift -= 4) {
+                key.push_back(hex[(code >> shift) & 0xFu]);
+            }
+        } else if ((letter >= L'a' && letter <= L'z') || (letter >= L'A' && letter <= L'Z')
+            || (letter >= L'0' && letter <= L'9') || letter == L'_' || letter == L'-' || letter == L'.'
+            || letter == L' ') {
+            key.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(letter))));
+        } else {
+            return { };
+        }
+        if (key.size() > 120) {
+            return { };
+        }
+    }
+    return key.ends_with(".exe") ? key : std::string { };
 }
 
 std::string serializeSettings(const Settings& settings)
@@ -983,6 +1638,13 @@ std::string serializeSettings(const Settings& settings)
         text += "monitor_origin_y = " + std::to_string(settings.overlay.monitorOriginY) + "\n";
     }
     text += std::string("follow_game_monitor = ") + (settings.overlay.followGameMonitor ? "1\n" : "0\n");
+    text += std::string("fps_sparkline = ") + (settings.overlay.showSparkline ? "1\n" : "0\n");
+    const MetricId sparkline = settings.overlay.sparklineMetric;
+    const std::string_view sparklineKey
+        = sparkline == MetricId::FrameTime || sparkline == MetricId::CpuLoad || sparkline == MetricId::GpuLoad
+        ? metricInfo(sparkline).key
+        : "fps";
+    text += "sparkline_metric = " + std::string(sparklineKey) + "\n";
     text += "recipe = " + std::string(overlayRecipeKey(settings.overlay.recipe)) + "\n";
     text += "layout = " + std::string(overlayLayoutKey(settings.overlay.layout)) + "\n";
     text += "style = " + std::string(overlayStyleKey(settings.overlay.style)) + "\n";
@@ -993,6 +1655,7 @@ std::string serializeSettings(const Settings& settings)
     }
     text += "scale = " + std::to_string(settings.overlay.scalePercent) + "\n";
     text += "opacity = " + std::to_string(settings.overlay.opacityPercent) + "\n";
+    text += "menu_opacity = " + std::to_string(settings.overlay.menuOpacityPercent) + "\n";
     text += "offset_x = " + std::to_string(settings.overlay.offsetX) + "\n";
     text += "offset_y = " + std::to_string(settings.overlay.offsetY) + "\n";
     text += std::string("pixel_layout = ") + (settings.overlay.pixelLayout ? "1" : "0") + "\n";
@@ -1008,6 +1671,8 @@ std::string serializeSettings(const Settings& settings)
     text += "bg_opacity = " + std::to_string(settings.overlay.backgroundOpacityPercent) + "\n";
     text += "padding = " + std::to_string(settings.overlay.paddingPx) + "\n";
     text += "row_gap = " + std::to_string(settings.overlay.rowGapPx) + "\n";
+    text += "background_width = " + std::to_string(settings.overlay.backgroundWidthPx) + "\n";
+    text += "background_height = " + std::to_string(settings.overlay.backgroundHeightPx) + "\n";
     text += "value_color = " + std::to_string(settings.overlay.valueColor) + "\n";
     text += "label_color = " + std::to_string(settings.overlay.labelColor) + "\n";
     text += "accent_color = " + std::to_string(settings.overlay.accentColor) + "\n";
@@ -1061,6 +1726,20 @@ std::string serializeSettings(const Settings& settings)
                 + std::to_string(pos.valueX) + "," + std::to_string(pos.y) + "\n";
         }
     }
+    text += "\n[overlay_style_offsets]\n";
+    for (const MetricInfo& metric : kMetricTable) {
+        const auto& offset = settings.overlay.styleRowOffsets[static_cast<std::size_t>(metric.id)];
+        if (offset.x != 0 || offset.y != 0) {
+            text += std::string(metric.key) + " = " + std::to_string(offset.x) + ","
+                + std::to_string(offset.y) + "\n";
+        }
+    }
+    text += "\n[overlay_metric_text_scale]\n";
+    for (const MetricInfo& metric : kMetricTable) {
+        const int size = settings.overlay.metricTextScalePercent[static_cast<std::size_t>(metric.id)];
+        if (size != 100)
+            text += std::string(metric.key) + " = " + std::to_string(size) + "\n";
+    }
     text += "\n[overlay_metric_colors]\n";
     for (const MetricInfo& metric : kMetricTable) {
         const int color = settings.overlay.metricColors[static_cast<std::size_t>(metric.id)];
@@ -1087,7 +1766,78 @@ std::string serializeSettings(const Settings& settings)
         text += std::string(labelKey(field)) + " = " + labelValue(settings.overlay, field) + "\n";
     }
     text += "\n";
+    if (settings.overlay.rtssTemplate && settings.overlay.rtssTemplate->size() <= kMaxRtssBytes) {
+        text += "[rtss_original]\n";
+        text += "template_hex = " + hexEncode(*settings.overlay.rtssTemplate) + "\n";
+        text += "omitted_layers = " + std::to_string(settings.overlay.rtssOmittedLayers) + "\n";
+        if (!settings.overlay.rtssExchange && settings.overlay.rtssVisual
+            && settings.overlay.rtssVisual->imageBytes
+            && settings.overlay.rtssVisual->imageBytes->size() <= 4 * 1024 * 1024) {
+            text += "image_hex = " + hexEncode(*settings.overlay.rtssVisual->imageBytes) + "\n";
+        }
+        if (settings.overlay.rtssExchange && settings.overlay.rtssExchange->size() <= kMaxRtssExchangeBytes) {
+            text += "exchange_hex = " + hexEncode(*settings.overlay.rtssExchange) + "\n";
+            text += "resources = " + std::to_string(settings.overlay.rtssResources) + "\n";
+        }
+        text += "\n";
+    }
 
+    bool hasRtssEdits = false;
+    for (const RtssLayerEdit& edit : settings.overlay.rtssLayerEdits) {
+        hasRtssEdits |= edit.x != 0 || edit.y != 0 || !edit.visible;
+    }
+    if (hasRtssEdits) {
+        text += "[rtss_layer_edits]\n";
+        for (std::size_t index = 0; index < settings.overlay.rtssLayerEdits.size(); ++index) {
+            const RtssLayerEdit& edit = settings.overlay.rtssLayerEdits[index];
+            if (edit.x != 0 || edit.y != 0 || !edit.visible) {
+                text += std::to_string(index) + " = " + std::to_string(edit.x) + "," + std::to_string(edit.y)
+                    + "," + (edit.visible ? "1" : "0") + "\n";
+            }
+        }
+        text += "\n";
+    }
+    for (std::string_view section : { "rtss_layer_text", "rtss_layer_color", "rtss_layer_background",
+             "rtss_layer_size", "rtss_layer_extent" }) {
+        bool header = false;
+        for (std::size_t index = 0; index < settings.overlay.rtssLayerEdits.size(); ++index) {
+            const auto& edit = settings.overlay.rtssLayerEdits[index];
+            std::string value;
+            bool hasValue = false;
+            if (section == "rtss_layer_text" && edit.text && edit.text->size() <= 8192) {
+                value = hexEncode(*edit.text);
+                hasValue = true;
+            } else if ((section == "rtss_layer_color" && edit.textColor)
+                || (section == "rtss_layer_background" && edit.backgroundColor)) {
+                const std::uint32_t color
+                    = section == "rtss_layer_color" ? *edit.textColor : *edit.backgroundColor;
+                constexpr char digits[] = "0123456789ABCDEF";
+                for (int shift = 28; shift >= 0; shift -= 4) {
+                    value += digits[(color >> shift) & 15];
+                }
+                hasValue = true;
+            } else if (section == "rtss_layer_size" && edit.size >= 10 && edit.size <= 400) {
+                value = std::to_string(edit.size);
+                hasValue = true;
+            } else if (section == "rtss_layer_extent" && (edit.width > 0 || edit.height > 0)) {
+                value = std::to_string(edit.width) + "," + std::to_string(edit.height);
+                hasValue = true;
+            }
+            if (!hasValue) {
+                continue;
+            }
+            if (!header) {
+                text += '[';
+                text.append(section);
+                text += "]\n";
+                header = true;
+            }
+            text += std::to_string(index) + " = " + value + "\n";
+        }
+        if (header) {
+            text += "\n";
+        }
+    }
     text += "[hotkeys]\n";
     text += "overlay = " + std::to_string(settings.hotkeys.overlay) + "\n";
     text += "position = " + std::to_string(settings.hotkeys.position) + "\n";

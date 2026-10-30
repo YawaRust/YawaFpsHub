@@ -4,9 +4,12 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace yawa {
 
@@ -56,6 +59,12 @@ struct OverlayRowPosition
     int y = -1;
 };
 
+struct OverlayRowOffset
+{
+    int x = 0;
+    int y = 0;
+};
+
 struct CaptureSettings
 {
     int intervalMs = 1000;
@@ -68,6 +77,48 @@ struct CaptureSettings
     int targetHz = 60;
     // Авто: цель кадра берётся из герцовки монитора, определённой при запуске.
     bool targetAuto = true;
+};
+
+struct RtssVisualLayer
+{
+    std::string name;
+    std::string text;
+    std::string visibilitySource;
+    int x = 0;
+    int y = 0;
+    int width = 0;
+    int height = 0;
+    int origin = 0;
+    int size = 100;
+    std::uint32_t textColor = 0xFFFFFFFFu;
+    std::uint32_t backgroundColor = 0;
+    bool hasBackground = false;
+};
+
+struct RtssVisualLayout
+{
+    std::string embeddedImage;
+    std::shared_ptr<const std::string> imageBytes;
+    std::string fontFace;
+    int fontHeight = 13;
+    int fontWeight = 400;
+    int zoom = 1;
+    std::vector<RtssVisualLayer> layers;
+    std::vector<std::pair<std::string, MetricId>> availableTags;
+};
+
+struct RtssLayerEdit
+{
+    int x = 0;
+    int y = 0;
+    int width = 0; // 0 — исходный ExtentX, иначе ширина в пикселях RTSS до ZoomRatio.
+    int height = 0;
+    bool visible = true;
+    // Локальные правки вида: оригинальный .ovl/.ovx остаётся нетронутым.
+    std::optional<std::string> text; // UTF-8; исходный RTSS-текст кодируется отдельно (CP1251).
+    std::optional<std::uint32_t> textColor; // AARRGGBB, как в RTSS.
+    std::optional<std::uint32_t> backgroundColor; // 0 — явно прозрачный фон.
+    int size = 0; // 0 — исходный размер; иначе 10…400 %.
 };
 
 struct OverlaySettings
@@ -83,6 +134,8 @@ struct OverlaySettings
     int monitorOriginX = 0;
     int monitorOriginY = 0;
     bool followGameMonitor = false;
+    bool showSparkline = false;
+    MetricId sparklineMetric = MetricId::Fps;
     OverlayLayout layout = OverlayLayout::Plates;
     OverlayStyle style = OverlayStyle::Frosted; // базовая палитра старых стилей
     OverlayRecipe recipe = OverlayRecipe::Frosted;
@@ -90,6 +143,7 @@ struct OverlaySettings
     bool surfaceActive = false; // старый INI не должен менять вид до явного выбора оси
     int scalePercent = 100;
     int opacityPercent = 72;
+    int menuOpacityPercent = 0; // 0 скрывает в меню; в игре действует opacityPercent
     // Ручной сдвиг от выбранного угла: даёт поставить оверлей точно по месту
     // независимо от разрешения и рамок экрана.
     int offsetX = 0;
@@ -114,6 +168,9 @@ struct OverlaySettings
     // -1 — отступы и межстрочный интервал из пресета, иначе ручные (px).
     int paddingPx = -1;
     int rowGapPx = -1;
+    // -1 — размер подложки из стиля; 80…2000 / 40…1600 — ручной размер в пикселях макета.
+    int backgroundWidthPx = -1;
+    int backgroundHeightPx = -1;
     // -1 — цвет из пресета, 0…5 — цвет палитры для значений и для подписей.
     int valueColor = -1;
     int labelColor = -1;
@@ -145,12 +202,28 @@ struct OverlaySettings
     std::array<MetricId, kMetricCount> order = defaultOverlayOrder();
     bool pixelLayout = false;
     std::array<OverlayRowPosition, kMetricCount> rowPositions { };
+    // Смещения внутри готового стиля не включают попиксельную раскладку и не меняют пресет.
+    std::array<OverlayRowOffset, kMetricCount> styleRowOffsets { };
     std::array<int, kMetricCount> metricColors = defaultOverlayMetricColors(); // -1 — палитра стиля
     std::array<std::optional<std::uint32_t>, kMetricCount> metricRgba { };
+    // 100 — размер из стиля; применяется к подписи и значению только этой строки.
+    std::array<int, kMetricCount> metricTextScalePercent = [] {
+        std::array<int, kMetricCount> sizes { };
+        sizes.fill(100);
+        return sizes;
+    }();
     std::array<bool, kMetricCount> customLabelSet { };
     std::array<std::string, kMetricCount> customLabels { };
     std::array<bool, kLabelCount> visible { true, true, true, true, true };
     std::array<std::string, kLabelCount> labels { "FPS", "CPU", "GPU", "RAM", "VRAM" };
+    // Исходный импортированный OVL хранится отдельно от редактируемых строк Yawa.
+    std::shared_ptr<const std::string> rtssTemplate;
+    std::shared_ptr<const std::string> rtssExchange;
+    std::shared_ptr<const RtssVisualLayout> rtssVisual;
+    // Редактирование слоя не изменяет исходный пакет, используемый при экспорте.
+    std::array<RtssLayerEdit, 256> rtssLayerEdits{};
+    int rtssOmittedLayers = 0;
+    int rtssResources = 0;
 };
 
 struct UiSettings
@@ -195,6 +268,9 @@ std::string overlayRgbaHex(std::uint32_t rgba);
 Settings defaultSettings();
 void moveOverlayMetric(OverlaySettings& settings, MetricId moved, MetricId before);
 void enableOverlayPixelLayout(OverlaySettings& settings);
+void restoreOverlayTemplate(OverlaySettings& settings);
+OverlayRowPosition moveOverlayRow(OverlayRowPosition start, int deltaX, int deltaY);
+OverlayRowOffset moveOverlayRowOffset(OverlayRowOffset start, int deltaX, int deltaY);
 // Перевод смещения между экраном и сценой редактора (обе стороны используют одни размеры).
 int scaledOverlayOffset(int offset, double sourceExtent, double targetExtent);
 void setOverlayMetricLabel(OverlaySettings& settings, MetricId id, std::string label);
@@ -233,6 +309,17 @@ bool parseOverlaySurface(std::string_view key, OverlaySurface& surface);
 std::string serializeOverlayRecipeJson(const OverlaySettings& overlay);
 // Импорт только осей и общих цветов; при ошибке overlay остаётся неизменным.
 bool importOverlayRecipeJson(std::string_view json, OverlaySettings& overlay, std::string& error);
+// Поддерживает только однозначно сопоставимые текстовые датчики RTSS OverlayEditor v2.
+// Убирает управляющий гипертекст из предпросмотра, не изменяя оригинальный шаблон.
+std::string rtssVisibleTemplate(std::string_view text);
+bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::string& error);
+// Извлекает OVL из OVX в памяти и хранит исходный пакет для обратного экспорта.
+bool importRtssExchange(std::string_view bytes, OverlaySettings& overlay, std::string& error);
+// Экспортирует только известные RTSS/ HAL показатели: внешние провайдеры и изображения не создаёт.
+std::string serializeRtssOverlay(const OverlaySettings& overlay);
+void copyOverlayPlacement(OverlaySettings& target, const OverlaySettings& source);
+OverlaySettings overlayForGame(const OverlaySettings& base, const OverlaySettings& profile);
+std::string gameProfileKey(std::wstring_view processName);
 
 std::string_view overlayStyleKey(OverlayStyle style);
 std::string_view overlayPositionKey(OverlayPosition position);

@@ -343,6 +343,8 @@ void drawDiskCard(Renderer& renderer, const AppModel& model, const Theme& theme,
     }
 
     float top = inner.top + 42.0f;
+    std::wstring_view hint;
+    float hintTop = 0.0f;
     for (const DiskIdentity& disk : model.hardware.disks) {
         if (top + 70.0f > inner.bottom) {
             break;
@@ -378,17 +380,34 @@ void drawDiskCard(Renderer& renderer, const AppModel& model, const Theme& theme,
                 Rect{ inner.left, top + 19.0f, inner.right, top + 33.0f }, TextRole::Tiny, theme.textFaint);
         }
         const NvmeSmartHealth* health = disk.diskNumber >= 0
-            ? nvmeHealthForDisk(model.diskHealth, static_cast<std::uint32_t>(disk.diskNumber)) : nullptr;
+            ? nvmeHealthForDisk(model.diskHealth, static_cast<std::uint32_t>(disk.diskNumber))
+            : nullptr;
         const std::wstring smart = health ? smartSummary(*health) : L"NVMe SMART: нет данных для этого диска";
+        const Rect smartRow { inner.left, top + 37.0f, inner.right, top + 68.0f };
         renderer.text(clipText(renderer, smart, TextRole::Tiny, inner.width()),
-            Rect{ inner.left, top + 37.0f, inner.right, top + 51.0f }, TextRole::Tiny,
+            Rect { smartRow.left, smartRow.top, smartRow.right, top + 51.0f }, TextRole::Tiny,
             health ? theme.textDim : theme.textFaint);
+        if (isHovered(model, smartRow)) {
+            hint = health ? L"NVMe SMART: ресурс — оценка контроллера, не гарантия срока службы. "
+                            L"Объём записи приблизительный: единицы по 512 000 байт округляются устройством."
+                          : L"Нет данных: Windows не предоставила журнал для этого диска или его номер "
+                            L"не совпал с паспортом. Это не означает нулевой износ.";
+            hintTop = top + 69.0f;
+            if (hintTop + 60.0f > inner.bottom)
+                hintTop = top - 64.0f;
+        }
         if (health) {
             renderer.text(clipText(renderer, smartWarnings(*health), TextRole::Tiny, inner.width()),
                 Rect{ inner.left, top + 54.0f, inner.right, top + 68.0f }, TextRole::Tiny,
                 health->criticalWarning ? theme.accent : theme.textFaint);
         }
         top += 76.0f;
+    }
+    if (!hint.empty()) {
+        const Rect tip { inner.left + 8.0f, hintTop, inner.right - 8.0f, hintTop + 60.0f };
+        renderer.fillRoundRect(tip, 8.0f, theme.panel);
+        renderer.strokeRoundRect(tip, 8.0f, theme.lineStrong, 1.0f);
+        drawWrappedText(renderer, hint, tip.inset(8.0f), TextRole::Tiny, theme.text, 13.0f, 3);
     }
 }
 

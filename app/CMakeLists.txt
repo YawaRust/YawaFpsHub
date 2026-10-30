@@ -15,6 +15,7 @@ add_executable(YawaFpsHub WIN32
     report/package_reader.cpp
     report/html_report.cpp
     platform/app_paths.cpp
+    platform/changelog_win.cpp
     platform/display_info.cpp
     platform/dxgi_adapters.cpp
     platform/hardware_info_win.cpp
@@ -47,6 +48,7 @@ add_executable(YawaFpsHub WIN32
     ui/overlay_view.cpp
     ui/sensors_view.cpp
     ui/settings.cpp
+    ui/rtss_exchange.cpp
     ui/overlay_recipe_json.cpp
     ui/settings_view.cpp
     ui/system_view.cpp
@@ -56,6 +58,8 @@ add_executable(YawaFpsHub WIN32
 # а локальная проверка ядра собирается без приложения.
 if(MSVC)
     set(YAWA_ICON_PATH "${CMAKE_CURRENT_SOURCE_DIR}/resources/yawa.ico")
+    set(YAWA_CHANGELOG_PATH "${CMAKE_SOURCE_DIR}/CHANGELOG.md")
+    set(YAWA_CHANGELOG_IDS "${CMAKE_CURRENT_SOURCE_DIR}/resources/changelog_ids.h")
     configure_file(resources/resource.rc.in "${CMAKE_CURRENT_BINARY_DIR}/resource.rc" @ONLY)
     target_sources(YawaFpsHub PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/resource.rc")
 endif()

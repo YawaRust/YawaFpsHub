@@ -19,6 +19,9 @@ struct OverlayText {
     std::vector<MetricId> ids;
     // Только показатели с определённой шкалой 0–100%; -1 означает «нет шкалы».
     std::vector<float> gaugeFill;
+    std::vector<float> sparklineHistory;
+    // Только реальные значения локальных датчиков; графики чужих провайдеров не синтезируются.
+    std::array<std::vector<float>, 4> rtssGraphHistory;
 };
 
 struct OverlayFormats {
@@ -45,6 +48,12 @@ struct OverlaySwatch {
 
 OverlaySwatch overlaySwatch(OverlayStyle style);
 
+struct OverlayRowBounds
+{
+    MetricId id;
+    Rect rect;
+};
+
 // Ручные цвета оверлея: одна палитра на редактор и на отрисовку. Индекс -1 означает
 // «как в пресете», 0…5 — конкретный цвет.
 constexpr int kOverlayColorCount = 6;
@@ -53,6 +62,8 @@ std::array<Color, kOverlayColorCount> overlayColorPalette();
 // Рисует оверлей выбранного стиля внутри bounds и возвращает прямоугольник содержимого.
 // Один и тот же код рисует и настоящее окно поверх игры, и предпросмотр в настройках.
 Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, const Theme& theme,
-    const OverlayText& text, const Rect& bounds, float scale, const OverlayFormats& formats);
+    const OverlayText& text, const Rect& bounds, float scale, const OverlayFormats& formats,
+    std::vector<Rect>* rtssLayerBounds = nullptr, float* rtssLayerScale = nullptr,
+    std::vector<OverlayRowBounds>* rowBounds = nullptr, float* rowScale = nullptr);
 
 } // namespace yawa

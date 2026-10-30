@@ -1,10 +1,12 @@
 #pragma once
 
+#include "render/overlay_painter.h"
 #include "ui/app_model.h"
 
 #include <windows.h>
 
 #include <functional>
+#include <utility>
 #include <vector>
 
 namespace yawa {
@@ -20,7 +22,8 @@ public:
         std::function<void(bool)> onChange);
     void close();
     void refresh();
-    bool isDragging() const { return m_dragging; }
+    bool isDragging() const { return m_dragging || m_styledRowDragging; }
+    bool isOpen() const { return m_window != nullptr; }
 
 private:
     static LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam);
@@ -28,11 +31,25 @@ private:
     void paint();
     void layout();
     void syncFields();
+    void openSourceText();
+    void finishSourceText(bool apply);
+    Rect sourceTextPanel() const;
     void select(MetricId id, bool value);
     void move(int x, int y);
     float canvasScale() const;
+    void fitCanvasToContent();
+    void alignSelectedRows(int edge);
+    void alignSelectedRtssLayers(int edge);
+    std::size_t rtssLayerCount() const;
+    void selectRtssLayer(int index, bool additive);
+    void nudgeRtssLayers(int dx, int dy);
+    void moveRtssLayer(int x, int y);
+    void moveStyledRow(int x, int y);
     int logicalCoordinate(int pixels) const;
     Rect plateOnCanvas() const;
+    Rect scaleGrip() const;
+    Rect paddingGrip() const;
+    void moveGrip(int x, int y);
     void preparePixelLayout();
     OverlayRowPosition canvasPosition(MetricId id) const;
     void editCoordinate(HWND field);
@@ -48,10 +65,17 @@ private:
     HWND m_valueX = nullptr;
     HWND m_y = nullptr;
     HWND m_alphaEdit = nullptr;
+    HWND m_rtssHeightEdit = nullptr;
     HWND m_hexEdit = nullptr;
+    HWND m_rtssBgEdit = nullptr;
     HWND m_numericEdit = nullptr;
     ActionKind m_numericAction = ActionKind::None;
     HWND m_catalogSearch = nullptr;
+    HWND m_sourceTextEdit = nullptr;
+    bool m_sourceTextOpen = false;
+    int m_sourceTextLayer = -1;
+    std::shared_ptr<const std::string> m_sourceTextTemplate;
+    HBRUSH m_editBrush = nullptr;
     Renderer m_renderer;
     AppModel* m_model = nullptr;
     const Theme* m_theme = nullptr;
@@ -60,6 +84,10 @@ private:
     std::function<void(bool)> m_onChange;
     std::vector<UiHit> m_hits;
     Rect m_canvas;
+    Rect m_preview;
+    Rect m_fitButton;
+    Rect m_eyedropperButton;
+    Rect m_resetButton;
     Rect m_layers;
     Rect m_inspector;
     Rect m_controls;
@@ -70,9 +98,13 @@ private:
     bool m_dragging = false;
     bool m_syncing = false;
     float m_dpiScale = 1.0f;
+    bool m_hdrDisplay = false;
     float m_canvasZoom = 1.0f;
     float m_panX = 0.0f;
     float m_panY = 0.0f;
+    bool m_fitPending = true;
+    std::shared_ptr<const std::string> m_canvasTemplate;
+    bool m_focusCanvas = true;
     float m_rowDragScale = 1.0f;
     bool m_panning = false;
     bool m_samplingColor = false;
@@ -84,8 +116,37 @@ private:
     std::vector<OverlaySettings> m_undo;
     std::vector<OverlaySettings> m_redo;
     int m_panelScroll = 0;
+    int m_section = 0;
     int m_layersScroll = 0;
     std::vector<MetricId> m_hiddenLayers;
+    std::vector<Rect> m_rtssLayerRects;
+    float m_rtssLayerScale = 1.0f;
+    std::vector<OverlayRowBounds> m_canvasRowBounds;
+    float m_canvasRowScale = 1.0f;
+    bool m_styledRowDragging = false;
+    MetricId m_styledRowId = MetricId::Fps;
+    OverlayRowOffset m_styledRowStart { };
+    Rect m_styledRowBounds { };
+    float m_styledRowUnit = 1.0f;
+    int m_rtssSelected = -1;
+    std::vector<std::size_t> m_selectedRtssLayers;
+    std::vector<std::pair<std::size_t, OverlayRowOffset>> m_rtssDragOffsets;
+    bool m_rtssDragging = false;
+    bool m_rtssResizing = false;
+    int m_rtssWidthStart = 0;
+    int m_rtssHeightStart = 0;
+    float m_rtssDragUnit = 1.0f;
+    bool m_scaleDragging = false;
+    bool m_backgroundResizing = false;
+    bool m_paddingDragging = false;
+    int m_backgroundStartWidth = 0;
+    int m_backgroundStartHeight = 0;
+    int m_gripStart = 0;
+    float m_gripWidth = 1.0f;
+    float m_gripHeight = 1.0f;
+    float m_gripUnit = 1.0f;
+    int m_rtssStartX = 0;
+    int m_rtssStartY = 0;
     int m_catalogScroll = 0;
     bool m_catalogOpen = false;
     int m_dragStartX = 0;

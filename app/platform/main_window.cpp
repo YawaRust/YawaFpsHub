@@ -2,6 +2,7 @@
 #include "metrics/overlay_metric.h"
 #include "metrics/report_frame.h"
 #include "platform/app_paths.h"
+#include "platform/changelog_win.h"
 #include "platform/display_info.h"
 #include "platform/hardware_info_win.h"
 #include "platform/overlay_monitor.h"
@@ -10,8 +11,8 @@
 #include "platform/report_preview_win.h"
 #include "platform/report_viewer_win.h"
 #include "platform/win_util.h"
-#include "report/package.h"
 #include "render/overlay_painter.h"
+#include "report/package.h"
 #include "ui/bottleneck_view.h"
 #include "ui/canvas_transform.h"
 #include "ui/chrome.h"
@@ -31,6 +32,7 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cwchar>
 #include <cwctype>
 #include <iterator>
 #include <memory>
@@ -66,6 +68,48 @@ namespace {
     constexpr DWORD kDwmBorderColor = 34;
     constexpr COLORREF kDwmColorNone = 0xFFFFFFFE;
 
+    void loadRtssSiblingImage(const wchar_t* layoutPath, OverlaySettings& overlay)
+    {
+        if (!overlay.rtssVisual || overlay.rtssVisual->embeddedImage.empty()) {
+            return;
+        }
+        const std::string& name = overlay.rtssVisual->embeddedImage;
+        const int length
+            = MultiByteToWideChar(1251, 0, name.data(), static_cast<int>(name.size()), nullptr, 0);
+        if (length <= 0) {
+            return;
+        }
+        std::wstring wideName(static_cast<std::size_t>(length), L'\0');
+        MultiByteToWideChar(1251, 0, name.data(), static_cast<int>(name.size()), wideName.data(), length);
+        const std::wstring path(layoutPath);
+        const std::size_t slash = path.find_last_of(L"/\\");
+        if (slash == std::wstring::npos) {
+            return;
+        }
+        wideName = path.substr(0, slash + 1) + wideName;
+        const HANDLE file = CreateFileW(wideName.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE) {
+            return;
+        }
+        LARGE_INTEGER size { };
+        std::string image;
+        if (GetFileSizeEx(file, &size) != FALSE && size.QuadPart >= 24 && size.QuadPart <= 4 * 1024 * 1024) {
+            image.resize(static_cast<std::size_t>(size.QuadPart));
+            DWORD received = 0;
+            if (ReadFile(file, image.data(), static_cast<DWORD>(image.size()), &received, nullptr) == FALSE
+                || received != static_cast<DWORD>(image.size()) || !image.starts_with("\x89PNG\r\n\x1A\n")) {
+                image.clear();
+            }
+        }
+        CloseHandle(file);
+        if (!image.empty()) {
+            auto visual = std::make_shared<RtssVisualLayout>(*overlay.rtssVisual);
+            visual->imageBytes = std::make_shared<const std::string>(std::move(image));
+            overlay.rtssVisual = std::move(visual);
+        }
+    }
+
     bool chooseOverlayRgba(HWND owner, std::optional<std::uint32_t>& rgba)
     {
         static COLORREF custom[16] { };
@@ -95,6 +139,39 @@ namespace {
     constexpr int kHotkeyWindow = 3;
     constexpr int kHotkeyClickThrough = 4;
     constexpr int kHotkeyEmergencyExit = 5;
+    constexpr int kHotkeyMenuScene = 6;
+
+    std::string gameOverlayPath(std::string_view gameKey)
+    {
+        return dataDirectory() + "\\game-profiles\\" + std::string(gameKey) + ".ini";
+    }
+
+    bool writeGameOverlay(std::string_view gameKey, const OverlaySettings& overlay)
+    {
+        ensureDirectory(dataDirectory() + "\\game-profiles");
+        Settings profile = defaultSettings();
+        profile.overlay = overlay;
+        copyOverlayPlacement(profile.overlay, defaultSettings().overlay);
+        return writeTextFile(gameOverlayPath(gameKey), serializeSettings(profile));
+    }
+
+    std::vector<std::pair<std::string, RECT>> overlayMonitors()
+    {
+        std::vector<std::pair<std::string, RECT>> result;
+        EnumDisplayMonitors(
+            nullptr, nullptr,
+            [](HMONITOR monitor, HDC, LPRECT, LPARAM context) -> BOOL {
+                auto& monitors = *reinterpret_cast<std::vector<std::pair<std::string, RECT>>*>(context);
+                MONITORINFOEXW info { };
+                info.cbSize = sizeof(info);
+                if (GetMonitorInfoW(monitor, reinterpret_cast<MONITORINFO*>(&info))) {
+                    monitors.emplace_back(monitorIdentity(info.szDevice), info.rcMonitor);
+                }
+                return TRUE;
+            },
+            reinterpret_cast<LPARAM>(&result));
+        return result;
+    }
 
 } // namespace
 
@@ -193,6 +270,8 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
         saveSettings();
     }
 
+    m_baseOverlay = m_model.settings.overlay;
+
     // Разрешение и герцовку приложение определяет само: они нужны в подписях и как
     // цель кадра по умолчанию, чтобы бюджет кадра не был заведомо провальным.
     const DisplayMode display = currentDisplayMode();
@@ -237,6 +316,103 @@ bool MainWindow::create(HINSTANCE instance, Log& log, std::string& error)
                 }
                 saveSettings();
             }
+            InvalidateRect(m_window, nullptr, FALSE);
+        });
+        m_overlay.setDirectEditHandler([this](int scale, int padding, int rowGap, bool finished) {
+            {
+                std::lock_guard<std::mutex> guard(m_modelMutex);
+                auto& overlay = m_model.settings.overlay;
+                overlay.scalePercent = scale;
+                overlay.paddingPx = padding;
+                overlay.rowGapPx = rowGap;
+            }
+            if (finished) {
+                saveSettings();
+            }
+            m_overlayEditor.refresh();
+            InvalidateRect(m_window, nullptr, FALSE);
+        });
+        m_overlay.setBackgroundEditHandler(
+            [this](int width, int height, int originX, int originY, bool finished) {
+                {
+                    std::lock_guard<std::mutex> guard(m_modelMutex);
+                    auto& overlay = m_model.settings.overlay;
+                    overlay.backgroundWidthPx = width;
+                    overlay.backgroundHeightPx = height;
+                    overlay.anchorMode = OverlayAnchorMode::Free;
+                    overlay.originX = originX;
+                    overlay.originY = originY;
+                    overlay.offsetX = overlay.offsetY = 0;
+                }
+                if (finished) {
+                    rememberOverlayMonitor(m_model.settings.overlay, overlayVirtualScreen());
+                    saveSettings();
+                }
+                m_overlayEditor.refresh();
+                InvalidateRect(m_window, nullptr, FALSE);
+            });
+        m_overlay.setLayerEditHandler([this](std::size_t index, int x, int y, bool finished) {
+            if (index >= m_model.settings.overlay.rtssLayerEdits.size()) {
+                return;
+            }
+            {
+                std::lock_guard<std::mutex> guard(m_modelMutex);
+                auto& edit = m_model.settings.overlay.rtssLayerEdits[index];
+                edit.x = x;
+                edit.y = y;
+            }
+            if (finished) {
+                saveSettings();
+            }
+            m_overlayEditor.refresh();
+            InvalidateRect(m_window, nullptr, FALSE);
+        });
+        m_overlay.setLayerExtentHandler([this](std::size_t index, int width, int height, bool finished) {
+            if (index >= m_model.settings.overlay.rtssLayerEdits.size()) {
+                return;
+            }
+            {
+                std::lock_guard<std::mutex> guard(m_modelMutex);
+                auto& edit = m_model.settings.overlay.rtssLayerEdits[index];
+                edit.width = width;
+                edit.height = height;
+            }
+            if (finished) {
+                saveSettings();
+            }
+            m_overlayEditor.refresh();
+            InvalidateRect(m_window, nullptr, FALSE);
+        });
+        m_overlay.setRowEditHandler([this](MetricId id, OverlayRowPosition position, bool finished) {
+            {
+                std::lock_guard<std::mutex> guard(m_modelMutex);
+                m_model.settings.overlay.rowPositions[static_cast<std::size_t>(id)] = position;
+            }
+            if (finished) {
+                saveSettings();
+            }
+            m_overlayEditor.refresh();
+            InvalidateRect(m_window, nullptr, FALSE);
+        });
+        m_overlay.setRowReorderHandler([this](MetricId moved, MetricId before, bool finished) {
+            if (!finished) {
+                std::lock_guard<std::mutex> guard(m_modelMutex);
+                moveOverlayMetric(m_model.settings.overlay, moved, before);
+            } else {
+                saveSettings();
+            }
+            m_overlayEditor.refresh();
+            InvalidateRect(m_window, nullptr, FALSE);
+        });
+        m_overlay.setStyledRowEditHandler([this](MetricId id, OverlayRowOffset offset, bool finished) {
+            {
+                std::lock_guard<std::mutex> guard(m_modelMutex);
+                m_model.settings.overlay.styleRowOffsets[static_cast<std::size_t>(id)] = offset;
+            }
+            if (finished) {
+                saveSettings();
+            }
+            m_overlayEditor.refresh();
             InvalidateRect(m_window, nullptr, FALSE);
         });
     }
@@ -307,6 +483,9 @@ void MainWindow::exportOverlayStyles()
 
 void MainWindow::toggleOverlay()
 {
+    m_model.menuScene = false;
+    m_sceneWasVisible = false;
+    m_overlay.setMenuSceneOpacity(std::nullopt);
     std::string error;
     m_overlay.toggle(&error);
     m_model.overlayVisible = m_overlay.isVisible();
@@ -328,6 +507,36 @@ void MainWindow::toggleOverlay()
     }
 }
 
+void MainWindow::refreshMenuScene()
+{
+    const bool menu = m_model.menuScene;
+    const int opacity = m_model.settings.overlay.menuOpacityPercent;
+    m_overlay.setMenuSceneOpacity(menu ? std::optional<int>(opacity) : std::nullopt);
+    if (menu && opacity == 0 && m_overlay.isVisible()) {
+        m_overlay.hide();
+    } else if (m_sceneWasVisible && (!menu || opacity > 0) && !m_overlay.isVisible()) {
+        std::string error;
+        if (!m_overlay.show(&error) && m_log != nullptr) {
+            m_log->warning("смена сцены оверлея: " + error);
+        }
+    }
+    m_model.overlayVisible = m_overlay.isVisible();
+    InvalidateRect(m_window, nullptr, FALSE);
+    m_overlayEditor.refresh();
+}
+
+void MainWindow::toggleMenuScene()
+{
+    if (!m_model.menuScene) {
+        m_sceneWasVisible = m_overlay.isVisible();
+    }
+    m_model.menuScene = !m_model.menuScene;
+    refreshMenuScene();
+    if (!m_model.menuScene) {
+        m_sceneWasVisible = false;
+    }
+}
+
 void MainWindow::setInitialSize(int width, int height)
 {
     m_initialWidth = width;
@@ -343,6 +552,102 @@ void MainWindow::setOverlayVisible(bool visible)
     if (visible != m_overlay.isVisible()) {
         toggleOverlay();
     }
+}
+
+bool MainWindow::smokeImportRtss(std::string_view package, std::string& error, std::wstring_view path,
+    bool checkImage, bool checkCrop, bool checkTextWidth, bool checkMissingImageBounds)
+{
+    OverlaySettings imported = m_model.settings.overlay;
+    const bool parsed = package.starts_with("0CDU") ? importRtssExchange(package, imported, error)
+                                                    : importRtssOverlay(package, imported, error);
+    if (!parsed) {
+        return false;
+    }
+    if (!package.starts_with("0CDU") && !path.empty()) {
+        loadRtssSiblingImage(std::wstring(path).c_str(), imported);
+    }
+    imported.opacityPercent = 100;
+    m_overlay.setSettings(imported);
+    if (!m_overlay.show(&error)) {
+        return false;
+    }
+    if (!m_overlay.hasVisiblePixels()) {
+        error = "импорт RTSS создал прозрачный кадр";
+        return false;
+    }
+    if (checkTextWidth && m_overlay.contentBounds().width() < 500.0f) {
+        error = "RTSS-текст с широкими буквами обрезан автоматической шириной слоя";
+        return false;
+    }
+    if (checkMissingImageBounds
+        && (m_overlay.contentBounds().width() < 250.0f || m_overlay.contentBounds().height() < 125.0f)) {
+        error = "RTSS-слой уменьшился при отсутствии PNG-атласа";
+        return false;
+    }
+    if (checkCrop && (!m_overlay.hasPixelColor(245, 43, 71) || m_overlay.hasPixelColor(43, 245, 71))) {
+        error = "RTSS-спрайт не выбрал нужную область PNG-атласа";
+        return false;
+    }
+    if (checkImage && !m_overlay.hasPixelColor(245, 43, 71)) {
+        error = "PNG-атлас RTSS не отрисовал ожидаемый цвет";
+        return false;
+    }
+    if (imported.rtssVisual) {
+        const auto& layers = imported.rtssVisual->layers;
+        if (std::any_of(layers.begin(), layers.end(), [](const RtssVisualLayer& layer) {
+                return layer.text.starts_with("<G=Frametime,");
+            })) {
+            MetricStore samples;
+            for (int index = 0; index < 32; ++index) {
+                samples.set(MetricId::FrameTime, 8.0 + index % 9);
+            }
+            m_overlay.setContent(samples, FpsSummary{}, L"");
+            m_overlay.repaint();
+            if (!m_overlay.hasVisiblePixels()) {
+                error = "RTSS-график с локальными данными не отрисован";
+                return false;
+            }
+            OverlaySettings graphOnly = imported;
+            auto visual = std::make_shared<RtssVisualLayout>(*imported.rtssVisual);
+            bool foundMode80 = false;
+            for (std::size_t index = 0; index < visual->layers.size(); ++index) {
+                auto& layer = visual->layers[index];
+                const bool graph = layer.text.starts_with("<G=Frametime,") && layer.text.ends_with(",80>");
+                graphOnly.rtssLayerEdits[index].visible = graph && !foundMode80;
+                if (graph && !foundMode80) {
+                    layer.text.replace(layer.text.size() - 4, 4, ",10>");
+                    foundMode80 = true;
+                }
+            }
+            if (foundMode80) {
+                graphOnly.rtssVisual = std::move(visual);
+                m_overlay.setSettings(graphOnly);
+                m_overlay.repaint();
+                if (!m_overlay.hasVisiblePixels()) {
+                    error = "RTSS-график режима 10 без видимых подложек не отрисован";
+                    return false;
+                }
+                m_overlay.setSettings(imported);
+                m_overlay.repaint();
+            }
+        }
+        OverlaySettings hidden = imported;
+        for (std::size_t index = 0; index < hidden.rtssVisual->layers.size(); ++index) {
+            hidden.rtssLayerEdits[index].visible = false;
+        }
+        m_overlay.setSettings(hidden);
+        m_overlay.repaint();
+        const bool blankWhenHidden = !m_overlay.hasVisiblePixels();
+        m_overlay.setSettings(imported);
+        m_overlay.repaint();
+        if (!blankWhenHidden || !m_overlay.hasVisiblePixels()) {
+            error = "не прошла проверка видимости RTSS-слоёв";
+            return false;
+        }
+    }
+    m_model.settings.overlay = std::move(imported);
+    m_model.overlayVisible = true;
+    return true;
 }
 
 int MainWindow::run(int smokeSeconds, const std::wstring& overlayShotDir)
@@ -890,6 +1195,8 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         } else if (wParam == static_cast<WPARAM>(kHotkeyEmergencyExit)) {
             m_quitRequested = true;
             PostMessageW(m_window, WM_CLOSE, 0, 0);
+        } else if (wParam == static_cast<WPARAM>(kHotkeyMenuScene)) {
+            toggleMenuScene();
         } else if (wParam == static_cast<WPARAM>(kHotkeyClickThrough)) {
             m_model.settings.overlay.clickThrough = !m_model.settings.overlay.clickThrough;
             m_overlay.setSettings(m_model.settings.overlay);
@@ -1357,6 +1664,96 @@ void MainWindow::applyAction(const UiHit& hit)
         saveSettings();
         break;
 
+    case ActionKind::CycleOverlayMonitor: {
+        const auto monitors = overlayMonitors();
+        if (monitors.empty()) {
+            break;
+        }
+        auto& placement = m_model.settings.overlay;
+        std::size_t next = 0;
+        for (std::size_t index = 0; index < monitors.size(); ++index) {
+            if (monitors[index].first == placement.savedMonitorId) {
+                next = (index + 1) % monitors.size();
+                break;
+            }
+        }
+        const RECT& chosen = monitors[next].second;
+        const int localX = placement.anchorMode == OverlayAnchorMode::Free ? placement.monitorOriginX : 16;
+        const int localY = placement.anchorMode == OverlayAnchorMode::Free ? placement.monitorOriginY : 16;
+        placement.anchorMode = OverlayAnchorMode::Free;
+        placement.followGameMonitor = false;
+        placement.savedMonitorId = monitors[next].first;
+        placement.monitorOriginX = std::clamp(localX, 0, static_cast<int>(chosen.right - chosen.left - 1));
+        placement.monitorOriginY = std::clamp(localY, 0, static_cast<int>(chosen.bottom - chosen.top - 1));
+        const RECT virtualScreen = overlayVirtualScreen();
+        placement.originX = originFromMonitor(placement.monitorOriginX, chosen.left, virtualScreen.left);
+        placement.originY = originFromMonitor(placement.monitorOriginY, chosen.top, virtualScreen.top);
+        m_overlay.setSettings(placement);
+        saveSettings();
+        break;
+    }
+
+    case ActionKind::CycleSparkline: {
+        auto& overlay = m_model.settings.overlay;
+        if (!overlay.showSparkline) {
+            overlay.showSparkline = true;
+            overlay.sparklineMetric = MetricId::Fps;
+        } else if (overlay.sparklineMetric == MetricId::Fps) {
+            overlay.sparklineMetric = MetricId::CpuLoad;
+        } else if (overlay.sparklineMetric == MetricId::CpuLoad) {
+            overlay.sparklineMetric = MetricId::GpuLoad;
+        } else if (overlay.sparklineMetric == MetricId::GpuLoad) {
+            overlay.sparklineMetric = MetricId::FrameTime;
+        } else {
+            overlay.showSparkline = false;
+        }
+        m_overlay.setSettings(overlay);
+        saveSettings();
+        break;
+    }
+
+    case ActionKind::ToggleMenuScene:
+        toggleMenuScene();
+        break;
+
+    case ActionKind::ToggleGameProfile: {
+        const auto nowMs = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+                .count());
+        if (m_recentGameKey.empty() || m_recentGameAtMs == 0 || nowMs < m_recentGameAtMs
+            || nowMs - m_recentGameAtMs > 300000) {
+            break;
+        }
+        if (m_profileActive && m_activeGameKey == m_recentGameKey) {
+            const std::string path = gameOverlayPath(m_activeGameKey);
+            if (DeleteFileW(widen(path).c_str()) == FALSE) {
+                MessageBoxW(
+                    m_window, L"Не удалось удалить профиль игры.", L"YawaFpsHub", MB_OK | MB_ICONERROR);
+                break;
+            }
+            m_profileActive = false;
+            m_model.hasGameProfile = false;
+            m_model.settings.overlay = m_baseOverlay;
+        } else {
+            if (!writeGameOverlay(m_recentGameKey, m_model.settings.overlay)) {
+                MessageBoxW(m_window,
+                    L"Не удалось сохранить профиль игры. Проверьте доступ к каталогу данных.", L"YawaFpsHub",
+                    MB_OK | MB_ICONERROR);
+                break;
+            }
+            m_activeGameKey = m_recentGameKey;
+            m_profileActive = true;
+            m_model.hasGameProfile = true;
+        }
+        m_overlay.setSettings(m_model.settings.overlay);
+        if (m_model.menuScene) {
+            refreshMenuScene();
+        }
+        saveSettings();
+        m_overlayEditor.refresh();
+        break;
+    }
+
     case ActionKind::SetLayout:
         m_model.settings.overlay.layout = static_cast<OverlayLayout>(hit.value);
         m_overlay.setSettings(m_model.settings.overlay);
@@ -1478,6 +1875,13 @@ void MainWindow::applyAction(const UiHit& hit)
         revealInExplorer(dataDirectory());
         break;
 
+    case ActionKind::ShowChangelog:
+        if (!openEmbeddedChangelog(m_window)) {
+            MessageBoxW(
+                m_window, L"Встроенный список изменений недоступен.", L"YawaFpsHub", MB_OK | MB_ICONWARNING);
+        }
+        break;
+
     case ActionKind::ResetSettings:
         m_model.settings = defaultSettings();
         m_theme = makeTheme(m_model.settings.ui.accent);
@@ -1494,6 +1898,13 @@ void MainWindow::applyAction(const UiHit& hit)
     case ActionKind::SetOpacity:
         m_model.settings.overlay.opacityPercent = std::clamp(hit.value, 0, 100);
         m_overlay.setSettings(m_model.settings.overlay);
+        break;
+
+    case ActionKind::SetMenuOpacity:
+        m_model.settings.overlay.menuOpacityPercent = std::clamp(hit.value, 0, 100);
+        if (m_model.menuScene) {
+            refreshMenuScene();
+        }
         break;
 
     case ActionKind::SetOverlayTextScale:
@@ -1765,46 +2176,118 @@ void MainWindow::applyAction(const UiHit& hit)
         OPENFILENAMEW dialog { };
         dialog.lStructSize = sizeof(dialog);
         dialog.hwndOwner = GetActiveWindow() != nullptr ? GetActiveWindow() : m_window;
-        dialog.lpstrFilter = L"Рецепт JSON (*.json)\0*.json\0\0";
+        dialog.lpstrFilter
+            = L"Рецепт JSON (*.json)\0*.json\0RTSS-макет (*.ovl)\0*.ovl\0RTSS-пакет (*.ovx)\0*.ovx\0\0";
         dialog.lpstrFile = filename;
         dialog.nMaxFile = MAX_PATH;
         dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
         if (GetOpenFileNameW(&dialog) == FALSE)
             break;
 
-        std::string json;
+        const wchar_t* suffix = std::wcsrchr(filename, L'.');
+        const bool exchange = suffix != nullptr && _wcsicmp(suffix, L".ovx") == 0;
+        const bool rtss = exchange || (suffix != nullptr && _wcsicmp(suffix, L".ovl") == 0);
+        std::string content;
         std::string error;
         const HANDLE file = CreateFileW(
             filename, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (file == INVALID_HANDLE_VALUE) {
-            error = "Не удалось открыть рецепт JSON: " + win32ErrorText(GetLastError());
+            error = "Не удалось открыть файл оверлея: " + win32ErrorText(GetLastError());
         } else {
             LARGE_INTEGER length { };
             if (GetFileSizeEx(file, &length) == FALSE || length.QuadPart < 0) {
-                error = "Не удалось определить размер рецепта JSON";
-            } else if (length.QuadPart > 16384) {
-                error = "Файл рецепта слишком большой (предел 16 КБ)";
+                error = "Не удалось определить размер файла оверлея";
+            } else if (length.QuadPart > (exchange ? 8 * 1024 * 1024 : rtss ? 1024 * 1024 : 16384)) {
+                error = "Файл оверлея слишком большой";
             } else {
-                json.resize(static_cast<std::size_t>(length.QuadPart));
+                content.resize(static_cast<std::size_t>(length.QuadPart));
                 DWORD received = 0;
-                if (ReadFile(file, json.data(), static_cast<DWORD>(json.size()), &received, nullptr) == FALSE
-                    || received != static_cast<DWORD>(json.size())) {
-                    error = "Не удалось прочитать рецепт JSON";
+                if (ReadFile(file, content.data(), static_cast<DWORD>(content.size()), &received, nullptr)
+                        == FALSE
+                    || received != static_cast<DWORD>(content.size())) {
+                    error = "Не удалось прочитать файл оверлея";
                 }
             }
             CloseHandle(file);
         }
         OverlaySettings imported = m_model.settings.overlay;
-        if (error.empty())
-            importOverlayRecipeJson(json, imported, error);
+        if (error.empty()) {
+            if (exchange) {
+                importRtssExchange(content, imported, error);
+            } else if (rtss) {
+                if (importRtssOverlay(content, imported, error)) {
+                    loadRtssSiblingImage(filename, imported);
+                }
+            } else {
+                importOverlayRecipeJson(content, imported, error);
+            }
+        }
         if (!error.empty()) {
             if (m_log)
-                m_log->warning("импорт рецепта JSON: " + error);
+                m_log->warning("импорт оверлея: " + error);
             MessageBoxW(dialog.hwndOwner, widen(error).c_str(), L"YawaFpsHub", MB_OK | MB_ICONERROR);
             break;
         }
+        if (rtss) {
+            const bool hasRows = std::any_of(
+                imported.metrics.begin(), imported.metrics.end(), [](bool selected) { return selected; });
+            const bool hasVisual = imported.rtssVisual
+                && std::any_of(imported.rtssVisual->layers.begin(), imported.rtssVisual->layers.end(),
+                    [](const RtssVisualLayer& layer) { return !layer.text.empty() || layer.hasBackground; });
+            if (!hasRows && !hasVisual) {
+                MessageBoxW(dialog.hwndOwner, L"Нет слоёв для отображения. Текущий оверлей не изменён.",
+                    L"Шаблон RTSS не перенесён", MB_OK | MB_ICONWARNING);
+                break;
+            }
+            const std::wstring notice = L"Это предварительная отрисовка, не копия RTSS 1:1. "
+                + std::to_wstring(imported.rtssOmittedLayers)
+                + L" слоёв без связанной метрики. Фон, обычный текст и координаты "
+                  L"переносятся; графики и сложные теги частичны, PNG-атлас рисуется "
+                  L"только для поддерживаемого тега изображения. "
+                  L"Недоступные значения помечены «нет данных». Исходный пакет остаётся "
+                  L"для обратного экспорта."
+                + ((imported.rtssVisual && !imported.rtssVisual->embeddedImage.empty()
+                       && !imported.rtssVisual->imageBytes)
+                        ? L"\n\nВнимание: встроенный PNG-атлас не найден или не поддерживается. "
+                          L"Слои изображений будут показаны как «нет данных»."
+                        : L"")
+                + L"\n\nОткрыть этот макет вместо текущего оверлея?";
+            if (MessageBoxW(dialog.hwndOwner, notice.c_str(), L"Частичный импорт RTSS",
+                    MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2)
+                != IDYES) {
+                break;
+            }
+        }
+        const OverlaySettings previous = m_model.settings.overlay;
+        const bool wasVisible = m_overlay.isVisible();
+        if (rtss && imported.opacityPercent == 0) {
+            imported.opacityPercent = 100;
+        }
         m_model.settings.overlay = std::move(imported);
         m_overlay.setSettings(m_model.settings.overlay);
+        std::string renderError;
+        if (!wasVisible && !m_model.menuScene) {
+            m_overlay.show(&renderError);
+        }
+        if (renderError.empty() && m_overlay.isVisible() && m_model.settings.overlay.opacityPercent > 0
+            && !m_overlay.hasVisiblePixels()) {
+            renderError = "Импортированный макет не дал видимых пикселей";
+        }
+        if (!renderError.empty()) {
+            m_model.settings.overlay = previous;
+            m_overlay.setSettings(previous);
+            if (!wasVisible) {
+                m_overlay.hide();
+            }
+            m_model.overlayVisible = wasVisible;
+            if (m_log) {
+                m_log->warning("импорт оверлея: " + renderError);
+            }
+            MessageBoxW(dialog.hwndOwner, widen(renderError).c_str(), L"Оверлей оставлен без изменений",
+                MB_OK | MB_ICONWARNING);
+            break;
+        }
+        m_model.overlayVisible = m_overlay.isVisible();
         saveSettings();
         m_overlayEditor.refresh();
         InvalidateRect(m_window, nullptr, FALSE);
@@ -1812,37 +2295,89 @@ void MainWindow::applyAction(const UiHit& hit)
     }
 
     case ActionKind::ExportOverlayRecipe: {
-        wchar_t filename[MAX_PATH] = L"yawa-overlay-recipe.json";
+        wchar_t filename[MAX_PATH] = L"yawa-overlay-recipe";
         OPENFILENAMEW dialog { };
         dialog.lStructSize = sizeof(dialog);
         dialog.hwndOwner = GetActiveWindow() != nullptr ? GetActiveWindow() : m_window;
-        dialog.lpstrFilter = L"Рецепт JSON (*.json)\0*.json\0\0";
+        dialog.lpstrFilter = L"Рецепт JSON (*.json)\0*.json\0RTSS-макет (*.ovl)\0*.ovl\0Исходный RTSS-пакет "
+                             L"(*.ovx)\0*.ovx\0\0";
         dialog.lpstrFile = filename;
         dialog.nMaxFile = MAX_PATH;
-        dialog.lpstrDefExt = L"json";
         dialog.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
-        if (GetSaveFileNameW(&dialog) != FALSE) {
-            const std::string json = serializeOverlayRecipeJson(m_model.settings.overlay);
-            const HANDLE file = CreateFileW(
-                filename, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-            DWORD written = 0;
-            const bool saved = file != INVALID_HANDLE_VALUE
-                && WriteFile(file, json.data(), static_cast<DWORD>(json.size()), &written, nullptr) != FALSE
-                && written == static_cast<DWORD>(json.size());
-            const DWORD writeError = GetLastError();
-            if (file != INVALID_HANDLE_VALUE) {
-                CloseHandle(file);
-                if (!saved) {
-                    DeleteFileW(filename);
-                }
+        if (GetSaveFileNameW(&dialog) == FALSE) {
+            break;
+        }
+        std::wstring path(filename);
+        const std::size_t dot = path.find_last_of(L'.');
+        const std::size_t slash = path.find_last_of(L"\\/");
+        const bool hasExtension = dot != std::wstring::npos && (slash == std::wstring::npos || dot > slash);
+        const bool exchange
+            = hasExtension ? _wcsicmp(path.c_str() + dot, L".ovx") == 0 : dialog.nFilterIndex == 3;
+        const bool rtss
+            = hasExtension ? _wcsicmp(path.c_str() + dot, L".ovl") == 0 : dialog.nFilterIndex == 2;
+        if (hasExtension && !rtss && !exchange && _wcsicmp(path.c_str() + dot, L".json") != 0) {
+            MessageBoxW(dialog.hwndOwner, L"Поддерживается экспорт .json, .ovl и исходного .ovx.",
+                L"YawaFpsHub", MB_OK | MB_ICONWARNING);
+            break;
+        }
+        if (exchange && !m_model.settings.overlay.rtssExchange) {
+            MessageBoxW(dialog.hwndOwner,
+                L"Нет импортированного .ovx для обратного экспорта. "
+                L"Создание нового пакета .ovx в Yawa не поддерживается.",
+                L"YawaFpsHub", MB_OK | MB_ICONWARNING);
+            break;
+        }
+        if (!hasExtension) {
+            path += exchange ? L".ovx" : rtss ? L".ovl" : L".json";
+            if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES
+                && MessageBoxW(dialog.hwndOwner, L"Файл уже существует. Заменить?", L"YawaFpsHub",
+                       MB_YESNO | MB_ICONWARNING)
+                    != IDYES) {
+                break;
             }
-            if (!saved) {
-                if (m_log) {
-                    m_log->warning("не удалось сохранить рецепт JSON: " + win32ErrorText(writeError));
-                }
-                MessageBoxW(dialog.hwndOwner, L"Не удалось сохранить рецепт JSON.", L"YawaFpsHub",
-                    MB_OK | MB_ICONERROR);
+        }
+        bool exportOriginal = false;
+        if (rtss && m_model.settings.overlay.rtssTemplate) {
+            const int choice = MessageBoxW(dialog.hwndOwner,
+                L"Да — экспортировать исходный RTSS .ovl без изменений (включая незнакомые слои).\n"
+                L"Нет — создать новый .ovl только из текущих показателей Yawa.\n"
+                L"Отмена — не сохранять.\n\n"
+                L"Правки в мастерской не изменяют исходный файл. Внешние картинки остаются "
+                L"зависимыми от своих путей.",
+                L"Как экспортировать RTSS?", MB_YESNOCANCEL | MB_ICONQUESTION);
+            if (choice == IDCANCEL) {
+                break;
             }
+            exportOriginal = choice == IDYES;
+        }
+        const std::string content = exchange ? *m_model.settings.overlay.rtssExchange
+            : exportOriginal                 ? *m_model.settings.overlay.rtssTemplate
+            : rtss                           ? serializeRtssOverlay(m_model.settings.overlay)
+                                             : serializeOverlayRecipeJson(m_model.settings.overlay);
+        if (content.empty()) {
+            MessageBoxW(dialog.hwndOwner, L"Нет показателей, которые можно экспортировать в RTSS.",
+                L"YawaFpsHub", MB_OK | MB_ICONWARNING);
+            break;
+        }
+        if (!writeTextFile(narrow(path), content)) {
+            if (m_log != nullptr) {
+                m_log->warning("не удалось сохранить оверлей " + narrow(path));
+            }
+            MessageBoxW(
+                dialog.hwndOwner, L"Не удалось сохранить файл оверлея.", L"YawaFpsHub", MB_OK | MB_ICONERROR);
+        } else if (exchange) {
+            MessageBoxW(dialog.hwndOwner,
+                L"Исходный пакет .ovx записан без изменений, включая вложенные "
+                L"файлы. Правки мастерской Yawa в нём не отражены.",
+                L"Экспорт RTSS", MB_OK | MB_ICONINFORMATION);
+        } else if (rtss) {
+            MessageBoxW(dialog.hwndOwner,
+                exportOriginal
+                    ? L"Исходный .ovl записан без изменений. Вложенные в импортированный .ovx изображения "
+                      L"в этот файл не включены: для полного пакета экспортируйте исходный .ovx."
+                    : L"Созданы только показатели RTSS HAL и FPS. Форма, картинки и внешние датчики "
+                      L"не добавлены. Проверьте шаблон в RTSS OverlayEditor.",
+                L"Экспорт RTSS", MB_OK | MB_ICONINFORMATION);
         }
         break;
     }
@@ -1872,6 +2407,9 @@ void MainWindow::applyAction(const UiHit& hit)
                 },
                 [this](bool finished) {
                     m_overlay.setSettings(m_model.settings.overlay);
+                    if (m_model.menuScene) {
+                        refreshMenuScene();
+                    }
                     if (finished) {
                         saveSettings();
                     }
@@ -1903,8 +2441,17 @@ void MainWindow::applyAction(const UiHit& hit)
 
 void MainWindow::saveSettings()
 {
-    const std::string text = serializeSettings(m_model.settings);
-    if (!writeTextFile(settingsPath(), text) && m_log != nullptr) {
+    if (m_profileActive && !m_activeGameKey.empty()) {
+        copyOverlayPlacement(m_baseOverlay, m_model.settings.overlay);
+        if (!writeGameOverlay(m_activeGameKey, m_model.settings.overlay) && m_log != nullptr) {
+            m_log->warning("не удалось записать профиль " + gameOverlayPath(m_activeGameKey));
+        }
+    } else {
+        m_baseOverlay = m_model.settings.overlay;
+    }
+    Settings global = m_model.settings;
+    global.overlay = m_baseOverlay;
+    if (!writeTextFile(settingsPath(), serializeSettings(global)) && m_log != nullptr) {
         m_log->warning("не удалось записать " + settingsPath());
     }
 }
@@ -2223,6 +2770,53 @@ void MainWindow::samplingLoop()
 
 void MainWindow::onTick()
 {
+    std::string gameKey;
+    const auto profileNowMs
+        = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+                .count());
+    {
+        std::lock_guard<std::mutex> guard(m_modelMutex);
+        if (m_model.gameProcessId != 0) {
+            gameKey = gameProfileKey(m_model.gameName);
+            if (!gameKey.empty()) {
+                m_recentGameKey = gameKey;
+                m_model.profileGameName = m_model.gameName;
+            } else {
+                m_recentGameKey.clear();
+                m_model.profileGameName.clear();
+            }
+        } else if (m_recentGameAtMs == 0 || profileNowMs < m_recentGameAtMs
+            || profileNowMs - m_recentGameAtMs > 300000) {
+            m_recentGameKey.clear();
+            m_model.profileGameName.clear();
+        }
+    }
+    if (gameKey.empty() && m_overlayEditor.isOpen() && m_profileActive) {
+        gameKey = m_activeGameKey;
+    }
+    if (gameKey != m_activeGameKey) {
+        Settings saved;
+        std::string content;
+        std::string error;
+        const bool hasProfile = !gameKey.empty() && readTextFile(gameOverlayPath(gameKey), content)
+            && content.size() <= 20 * 1024 * 1024 && parseSettings(content, saved, error);
+        OverlaySettings resolved;
+        {
+            std::lock_guard<std::mutex> guard(m_modelMutex);
+            m_activeGameKey = gameKey;
+            m_profileActive = hasProfile;
+            m_model.hasGameProfile = hasProfile;
+            m_model.settings.overlay
+                = hasProfile ? overlayForGame(m_baseOverlay, saved.overlay) : m_baseOverlay;
+            resolved = m_model.settings.overlay;
+        }
+        m_overlay.setSettings(resolved);
+        if (m_model.menuScene) {
+            refreshMenuScene();
+        }
+        m_overlayEditor.refresh();
+    }
     static const auto started = std::chrono::steady_clock::now();
     const auto now = std::chrono::steady_clock::now();
     std::uint32_t gamePid = 0;
@@ -2354,7 +2948,12 @@ void MainWindow::registerHotkeys()
     UnregisterHotKey(m_window, kHotkeyWindow);
     UnregisterHotKey(m_window, kHotkeyClickThrough);
     UnregisterHotKey(m_window, kHotkeyEmergencyExit);
+    UnregisterHotKey(m_window, kHotkeyMenuScene);
     RegisterHotKey(m_window, kHotkeyEmergencyExit, MOD_CONTROL | MOD_SHIFT | MOD_NOREPEAT, VK_F10);
+    if (RegisterHotKey(m_window, kHotkeyMenuScene, MOD_CONTROL | MOD_NOREPEAT, VK_F11) == FALSE
+        && m_log != nullptr) {
+        m_log->warning("хоткей Ctrl+F11 для сцены меню занят другой программой");
+    }
 
     // Коды из настроек: ноль означает «клавиша отключена». MOD_NOREPEAT не даёт
     // автоповтору удерживаемой клавиши переключать оверлей десятки раз в секунду.

@@ -403,9 +403,13 @@ namespace {
         }
         top += 30.0f;
 
-        const Rect follow { inner.left, top, inner.right, top + 27.0f };
+        const Rect follow { inner.left, top, inner.left + 190.0f, top + 27.0f };
         drawChip(renderer, follow, L"На мониторе игры", overlay.followGameMonitor, theme, TextRole::Tiny);
         hits.push_back(UiHit { follow, ActionKind::ToggleFollowGameMonitor, 0 });
+        const Rect monitor { inner.left + 196.0f, top, inner.right, top + 27.0f };
+        drawChip(renderer, monitor, overlay.savedMonitorId.empty() ? L"Выбрать экран →" : L"Другой экран →",
+            !overlay.savedMonitorId.empty(), theme, TextRole::Tiny, isHovered(model, monitor));
+        hits.push_back(UiHit { monitor, ActionKind::CycleOverlayMonitor, 0 });
         top += 32.0f;
 
         renderer.text(L"Вид", Rect { inner.left, top, inner.left + 40.0f, top + 16.0f }, TextRole::Small,
@@ -666,9 +670,18 @@ float overlayOrderCardHeight(const OverlaySettings& settings)
     return 52.0f + 27.0f * static_cast<float>(count);
 }
 
-float overlayEditorControlsHeight(const OverlaySettings& settings)
+float overlayEditorSectionHeight(const OverlaySettings& settings, int section)
 {
-    return 268.0f + 1458.0f + overlayOrderCardHeight(settings) + 2.0f * kGap;
+    switch (section) {
+    case 0:
+        return 268.0f + kGap + 306.0f;
+    case 1:
+        return 574.0f;
+    case 2:
+        return 1458.0f - 574.0f;
+    default:
+        return overlayOrderCardHeight(settings);
+    }
 }
 
 void drawOverlayEditorPreview(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& card,
@@ -677,6 +690,9 @@ void drawOverlayEditorPreview(Renderer& renderer, const AppModel& model, const T
     const Rect inner = card.inset(kCardPadding);
     const Rect scene { inner.left, inner.top + 46.0f, inner.right, inner.bottom };
     OverlaySettings preview = model.settings.overlay;
+    if (model.menuScene) {
+        preview.opacityPercent = preview.menuOpacityPercent;
+    }
     preview.offsetX = scaledOverlayOffset(preview.offsetX, screenWidth, scene.width());
     preview.offsetY = scaledOverlayOffset(preview.offsetY, screenHeight, scene.height());
     preview.originX = scaledOverlayOffset(preview.originX, screenWidth, scene.width());
@@ -685,28 +701,100 @@ void drawOverlayEditorPreview(Renderer& renderer, const AppModel& model, const T
     drawPreviewCard(renderer, model, theme, card, unused, &preview);
 }
 
-void drawOverlayEditorControls(
+void drawOverlayEditorQuickControls(
     Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area, std::vector<UiHit>& hits)
 {
-    float top = area.top;
-    const auto place = [&](float height) {
-        const Rect card { area.left, top, area.right, top + height };
-        top += height + kGap;
-        return card;
-    };
-    const Rect gallery = place(268.0f);
+    const Rect gallery { area.left, area.top, area.right, area.top + 268.0f };
     renderer.pushClip(gallery);
     drawCard(renderer, gallery, theme);
     drawStyleGallery(renderer, model, theme, gallery.inset(kCardPadding), hits);
     renderer.popClip();
-    const Rect controls = place(1458.0f);
-    renderer.pushClip(controls);
-    drawControlsCard(renderer, model, theme, controls, hits);
+
+    const Rect card { area.left, gallery.bottom + kGap, area.right, gallery.bottom + kGap + 306.0f };
+    renderer.pushClip(card);
+    drawCard(renderer, card, theme);
+    const Rect inner = card.inset(kCardPadding);
+    const OverlaySettings& overlay = model.settings.overlay;
+    renderer.text(L"Соберите оверлей", Rect { inner.left, inner.top, inner.right, inner.top + 22.0f },
+        TextRole::Heading, theme.text);
+    renderer.text(model.profileGameName.empty() ? L"Рецепт выше · слои слева · плашку двигайте на холсте"
+                                                : L"Игра: " + model.profileGameName,
+        Rect { inner.left, inner.top + 22.0f, inner.right, inner.top + 38.0f }, TextRole::Tiny,
+        theme.textDim);
+
+    constexpr std::array<std::wstring_view, 3> names { L"Плитки", L"Строка", L"Шкала" };
+    const float chipWidth = (inner.width() - 12.0f) / 3.0f;
+    for (std::size_t index = 0; index < names.size(); ++index) {
+        const float left = inner.left + static_cast<float>(index) * (chipWidth + 6.0f);
+        const Rect chip { left, inner.top + 44.0f, left + chipWidth, inner.top + 70.0f };
+        drawChip(renderer, chip, names[index], static_cast<std::size_t>(overlay.layout) == index, theme,
+            TextRole::Tiny, isHovered(model, chip));
+        hits.push_back(UiHit { chip, ActionKind::SetLayout, static_cast<int>(index) });
+    }
+    drawSlider(renderer, Rect { inner.left, inner.top + 80.0f, inner.right, inner.top + 114.0f },
+        overlay.scalePercent, 70, 160, L"Масштаб", theme, hits, ActionKind::SetScale, L"%");
+    drawSlider(renderer, Rect { inner.left, inner.top + 126.0f, inner.right, inner.top + 160.0f },
+        overlay.opacityPercent, 0, 100, L"Прозрачность", theme, hits, ActionKind::SetOpacity, L"%");
+    const Rect follow { inner.left, inner.top + 172.0f, inner.left + 190.0f, inner.top + 196.0f };
+    drawChip(renderer, follow, L"На мониторе игры", overlay.followGameMonitor, theme, TextRole::Tiny,
+        isHovered(model, follow));
+    hits.push_back(UiHit { follow, ActionKind::ToggleFollowGameMonitor, 0 });
+    const Rect spark { inner.left + 196.0f, inner.top + 172.0f, inner.right, inner.top + 196.0f };
+    const std::wstring_view graph = !overlay.showSparkline ? L"График: выкл"
+        : overlay.sparklineMetric == MetricId::CpuLoad     ? L"График: CPU"
+        : overlay.sparklineMetric == MetricId::GpuLoad     ? L"График: GPU"
+        : overlay.sparklineMetric == MetricId::FrameTime   ? L"График: кадр"
+                                                           : L"График: FPS";
+    drawChip(renderer, spark, graph, overlay.showSparkline, theme, TextRole::Tiny, isHovered(model, spark));
+    hits.push_back(UiHit { spark, ActionKind::CycleSparkline, 0 });
+    const Rect profile { inner.left, inner.top + 202.0f, inner.left + 186.0f, inner.top + 226.0f };
+    drawChip(renderer, profile, model.hasGameProfile ? L"Убрать профиль игры" : L"Сохранить для игры",
+        model.hasGameProfile, theme, TextRole::Tiny, isHovered(model, profile));
+    if (!model.profileGameName.empty()) {
+        hits.push_back(UiHit { profile, ActionKind::ToggleGameProfile, 0 });
+    }
+    const Rect scene { inner.left + 192.0f, inner.top + 202.0f, inner.right, inner.top + 226.0f };
+    drawChip(renderer, scene,
+        model.menuScene                       ? L"Вернуть · Ctrl+F11"
+            : overlay.menuOpacityPercent == 0 ? L"Меню: скрыть · Ctrl+F11"
+                                              : L"Меню: приглушить · Ctrl+F11",
+        model.menuScene, theme, TextRole::Tiny, isHovered(model, scene));
+    hits.push_back(UiHit { scene, ActionKind::ToggleMenuScene, 0 });
+    drawSlider(renderer, Rect { inner.left, inner.top + 238.0f, inner.right, inner.top + 272.0f },
+        overlay.menuOpacityPercent, 0, 100, L"В меню (0 — скрыть)", theme, hits, ActionKind::SetMenuOpacity,
+        L"%");
     renderer.popClip();
-    const Rect order = place(overlayOrderCardHeight(model.settings.overlay));
-    renderer.pushClip(order);
-    drawOrderCard(renderer, model, theme, order, hits);
+}
+
+void drawOverlayEditorSection(Renderer& renderer, const AppModel& model, const Theme& theme, const Rect& area,
+    int section, std::vector<UiHit>& hits)
+{
+    if (section == 0) {
+        drawOverlayEditorQuickControls(renderer, model, theme, area, hits);
+        return;
+    }
+    if (section == 3) {
+        const Rect card { area.left, area.top, area.right,
+            area.top + overlayOrderCardHeight(model.settings.overlay) };
+        drawOrderCard(renderer, model, theme, card, hits);
+        return;
+    }
+
+    // Одна и та же карточка рисуется в двух окнах просмотра: параметры не дублируются.
+    constexpr float kTextOffset = 574.0f;
+    const float offset = section == 2 ? kTextOffset : 0.0f;
+    const Rect card { area.left, area.top - offset, area.right, area.top - offset + 1458.0f };
+    const Rect visible { area.left, area.top, area.right,
+        area.top + overlayEditorSectionHeight(model.settings.overlay, section) };
+    std::vector<UiHit> pageHits;
+    renderer.pushClip(visible);
+    drawControlsCard(renderer, model, theme, card, pageHits);
     renderer.popClip();
+    for (const UiHit& hit : pageHits) {
+        if (hit.rect.top >= visible.top && hit.rect.top < visible.bottom) {
+            hits.push_back(hit);
+        }
+    }
 }
 
 void drawOverlayView(

@@ -1,8 +1,11 @@
 #include "render/overlay_painter.h"
 #include "metrics/overlay_rows.h"
 
+#include <wincodec.h>
+
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cmath>
 #include <cstdio>
 #include <cwctype>
@@ -131,13 +134,14 @@ namespace {
     {
     public:
         Painter(ID2D1RenderTarget* target, const Theme& theme, const OverlayFormats& formats, float scale,
-            float opacity, const OverlayChrome& chrome, int outline = 0)
+            float opacity, const OverlayChrome& chrome, const OverlaySettings& settings, int outline = 0)
             : m_target(target)
             , m_theme(theme)
             , m_formats(formats)
             , m_scale(scale)
             , m_opacity(opacity)
             , m_chrome(chrome)
+            , m_settings(settings)
             , m_outline(static_cast<float>(std::max(outline, 0)))
         {
         }
@@ -235,6 +239,8 @@ namespace {
                 return;
             }
 
+            const float textBottom
+                = rect.bottom + std::max(0.0f, (m_rowTextFactor - 1.0f) * format->GetFontSize());
             const DWRITE_TEXT_ALIGNMENT previous = format->GetTextAlignment();
             format->SetTextAlignment(align == TextAlign::Right ? DWRITE_TEXT_ALIGNMENT_TRAILING
                     : align == TextAlign::Center               ? DWRITE_TEXT_ALIGNMENT_CENTER
@@ -254,7 +260,7 @@ namespace {
                     };
                     for (const auto& [dx, dy] : shifts) {
                         m_target->DrawTextW(value.data(), static_cast<UINT32>(value.size()), format,
-                            D2D1::RectF(rect.left + dx, rect.top + dy, rect.right + dx, rect.bottom + dy),
+                            D2D1::RectF(rect.left + dx, rect.top + dy, rect.right + dx, textBottom + dy),
                             edgeBrush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
                     }
                     edgeBrush->Release();
@@ -268,8 +274,7 @@ namespace {
             }
 
             m_target->DrawTextW(value.data(), static_cast<UINT32>(value.size()), format,
-                D2D1::RectF(rect.left, rect.top, rect.right, rect.bottom), brush,
-                D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                D2D1::RectF(rect.left, rect.top, rect.right, textBottom), brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
             format->SetTextAlignment(previous);
             brush->Release();
         }
@@ -289,6 +294,81 @@ namespace {
             layout->GetMetrics(&metrics);
             layout->Release();
             return metrics.widthIncludingTrailingWhitespace;
+        }
+
+        void setRowBounds(const OverlaySettings& settings, std::vector<OverlayRowBounds>* bounds,
+            const Rect& frame, float fit)
+        {
+            m_rowOffsets = &settings.styleRowOffsets;
+            m_rowBounds = bounds;
+            m_frame = frame;
+            m_fit = fit;
+        }
+
+        void beginTextSize(MetricId id)
+        {
+            const int percent = m_settings.metricTextScalePercent[static_cast<std::size_t>(id)];
+            if (percent == 100 || m_formats.factory == nullptr) {
+                return;
+            }
+            m_baseFormats = m_formats;
+            const float factor = static_cast<float>(std::clamp(percent, 70, 200)) / 100.0f;
+            m_rowFormats = { styledFormat(m_formats.factory, m_formats.key, factor, m_settings),
+                styledFormat(m_formats.factory, m_formats.value, factor, m_settings),
+                styledFormat(m_formats.factory, m_formats.smallText, factor, m_settings),
+                styledFormat(m_formats.factory, m_formats.mono, factor, m_settings) };
+            if (std::all_of(m_rowFormats.begin(), m_rowFormats.end(),
+                    [](IDWriteTextFormat* format) { return format != nullptr; })) {
+                m_formats = OverlayFormats { m_formats.factory, m_rowFormats[0], m_rowFormats[1],
+                    m_rowFormats[2], m_rowFormats[3] };
+                m_rowTextFactor = factor;
+            } else {
+                endTextSize();
+            }
+        }
+
+        void endTextSize()
+        {
+            if (m_rowFormats[0] == nullptr && m_rowFormats[1] == nullptr && m_rowFormats[2] == nullptr
+                && m_rowFormats[3] == nullptr) {
+                return;
+            }
+            m_formats = m_baseFormats;
+            for (auto*& format : m_rowFormats) {
+                if (format)
+                    format->Release();
+                format = nullptr;
+            }
+            m_rowTextFactor = 1.0f;
+        }
+
+        void beginRow(MetricId id, const Rect& row)
+        {
+            beginTextSize(id);
+            const auto& offset = (*m_rowOffsets)[static_cast<std::size_t>(id)];
+            const float dx = static_cast<float>(offset.x) * m_scale;
+            const float dy = static_cast<float>(offset.y) * m_scale;
+            if (m_rowBounds != nullptr) {
+                m_rowBounds->push_back({ id,
+                    { m_frame.left + (row.left + dx - m_frame.left) * m_fit,
+                        m_frame.top + (row.top + dy - m_frame.top) * m_fit,
+                        m_frame.left + (row.right + dx - m_frame.left) * m_fit,
+                        m_frame.top + (row.bottom + dy - m_frame.top) * m_fit } });
+            }
+            if (offset.x != 0 || offset.y != 0) {
+                m_target->GetTransform(&m_rowTransform);
+                m_target->SetTransform(D2D1::Matrix3x2F::Translation(dx, dy) * m_rowTransform);
+                m_rowTransformed = true;
+            }
+        }
+
+        void endRow()
+        {
+            if (m_rowTransformed) {
+                m_target->SetTransform(m_rowTransform);
+                m_rowTransformed = false;
+            }
+            endTextSize();
         }
 
         float scale() const { return m_scale; }
@@ -323,8 +403,18 @@ namespace {
         float m_scale = 1.0f;
         float m_opacity = 1.0f;
         OverlayChrome m_chrome;
+        const OverlaySettings& m_settings;
+        OverlayFormats m_baseFormats { };
+        std::array<IDWriteTextFormat*, 4> m_rowFormats { };
+        float m_rowTextFactor = 1.0f;
         float m_outline = 0.0f;
         float m_backgroundOpacity = 1.0f;
+        std::vector<OverlayRowBounds>* m_rowBounds = nullptr;
+        Rect m_frame { };
+        float m_fit = 1.0f;
+        const std::array<OverlayRowOffset, kMetricCount>* m_rowOffsets = nullptr;
+        D2D1::Matrix3x2F m_rowTransform { };
+        bool m_rowTransformed = false;
     };
 
     // Полный визуальный набор стиля: палитра, форма, типографика. Раньше стили отличались
@@ -598,6 +688,8 @@ namespace {
         const float right = frame.right - look.padding * scale;
 
         if (rowShown(text, 0)) {
+            painter.beginRow(text.ids[0],
+                Rect { frame.left, frame.top + 8.0f * scale, frame.right, frame.top + 62.0f * scale });
             const Rect chip { left, frame.top + 8.0f * scale, left + 66.0f * scale,
                 frame.top + 26.0f * scale };
             painter.fillRound(chip, 9.0f * scale, look.label, 0.12f);
@@ -612,6 +704,7 @@ namespace {
                 TextRole::Tiny, look.label);
             painter.line(
                 left, frame.top + 64.0f * scale, right, frame.top + 64.0f * scale, look.border, 1.0f, 0.22f);
+            painter.endRow();
         }
 
         float y = frame.top + (rowShown(text, 0) ? 70.0f : 8.0f) * scale;
@@ -619,12 +712,15 @@ namespace {
             if (!rowShown(text, index)) {
                 continue;
             }
+            painter.beginRow(
+                text.ids[index], Rect { frame.left, y, frame.right, y + (18.0f + look.rowGap) * scale });
             painter.text(labels[index],
                 Rect { left, y, left + look.labelWidth * scale, y + kRowHeight * scale }, TextRole::Tiny,
                 look.label);
             painter.text(values[index],
                 Rect { right - look.valueWidth * scale, y, right, y + kRowHeight * scale }, TextRole::Small,
                 look.rowPalette[index], TextAlign::Right);
+            painter.endRow();
             y += (18.0f + look.rowGap) * scale;
         }
     }
@@ -647,6 +743,8 @@ namespace {
         const float right = frame.right - look.padding * scale;
 
         if (rowShown(text, 0)) {
+            painter.beginRow(text.ids[0],
+                Rect { frame.left, frame.top + 8.0f * scale, frame.right, frame.top + 60.0f * scale });
             painter.text(labels[0],
                 Rect { left, frame.top + 8.0f * scale, left + 120.0f * scale, frame.top + 22.0f * scale },
                 TextRole::Tiny, look.accent);
@@ -660,6 +758,7 @@ namespace {
 
             painter.line(
                 left, frame.top + 60.0f * scale, right, frame.top + 60.0f * scale, look.accent, 1.0f, 0.35f);
+            painter.endRow();
         }
 
         float y = frame.top + (rowShown(text, 0) ? 64.0f : 8.0f) * scale;
@@ -667,6 +766,8 @@ namespace {
             if (!rowShown(text, index)) {
                 continue;
             }
+            painter.beginRow(
+                text.ids[index], Rect { frame.left, y, frame.right, y + (18.0f + look.rowGap) * scale });
             painter.fillCircle(left + 2.0f * scale, y + 8.0f * scale, 2.0f * scale, look.rowPalette[index]);
             painter.text(labels[index],
                 Rect { left + 10.0f * scale, y, left + look.labelWidth * scale, y + kRowHeight * scale },
@@ -674,6 +775,7 @@ namespace {
             painter.text(values[index],
                 Rect { right - look.valueWidth * scale, y, right, y + kRowHeight * scale }, TextRole::Small,
                 look.rowPalette[index], TextAlign::Right);
+            painter.endRow();
             y += (18.0f + look.rowGap) * scale;
         }
     }
@@ -693,6 +795,7 @@ namespace {
             if (!rowShown(text, index)) {
                 continue;
             }
+            painter.beginRow(text.ids[index], Rect { frame.left, y, frame.right, y + 19.0f * scale });
             painter.text(labels[index],
                 Rect { frame.left, y, frame.left + look.padding * scale + look.labelWidth * scale,
                     y + kRowHeight * scale },
@@ -701,6 +804,7 @@ namespace {
                 Rect { frame.left + look.padding * scale + look.labelWidth * scale, y, frame.right,
                     y + kRowHeight * scale },
                 TextRole::Mono, look.value);
+            painter.endRow();
             y += 19.0f * scale;
         }
     }
@@ -729,12 +833,15 @@ namespace {
             if (!rowShown(text, index)) {
                 continue;
             }
+            painter.beginRow(text.ids[index],
+                Rect { frame.left, y, frame.right, y + std::min(kRowHeight, 18.0f + look.rowGap) * scale });
             painter.text(L"> " + labels[index],
                 Rect { left, y, left + look.labelWidth * scale, y + kRowHeight * scale }, TextRole::Mono,
                 look.label);
             painter.text(tracked(values[index], look.letterSpacing),
                 Rect { right - look.valueWidth * scale, y, right, y + kRowHeight * scale }, TextRole::Mono,
                 look.rowPalette[index], TextAlign::Right);
+            painter.endRow();
             y += (18.0f + look.rowGap) * scale;
         }
     }
@@ -765,6 +872,8 @@ namespace {
         const float right = frame.right - look.padding * scale;
 
         if (rowShown(text, 0)) {
+            painter.beginRow(text.ids[0],
+                Rect { frame.left, frame.top + 8.0f * scale, frame.right, frame.top + 62.0f * scale });
             painter.text(labels[0],
                 Rect { left, frame.top + 8.0f * scale, left + 140.0f * scale, frame.top + 22.0f * scale },
                 TextRole::Tiny, look.accent);
@@ -773,6 +882,7 @@ namespace {
                 TextRole::Display, look.value);
             painter.line(
                 left, frame.top + 62.0f * scale, right, frame.top + 62.0f * scale, look.border, 1.0f, 0.35f);
+            painter.endRow();
         }
 
         float y = frame.top + (rowShown(text, 0) ? 68.0f : 10.0f) * scale;
@@ -780,12 +890,15 @@ namespace {
             if (!rowShown(text, index)) {
                 continue;
             }
+            painter.beginRow(
+                text.ids[index], Rect { frame.left, y, frame.right, y + (18.0f + look.rowGap) * scale });
             painter.text(labels[index],
                 Rect { left, y, left + look.labelWidth * scale, y + kRowHeight * scale }, TextRole::Tiny,
                 look.label);
             painter.text(values[index],
                 Rect { right - look.valueWidth * scale, y, right, y + kRowHeight * scale }, TextRole::Small,
                 look.rowPalette[index], TextAlign::Right);
+            painter.endRow();
             y += (18.0f + look.rowGap) * scale;
         }
     }
@@ -804,6 +917,8 @@ namespace {
             if (!rowShown(text, index)) {
                 continue;
             }
+            painter.beginRow(text.ids[index],
+                Rect { frame.left, y, frame.right, y + std::min(kRowHeight, 18.0f + look.rowGap) * scale });
             painter.text(labels[index],
                 Rect { frame.left + look.padding * scale, y, frame.left + 86.0f * scale,
                     y + kRowHeight * scale },
@@ -812,6 +927,7 @@ namespace {
                 Rect { frame.right - look.padding * scale - look.valueWidth * scale, y,
                     frame.right - look.padding * scale, y + kRowHeight * scale },
                 TextRole::Small, look.rowPalette[index], TextAlign::Right);
+            painter.endRow();
             y += (18.0f + look.rowGap) * scale;
         }
     }
@@ -841,11 +957,13 @@ namespace {
             const float valueWidth = big ? painter.measure(values[index], TextRole::Value)
                                          : painter.measure(values[index], TextRole::Small);
             const float cellWidth = std::max(labelWidth, valueWidth) + 10.0f * scale;
+            painter.beginRow(text.ids[index], Rect { x, top, x + cellWidth, bottom });
 
             painter.text(labels[index], Rect { x, top, x + cellWidth, top + 12.0f * scale }, TextRole::Tiny,
                 look.label);
             painter.text(values[index], Rect { x, top + (big ? 8.0f : 12.0f) * scale, x + cellWidth, bottom },
                 big ? TextRole::Value : TextRole::Small, look.rowPalette[index]);
+            painter.endRow();
             x += cellWidth;
 
             if (look.separators) {
@@ -890,12 +1008,15 @@ namespace {
             if (!rowShown(text, index)) {
                 continue;
             }
+            painter.beginRow(text.ids[index],
+                Rect { frame.left, y, frame.right, y + std::min(kRowHeight, 18.0f + look.rowGap) * scale });
             painter.text(labels[index],
                 Rect { left, y, left + look.labelWidth * scale, y + kRowHeight * scale }, TextRole::Mono,
                 look.label);
             painter.text(tracked(values[index], look.letterSpacing),
                 Rect { right - look.valueWidth * scale, y, right, y + kRowHeight * scale }, TextRole::Mono,
                 look.rowPalette[index], TextAlign::Right);
+            painter.endRow();
             y += (18.0f + look.rowGap) * scale;
         }
     }
@@ -915,6 +1036,7 @@ namespace {
             if (!rowShown(text, index)) {
                 continue;
             }
+            painter.beginRow(text.ids[index], Rect { frame.left, y, frame.right, y + 24.0f * scale });
             painter.text(labels[index], Rect { left, y, right - 90.0f * scale, y + 17.0f * scale },
                 TextRole::Small, look.label);
             painter.text(text.values[index], Rect { right - 90.0f * scale, y, right, y + 17.0f * scale },
@@ -929,8 +1051,458 @@ namespace {
                         Rect { left, barTop, end, track.bottom }, 1.5f * scale, look.rowPalette[index], 0.9f);
                 }
             }
+            painter.endRow();
             y += (30.0f + look.rowGap) * scale;
         }
+    }
+
+    std::wstring rtssWide(std::string_view encoded)
+    {
+        if (encoded.empty()) {
+            return { };
+        }
+        const int length
+            = MultiByteToWideChar(1251, 0, encoded.data(), static_cast<int>(encoded.size()), nullptr, 0);
+        if (length <= 0) {
+            return { };
+        }
+        std::wstring value(static_cast<std::size_t>(length), L'\0');
+        MultiByteToWideChar(1251, 0, encoded.data(), static_cast<int>(encoded.size()), value.data(), length);
+        return value;
+    }
+
+    std::wstring rtssText(
+        const RtssVisualLayout& layout, std::string_view source, const OverlayText& values, bool utf8 = false)
+    {
+        std::wstring result;
+        for (std::size_t at = 0; at < source.size() && result.size() < 8192;) {
+            const char start = source[at];
+            if (start == '<' || start == '%') {
+                const auto end = source.find(start == '<' ? '>' : '%', at + 1);
+                if (end != std::string_view::npos) {
+                    const std::string_view token = source.substr(at, end - at + 1);
+                    auto known = std::find_if(layout.availableTags.begin(), layout.availableTags.end(),
+                        [token](const auto& entry) { return entry.first == token; });
+                    if (known != layout.availableTags.end()) {
+                        const auto id = std::find(values.ids.begin(), values.ids.end(), known->second);
+                        if (id != values.ids.end()) {
+                            std::wstring metric
+                                = values.values[static_cast<std::size_t>(id - values.ids.begin())];
+                            if (metric != L"нет данных") {
+                                const auto unit = metric.find_first_of(L" %°/");
+                                if (unit != std::wstring::npos) {
+                                    metric.resize(unit);
+                                }
+                            }
+                            result += metric;
+                        } else {
+                            result += L"нет данных";
+                        }
+                    } else {
+                        result += L"нет данных";
+                    }
+                    at = end + 1;
+                    continue;
+                }
+            }
+            if (start == '\\' && at + 1 < source.size()) {
+                result += L' ';
+                at += 2;
+                continue;
+            }
+            if (start == '\n' || start == '\r') {
+                result += L'\n';
+                at += start == '\r' && at + 1 < source.size() && source[at + 1] == '\n' ? 2 : 1;
+                continue;
+            }
+            if (static_cast<unsigned char>(start) < 32) {
+                ++at;
+                continue;
+            }
+            std::size_t end = at + 1;
+            while (end < source.size() && source[end] != '<' && source[end] != '%' && source[end] != '\\'
+                && static_cast<unsigned char>(source[end]) >= 32) {
+                ++end;
+            }
+            result += utf8 ? wideLabel(source.substr(at, end - at)) : rtssWide(source.substr(at, end - at));
+            at = end;
+        }
+        return result;
+    }
+
+    struct RtssRaster
+    {
+        std::weak_ptr<const std::string> source;
+        std::vector<std::uint8_t> pixels;
+        UINT width = 0;
+        UINT height = 0;
+    };
+
+    const RtssRaster* rtssRaster(const RtssVisualLayout& layout)
+    {
+        if (!layout.imageBytes || layout.imageBytes->size() < 24
+            || layout.imageBytes->size() > 4 * 1024 * 1024
+            || !layout.imageBytes->starts_with("\x89PNG\r\n\x1A\n")) {
+            return nullptr;
+        }
+        static std::vector<RtssRaster> cache;
+        cache.erase(std::remove_if(cache.begin(), cache.end(),
+                        [](const RtssRaster& raster) { return raster.source.expired(); }),
+            cache.end());
+        for (const RtssRaster& raster : cache) {
+            if (raster.source.lock() == layout.imageBytes) {
+                return raster.pixels.empty() ? nullptr : &raster;
+            }
+        }
+        if (cache.size() == 3) {
+            cache.erase(cache.begin());
+        }
+        cache.emplace_back();
+        RtssRaster& raster = cache.back();
+        raster.source = layout.imageBytes;
+        std::vector<BYTE> input(layout.imageBytes->begin(), layout.imageBytes->end());
+        IWICImagingFactory* factory = nullptr;
+        IWICStream* stream = nullptr;
+        IWICBitmapDecoder* decoder = nullptr;
+        IWICBitmapFrameDecode* frame = nullptr;
+        IWICFormatConverter* converter = nullptr;
+        do {
+            if (FAILED(CoCreateInstance(
+                    CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory)))
+                || FAILED(factory->CreateStream(&stream))
+                || FAILED(stream->InitializeFromMemory(input.data(), static_cast<DWORD>(input.size())))
+                || FAILED(
+                    factory->CreateDecoderFromStream(stream, nullptr, WICDecodeMetadataCacheOnLoad, &decoder))
+                || FAILED(decoder->GetFrame(0, &frame))
+                || FAILED(frame->GetSize(&raster.width, &raster.height)) || raster.width == 0
+                || raster.height == 0 || raster.width > 2048 || raster.height > 2048
+                || FAILED(factory->CreateFormatConverter(&converter))
+                || FAILED(converter->Initialize(frame, GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone,
+                    nullptr, 0.0, WICBitmapPaletteTypeCustom))) {
+                break;
+            }
+            raster.pixels.resize(static_cast<std::size_t>(raster.width) * raster.height * 4);
+            if (FAILED(converter->CopyPixels(nullptr, raster.width * 4,
+                    static_cast<UINT>(raster.pixels.size()), raster.pixels.data()))) {
+                raster.pixels.clear();
+            }
+        } while (false);
+        if (converter)
+            converter->Release();
+        if (frame)
+            frame->Release();
+        if (decoder)
+            decoder->Release();
+        if (stream)
+            stream->Release();
+        if (factory)
+            factory->Release();
+        return raster.pixels.empty() ? nullptr : &raster;
+    }
+
+    bool rtssImageRect(std::string_view source, const RtssRaster* raster, D2D1_RECT_F& crop)
+    {
+        if (!source.starts_with("<I=") || !source.ends_with('>')) {
+            return false;
+        }
+        source.remove_prefix(3);
+        source.remove_suffix(1);
+        std::array<unsigned int, 6> fields { };
+        for (std::size_t index = 0; index < fields.size(); ++index) {
+            const std::size_t comma = source.find(',');
+            const std::string_view entry = source.substr(0, comma);
+            const auto result = std::from_chars(entry.data(), entry.data() + entry.size(), fields[index]);
+            if (result.ec != std::errc { } || result.ptr != entry.data() + entry.size()
+                || (index < 5 && comma == std::string_view::npos)
+                || (index == 5 && comma != std::string_view::npos)) {
+                return false;
+            }
+            if (index < 5) {
+                source.remove_prefix(comma + 1);
+            }
+        }
+        if (fields[0] || fields[1] || fields[2] > 2048 || fields[3] > 2048 || fields[4] == 0 || fields[5] == 0
+            || fields[4] > 2048 || fields[5] > 2048) {
+            return false;
+        }
+        if (raster
+            && (fields[2] >= raster->width || fields[3] >= raster->height
+                || fields[4] > raster->width - fields[2] || fields[5] > raster->height - fields[3])) {
+            return false;
+        }
+        crop = D2D1::RectF(static_cast<float>(fields[2]), static_cast<float>(fields[3]),
+            static_cast<float>(fields[2] + fields[4]), static_cast<float>(fields[3] + fields[5]));
+        return true;
+    }
+
+    struct RtssPlacement
+    {
+        Rect rect;
+        std::wstring text;
+        D2D1_RECT_F imageCrop { };
+        int graph = -1;
+        bool fillGraph = false;
+        bool image = false;
+    };
+
+    Rect drawRtssVisual(ID2D1RenderTarget* target, const RtssVisualLayout& layout, const OverlayText& values,
+        const OverlaySettings& settings, const Rect& bounds, float scale, const OverlayFormats& formats,
+        std::vector<Rect>* layerBounds, float* layerScale)
+    {
+        if (layerBounds != nullptr) {
+            layerBounds->assign(layout.layers.size(), {});
+        }
+        const RtssRaster* image = rtssRaster(layout);
+        const float zoom = static_cast<float>(layout.zoom) * scale;
+        const float cellHeight = static_cast<float>(layout.fontHeight) * zoom;
+        const float cellWidth = cellHeight * 0.61f;
+        const auto units = [zoom, cellWidth, cellHeight](int value, bool vertical) {
+            return value < 0 ? static_cast<float>(-value) * (vertical ? cellHeight : cellWidth)
+                             : static_cast<float>(value) * zoom;
+        };
+        const std::wstring family = layout.fontFace.empty() ? L"Consolas" : rtssWide(layout.fontFace);
+        std::vector<RtssPlacement> placed;
+        placed.reserve(layout.layers.size());
+        float leftEdge = 0.0f;
+        float topEdge = 0.0f;
+        float right = 0.0f;
+        float bottom = 0.0f;
+        for (std::size_t index = 0; index < layout.layers.size(); ++index) {
+            const RtssVisualLayer& layer = layout.layers[index];
+            const RtssLayerEdit& edit = settings.rtssLayerEdits[index];
+            const std::string_view source
+                = edit.text ? std::string_view(*edit.text) : std::string_view(layer.text);
+            D2D1_RECT_F imageCrop { };
+            const bool imageTag = source.starts_with("<I=");
+            const bool imageExtent = imageTag && rtssImageRect(source, nullptr, imageCrop);
+            const bool imageReady = imageExtent && image && rtssImageRect(source, image, imageCrop);
+            const std::string visible = rtssVisibleTemplate(source);
+            std::wstring text = imageTag ? (imageReady ? L"" : L"нет данных")
+                                         : rtssText(layout, visible, values, edit.text.has_value());
+            if (text.empty() && !source.empty() && !imageReady) {
+                text = L"н/д"; // Слой с неподдерживаемым тегом остаётся видимым и выбираемым.
+            }
+            int graph = -1;
+            const bool fillGraph = source.ends_with(",81>");
+            if (source.ends_with(",80>") || source.ends_with(",10>") || fillGraph) {
+                if (source.starts_with("<G=Frametime,")) {
+                    graph = 0;
+                } else if (source.starts_with("<G=Framerate 1% Low,")) {
+                    graph = 1;
+                } else if (source.starts_with("<G=CPU usage,")
+                    && std::any_of(layout.availableTags.begin(), layout.availableTags.end(),
+                        [](const auto& tag) { return tag.first == "%CPU usage%"; })) {
+                    graph = 2;
+                } else if (source.starts_with("<G=GPU1 usage,")
+                    && std::any_of(layout.availableTags.begin(), layout.availableTags.end(),
+                        [](const auto& tag) { return tag.first == "%GPU1 usage%"; })) {
+                    graph = 3;
+                }
+            }
+            if (graph >= 0) {
+                const auto& history = values.rtssGraphHistory[static_cast<std::size_t>(graph)];
+                if (history.size() >= 2 && std::all_of(history.begin(), history.end(), [graph](float value) {
+                        return std::isfinite(value) && (graph < 2 ? value > 0.0f : value >= 0.0f);
+                    })) {
+                    text.clear();
+                } else {
+                    graph = -1; // Нет реальных кадров: не рисуем искусственную кривую.
+                    text = L"нет данных";
+                }
+            }
+            const std::uint32_t background = edit.backgroundColor.value_or(layer.backgroundColor);
+            const bool hasBackground
+                = (edit.backgroundColor.has_value() || layer.hasBackground) && (background >> 24) != 0;
+            if (!edit.visible || (text.empty() && graph < 0 && !hasBackground && !imageReady)) {
+                placed.push_back({ });
+                continue;
+            }
+            const int size = edit.size == 0 ? layer.size : edit.size;
+            std::size_t longestLine = 0;
+            std::size_t lines = 1;
+            std::size_t lineLength = 0;
+            for (wchar_t symbol : text) {
+                if (symbol == L'\n') {
+                    longestLine = std::max(longestLine, lineLength);
+                    lineLength = 0;
+                    ++lines;
+                } else {
+                    ++lineLength;
+                }
+            }
+            longestLine = std::max(longestLine, lineLength);
+            float textWidth = static_cast<float>(longestLine) * cellWidth * size / 100.0f;
+            float textHeight = cellHeight * size / 100.0f * lines;
+            if (!text.empty() && formats.factory != nullptr
+                && ((edit.width == 0 && layer.width == 0) || (edit.height == 0 && layer.height == 0))) {
+                IDWriteTextFormat* format = nullptr;
+                if (SUCCEEDED(formats.factory->CreateTextFormat(family.c_str(), nullptr,
+                        static_cast<DWRITE_FONT_WEIGHT>(layout.fontWeight), DWRITE_FONT_STYLE_NORMAL,
+                        DWRITE_FONT_STRETCH_NORMAL, cellHeight * size / 100.0f, L"ru-RU", &format))) {
+                    format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+                    IDWriteTextLayout* measured = nullptr;
+                    if (SUCCEEDED(
+                            formats.factory->CreateTextLayout(text.data(), static_cast<UINT32>(text.size()),
+                                format, 1024.0f * zoom, 8192.0f * zoom, &measured))) {
+                        DWRITE_TEXT_METRICS metrics { };
+                        if (SUCCEEDED(measured->GetMetrics(&metrics))) {
+                            textWidth = metrics.widthIncludingTrailingWhitespace;
+                            textHeight = metrics.height;
+                        }
+                        measured->Release();
+                    }
+                    format->Release();
+                }
+            }
+            // Явный Extent задаёт границу слоя: текст и отсутствующие провайдеры не
+            // могут увеличивать весь макет и превращать остальные датчики в пиксельную пыль.
+            const float width = edit.width > 0 ? static_cast<float>(edit.width) * zoom
+                : layer.width == 0 ? (imageExtent ? (imageCrop.right - imageCrop.left) * zoom
+                                                  : std::clamp(textWidth, cellWidth, 1024.0f * zoom))
+                                   : units(layer.width, false);
+            const float height = edit.height > 0 ? static_cast<float>(edit.height) * zoom
+                : layer.height == 0 ? (imageExtent ? (imageCrop.bottom - imageCrop.top) * zoom : textHeight)
+                                    : units(layer.height, true);
+            float x = units(layer.x, false) + static_cast<float>(edit.x) * zoom;
+            float y = units(layer.y, true) + static_cast<float>(edit.y) * zoom;
+            x -= width * static_cast<float>(layer.origin % 3) / 2.0f;
+            y -= height * static_cast<float>(layer.origin / 3) / 2.0f;
+            placed.push_back(
+                { Rect { x, y, x + width, y + height }, text, imageCrop, graph, fillGraph, imageReady });
+            leftEdge = std::min(leftEdge, x);
+            topEdge = std::min(topEdge, y);
+            right = std::max(right, x + width);
+            bottom = std::max(bottom, y + height);
+        }
+        if (right <= leftEdge || bottom <= topEdge || formats.factory == nullptr) {
+            return { };
+        }
+        const float fit = std::min({ 1.0f, std::max(1.0f, bounds.width() - 4.0f) / (right - leftEdge),
+            std::max(1.0f, bounds.height() - 4.0f) / (bottom - topEdge) });
+        if (layerScale != nullptr) {
+            *layerScale = zoom * fit;
+        }
+        const float width = (right - leftEdge) * fit;
+        const float height = (bottom - topEdge) * fit;
+        const bool onRight = settings.position == OverlayPosition::TopRight
+            || settings.position == OverlayPosition::BottomRight;
+        const bool onBottom = settings.position == OverlayPosition::BottomLeft
+            || settings.position == OverlayPosition::BottomRight;
+        const float anchorX = settings.anchorMode == OverlayAnchorMode::Free
+            ? bounds.left + static_cast<float>(settings.originX)
+            : (onRight ? bounds.right - width - 18.0f : bounds.left + 18.0f)
+                + static_cast<float>(settings.offsetX);
+        const float anchorY = settings.anchorMode == OverlayAnchorMode::Free
+            ? bounds.top + static_cast<float>(settings.originY)
+            : (onBottom ? bounds.bottom - height - 18.0f : bounds.top + 18.0f)
+                + static_cast<float>(settings.offsetY);
+        const float left = std::clamp(anchorX, bounds.left, std::max(bounds.left, bounds.right - width));
+        const float top = std::clamp(anchorY, bounds.top, std::max(bounds.top, bounds.bottom - height));
+
+        ID2D1Bitmap* bitmap = nullptr;
+        if (image) {
+            const auto properties = D2D1::BitmapProperties(
+                D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+            target->CreateBitmap(D2D1::SizeU(image->width, image->height), image->pixels.data(),
+                image->width * 4, &properties, &bitmap);
+        }
+        std::array<IDWriteTextFormat*, 401> fonts { };
+        D2D1::Matrix3x2F oldTransform;
+        target->GetTransform(&oldTransform);
+        target->SetTransform(D2D1::Matrix3x2F::Scale(fit, fit, D2D1::Point2F(left, top)) * oldTransform);
+        const float opacity = static_cast<float>(std::clamp(settings.opacityPercent, 0, 100)) / 100.0f;
+        for (std::size_t index = 0; index < layout.layers.size(); ++index) {
+            const RtssVisualLayer& layer = layout.layers[index];
+            const RtssLayerEdit& edit = settings.rtssLayerEdits[index];
+            const std::uint32_t color = edit.textColor.value_or(layer.textColor);
+            const int textSize = edit.size == 0 ? layer.size : edit.size;
+            const RtssPlacement& placement = placed[index];
+            if (placement.rect.right <= placement.rect.left) {
+                continue;
+            }
+            if (layerBounds != nullptr) {
+                (*layerBounds)[index] = Rect { left + fit * (placement.rect.left - leftEdge),
+                    top + fit * (placement.rect.top - topEdge),
+                    left + fit * (placement.rect.right - leftEdge),
+                    top + fit * (placement.rect.bottom - topEdge) };
+            }
+            const D2D1_RECT_F rect
+                = D2D1::RectF(left + placement.rect.left - leftEdge, top + placement.rect.top - topEdge,
+                    left + placement.rect.right - leftEdge, top + placement.rect.bottom - topEdge);
+            const std::uint32_t background = edit.backgroundColor.value_or(layer.backgroundColor);
+            if ((edit.backgroundColor.has_value() || layer.hasBackground) && background >> 24 != 0) {
+                ID2D1SolidColorBrush* brush = nullptr;
+                if (SUCCEEDED(target->CreateSolidColorBrush(toD2D(fromRgba(background), opacity), &brush))) {
+                    target->FillRectangle(rect, brush);
+                    brush->Release();
+                }
+            }
+            if (placement.image) {
+                if (bitmap) {
+                    target->DrawBitmap(
+                        bitmap, &rect, opacity, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, &placement.imageCrop);
+                }
+                continue;
+            }
+            if (placement.graph >= 0) {
+                const auto& history = values.rtssGraphHistory[static_cast<std::size_t>(placement.graph)];
+                const auto highest = std::max_element(history.begin(), history.end());
+                const float ceiling = std::max(placement.graph == 0 ? 33.0f
+                        : placement.graph == 1                      ? 1.0f
+                                                                    : 100.0f,
+                    *highest);
+                ID2D1SolidColorBrush* brush = nullptr;
+                if (SUCCEEDED(target->CreateSolidColorBrush(toD2D(fromRgba(color), opacity), &brush))) {
+                    const auto point = [&](std::size_t sample) {
+                        const float x = rect.left + (rect.right - rect.left)
+                            * static_cast<float>(sample) / static_cast<float>(history.size() - 1);
+                        const float fraction = std::clamp(history[sample] / ceiling, 0.0f, 1.0f);
+                        return D2D1::Point2F(x, rect.bottom - fraction * (rect.bottom - rect.top));
+                    };
+                    for (std::size_t sample = 1; sample < history.size(); ++sample) {
+                        const D2D1_POINT_2F from = point(sample - 1);
+                        const D2D1_POINT_2F to = point(sample);
+                        if (placement.fillGraph) {
+                            target->FillRectangle(D2D1::RectF(from.x, std::min(from.y, to.y),
+                                std::max(from.x + 1.0f, to.x), rect.bottom), brush);
+                        } else {
+                            target->DrawLine(from, to, brush, std::max(1.0f, zoom));
+                        }
+                    }
+                    brush->Release();
+                }
+                continue;
+            }
+            if (placement.text.empty()) {
+                continue;
+            }
+            IDWriteTextFormat*& format = fonts[static_cast<std::size_t>(textSize)];
+            if (format == nullptr) {
+                const float size = cellHeight * static_cast<float>(textSize) / 100.0f;
+                if (FAILED(formats.factory->CreateTextFormat(family.c_str(), nullptr,
+                        static_cast<DWRITE_FONT_WEIGHT>(layout.fontWeight), DWRITE_FONT_STYLE_NORMAL,
+                        DWRITE_FONT_STRETCH_NORMAL, size, L"ru-RU", &format))) {
+                    continue;
+                }
+                format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+            }
+            ID2D1SolidColorBrush* brush = nullptr;
+            if (SUCCEEDED(target->CreateSolidColorBrush(toD2D(fromRgba(color), opacity), &brush))) {
+                target->DrawTextW(placement.text.data(), static_cast<UINT32>(placement.text.size()), format,
+                    rect, brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                brush->Release();
+            }
+        }
+        target->SetTransform(oldTransform);
+        if (bitmap) {
+            bitmap->Release();
+        }
+        for (IDWriteTextFormat* format : fonts) {
+            if (format != nullptr) {
+                format->Release();
+            }
+        }
+        return Rect { left, top, left + width, top + height };
     }
 
     void drawInline(Painter& painter, const OverlaySettings& settings, const OverlayText& text,
@@ -954,7 +1526,10 @@ namespace {
             }
             const std::wstring label = look.uppercase ? upperCase(text.labels[index]) : text.labels[index];
             const std::wstring segment = tracked(label + L" " + text.values[index], look.letterSpacing);
+            painter.beginTextSize(text.ids[index]);
             const float width = painter.measure(segment, role);
+            painter.endTextSize();
+            painter.beginRow(text.ids[index], Rect { x, inner.top, x + width + 4.0f, inner.bottom });
             const auto group = overlayColorGroup(text.ids[index]);
             const bool customized = settings.metricColors[static_cast<std::size_t>(text.ids[index])] >= 0
                 || settings.metricRgba[static_cast<std::size_t>(text.ids[index])] || settings.valueColor >= 0
@@ -962,6 +1537,7 @@ namespace {
                 || (group && settings.rowRgba[*group]);
             painter.text(segment, Rect { x, inner.top, x + width + 4.0f, inner.bottom }, role,
                 settings.style == OverlayStyle::Rtss && !customized ? look.accent : look.rowPalette[index]);
+            painter.endRow();
             x += width + separator;
         }
     }
@@ -1014,6 +1590,24 @@ std::array<Color, kOverlayColorCount> overlayColorPalette()
 OverlayText makeOverlayText(const OverlaySettings& settings, const MetricStore& store)
 {
     OverlayText text;
+    if (settings.recipe == OverlayRecipe::Rtss && settings.rtssTemplate && settings.rtssVisual) {
+        const std::array<MetricId, 4> graphMetrics { MetricId::FrameTime, MetricId::Low1Fps,
+            MetricId::CpuLoad, MetricId::GpuLoad };
+        for (std::size_t index = 0; index < graphMetrics.size(); ++index) {
+            if (!store.hasValue(graphMetrics[index])) {
+                continue;
+            }
+            std::array<float, 32> history { };
+            const std::size_t count = store.copyHistory(graphMetrics[index], history.data(), history.size());
+            text.rtssGraphHistory[index].assign(history.begin(),
+                history.begin() + static_cast<std::ptrdiff_t>(count));
+        }
+    }
+    if (settings.showSparkline && store.hasValue(settings.sparklineMetric)) {
+        std::array<float, 32> history { };
+        const std::size_t count = store.copyHistory(settings.sparklineMetric, history.data(), history.size());
+        text.sparklineHistory.assign(history.begin(), history.begin() + static_cast<std::ptrdiff_t>(count));
+    }
     for (const OverlayMetricRow& row : overlayMetricRows(settings, store)) {
         text.labels.push_back(wideLabel(row.label));
         text.values.push_back(wideLabel(row.value));
@@ -1029,9 +1623,30 @@ OverlayText makeOverlayText(const OverlaySettings& settings, const MetricStore& 
 }
 
 Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, const Theme& theme,
-    const OverlayText& text, const Rect& bounds, float scale, const OverlayFormats& formats)
+    const OverlayText& text, const Rect& bounds, float scale, const OverlayFormats& formats,
+    std::vector<Rect>* rtssLayerBounds, float* rtssLayerScale, std::vector<OverlayRowBounds>* rowBounds,
+    float* rowScale)
 {
-    if (target == nullptr || visibleRows(text) == 0) {
+    if (rowScale != nullptr) {
+        *rowScale = 1.0f;
+    }
+    if (rowBounds != nullptr) {
+        rowBounds->clear();
+    }
+    if (rtssLayerScale != nullptr) {
+        *rtssLayerScale = 1.0f;
+    }
+    if (rtssLayerBounds != nullptr) {
+        rtssLayerBounds->clear();
+    }
+    if (target == nullptr) {
+        return Rect { };
+    }
+    if (settings.recipe == OverlayRecipe::Rtss && settings.rtssVisual && settings.rtssTemplate) {
+        return drawRtssVisual(target, *settings.rtssVisual, text, settings, bounds, scale, formats,
+            rtssLayerBounds, rtssLayerScale);
+    }
+    if (visibleRows(text) == 0) {
         return Rect { };
     }
 
@@ -1155,7 +1770,7 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
     chrome.borderWidth = settings.borderWidth >= 0 ? static_cast<float>(settings.borderWidth) : 1.0f;
     chrome.shadowStrength = static_cast<float>(std::clamp(settings.shadowStrength, 0, 100)) / 100.0f;
 
-    Painter measurer(target, theme, scaled, scale, opacity, chrome, settings.textOutline);
+    Painter measurer(target, theme, scaled, scale, opacity, chrome, settings, settings.textOutline);
     measurer.setBackgroundOpacity(backgroundOpacity);
     const TextRole inlineRole = look.mono ? TextRole::Mono : TextRole::Small;
     float lineWidth = 0.0f;
@@ -1167,9 +1782,11 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
             lineWidth += measurer.measure(tracked(L"   ", look.letterSpacing), inlineRole) / scale;
         }
         const std::wstring label = look.uppercase ? upperCase(text.labels[index]) : text.labels[index];
+        measurer.beginTextSize(text.ids[index]);
         lineWidth
             += measurer.measure(tracked(label + L" " + text.values[index], look.letterSpacing), inlineRole)
             / scale;
+        measurer.endTextSize();
     }
     StyleSpec spec = styleSpec(settings, text, lineWidth);
     const auto labels = rowLabels(text, look);
@@ -1177,11 +1794,13 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
         float cellsWidth = look.padding * 2.0f;
         for (std::size_t index = 0; index < text.labels.size(); ++index) {
             if (rowShown(text, index)) {
+                measurer.beginTextSize(text.ids[index]);
                 cellsWidth += std::max(measurer.measure(labels[index], TextRole::Tiny),
                                   measurer.measure(
                                       text.values[index], index == 0 ? TextRole::Value : TextRole::Small))
                         / scale
                     + 20.0f;
+                measurer.endTextSize();
             }
         }
         spec.width = std::max(spec.width, cellsWidth);
@@ -1191,9 +1810,11 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
             continue;
         }
         const auto role = look.mono ? TextRole::Mono : TextRole::Small;
+        measurer.beginTextSize(text.ids[index]);
         look.labelWidth = std::max(look.labelWidth, measurer.measure(labels[index], role) / scale + 12.0f);
         look.valueWidth
             = std::max(look.valueWidth, measurer.measure(text.values[index], role) / scale + 12.0f);
+        measurer.endTextSize();
     }
     if (settings.layout == OverlayLayout::Plates && settings.style != OverlayStyle::Esport) {
         spec.width = std::max(spec.width, look.labelWidth + look.valueWidth + look.padding * 2.0f + 12.0f);
@@ -1231,16 +1852,35 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
     if (settings.pixelLayout && settings.layout == OverlayLayout::Plates && !text.ids.empty()) {
         spec.width = 520.0f;
         spec.height = 80.0f;
-        for (MetricId id : text.ids) {
-            const auto& row = settings.rowPositions[static_cast<std::size_t>(id)];
-            spec.height = std::max(spec.height, static_cast<float>((row.y >= 0 ? row.y : 12) + 30));
+        for (std::size_t i = 0; i < text.ids.size(); ++i) {
+            if (!rowShown(text, i)) {
+                continue;
+            }
+            const auto& row = settings.rowPositions[static_cast<std::size_t>(text.ids[i])];
+            spec.height = std::max(
+                spec.height, static_cast<float>((row.y >= 0 ? row.y : 12 + static_cast<int>(i) * 28) + 30));
         }
+    }
+    const bool hasSparkline = settings.showSparkline && text.sparklineHistory.size() >= 2
+        && std::all_of(text.sparklineHistory.begin(), text.sparklineHistory.end(),
+            [](float value) { return std::isfinite(value) && value >= 0.0f; });
+    if (hasSparkline) {
+        spec.height += 30.0f;
+    }
+    if (settings.layout == OverlayLayout::Plates) {
+        if (settings.backgroundWidthPx >= 80)
+            spec.width = static_cast<float>(settings.backgroundWidthPx);
+        if (settings.backgroundHeightPx >= 40)
+            spec.height = static_cast<float>(settings.backgroundHeightPx);
     }
     const float width = spec.width * scale;
     const float height = spec.height * scale;
     // Не обрезаем длинный список границами монитора или предпросмотра.
     const float fit = std::min({ 1.0f, std::max(bounds.width() - 4.0f, 1.0f) / width,
         std::max(bounds.height() - 4.0f, 1.0f) / height });
+    if (rowScale != nullptr) {
+        *rowScale = fit * scale;
+    }
     const float fittedWidth = width * fit;
     const float fittedHeight = height * fit;
 
@@ -1268,8 +1908,9 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
     target->GetTransform(&previousTransform);
     target->SetTransform(D2D1::Matrix3x2F::Scale(fit, fit, D2D1::Point2F(left, top)) * previousTransform);
     const Rect frame { left, top, left + width, top + height };
-    Painter painter(target, theme, scaled, scale, opacity, chrome, settings.textOutline);
+    Painter painter(target, theme, scaled, scale, opacity, chrome, settings, settings.textOutline);
     painter.setBackgroundOpacity(backgroundOpacity);
+    painter.setRowBounds(settings, rowBounds, frame, fit);
 
     if (settings.pixelLayout && settings.layout == OverlayLayout::Plates && !text.ids.empty()) {
         painter.plate(frame, look.radius * scale, look.background);
@@ -1285,6 +1926,13 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
                 : row.labelX < row.valueX                 ? std::min(row.labelX + 230, row.valueX - 8)
                                                           : 505;
             const int valueEnd = row.valueX < row.labelX ? row.labelX - 8 : 505;
+            if (rowBounds != nullptr) {
+                rowBounds->push_back(OverlayRowBounds { text.ids[i],
+                    Rect { left + fit * std::min(row.labelX, row.valueX) * scale, top + fit * (y - top),
+                        left + fit * std::max(labelEnd, valueEnd) * scale,
+                        top + fit * (y + 26.0f * scale - top) } });
+            }
+            painter.beginTextSize(text.ids[i]);
             if (labelEnd > row.labelX) {
                 painter.text(text.labels[i],
                     Rect { frame.left + row.labelX * scale, y, frame.left + labelEnd * scale,
@@ -1297,6 +1945,7 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
                         y + 26.0f * scale },
                     TextRole::Small, look.rowPalette[i]);
             }
+            painter.endTextSize();
         }
     } else if (settings.layout == OverlayLayout::Line) {
         drawInline(painter, settings, text, frame, look);
@@ -1328,6 +1977,24 @@ Rect paintOverlay(ID2D1RenderTarget* target, const OverlaySettings& settings, co
         case OverlayStyle::Retro:
             drawRetro(painter, text, frame, look);
             break;
+        }
+    }
+
+    if (hasSparkline) {
+        const auto [low, high]
+            = std::minmax_element(text.sparklineHistory.begin(), text.sparklineHistory.end());
+        const float range = std::max(*high - *low, 1.0f);
+        const float span = frame.width() - 2.0f * look.padding * scale;
+        for (std::size_t index = 1; index < text.sparklineHistory.size(); ++index) {
+            const float x1 = frame.left + look.padding * scale
+                + span * static_cast<float>(index - 1) / static_cast<float>(text.sparklineHistory.size() - 1);
+            const float x2 = frame.left + look.padding * scale
+                + span * static_cast<float>(index) / static_cast<float>(text.sparklineHistory.size() - 1);
+            const float y1
+                = frame.bottom - (8.0f + 16.0f * (text.sparklineHistory[index - 1] - *low) / range) * scale;
+            const float y2
+                = frame.bottom - (8.0f + 16.0f * (text.sparklineHistory[index] - *low) / range) * scale;
+            painter.line(x1, y1, x2, y2, look.accent, 1.5f * scale, 0.85f);
         }
     }
 

@@ -60,13 +60,24 @@ LRESULT CALLBACK OverlayWindow::windowProc(HWND window, UINT message, WPARAM wPa
             return HTTRANSPARENT;
         }
         if (self != nullptr) {
-            POINT point{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+            POINT point { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
             ScreenToClient(window, &point);
             const D2D1_RECT_F& area = self->m_contentRectD2D;
             const float fx = static_cast<float>(point.x);
             const float fy = static_cast<float>(point.y);
-            if (area.right > area.left && fx >= area.left - 4.0f && fx <= area.right + 4.0f
-                && fy >= area.top - 4.0f && fy <= area.bottom + 4.0f) {
+            const int resizeLayer = self->layerResizeAt(point.x, point.y);
+            const int hoveredLayer = self->m_layerResizing ? static_cast<int>(self->m_layerIndex)
+                : resizeLayer >= 0                         ? resizeLayer
+                                                           : self->layerAt(point.x, point.y);
+            const bool overContent = hoveredLayer >= 0 || self->rowAt(point.x, point.y)
+                || (area.right > area.left && fx >= area.left - 4.0f && fx <= area.right + 4.0f
+                    && fy >= area.top - 4.0f && fy <= area.bottom + 4.0f);
+            if (self->m_showEditHandles != overContent || self->m_layerHover != hoveredLayer) {
+                self->m_showEditHandles = overContent;
+                self->m_layerHover = hoveredLayer;
+                PostMessageW(window, WM_APP + 1, 0, 0);
+            }
+            if (overContent) {
                 return HTCLIENT;
             }
         }
@@ -74,16 +85,23 @@ LRESULT CALLBACK OverlayWindow::windowProc(HWND window, UINT message, WPARAM wPa
 
     case WM_SETCURSOR:
         if (self != nullptr && !self->m_settings.clickThrough) {
-            POINT cursor{};
+            POINT cursor { };
             GetCursorPos(&cursor);
             ScreenToClient(window, &cursor);
             const D2D1_RECT_F& area = self->m_contentRectD2D;
-            const bool overContent = area.right > area.left && static_cast<float>(cursor.x) >= area.left - 4.0f
-                && static_cast<float>(cursor.x) <= area.right + 4.0f
-                && static_cast<float>(cursor.y) >= area.top - 4.0f
-                && static_cast<float>(cursor.y) <= area.bottom + 4.0f;
+            const bool overContent = self->rowAt(cursor.x, cursor.y).has_value()
+                || (area.right > area.left && static_cast<float>(cursor.x) >= area.left - 4.0f
+                    && static_cast<float>(cursor.x) <= area.right + 4.0f
+                    && static_cast<float>(cursor.y) >= area.top - 4.0f
+                    && static_cast<float>(cursor.y) <= area.bottom + 4.0f);
             if (overContent) {
-                SetCursor(LoadCursorW(nullptr, IDC_SIZEALL));
+                const wchar_t* shape = self->layerResizeAt(cursor.x, cursor.y) >= 0
+                        || self->onResizeCorner(cursor.x, cursor.y) || self->onPaddingGrip(cursor.x, cursor.y)
+                    ? IDC_SIZENWSE
+                    : self->layerAt(cursor.x, cursor.y) >= 0 || self->rowAt(cursor.x, cursor.y).has_value()
+                    ? IDC_HAND
+                    : IDC_SIZEALL;
+                SetCursor(LoadCursorW(nullptr, shape));
                 return TRUE;
             }
         }
@@ -91,8 +109,89 @@ LRESULT CALLBACK OverlayWindow::windowProc(HWND window, UINT message, WPARAM wPa
 
     case WM_LBUTTONDOWN:
         if (self != nullptr && !self->m_settings.clickThrough) {
-            self->beginDrag(GET_X_LPARAM(lParam) + static_cast<int>(self->m_monitorRect.left),
-                GET_Y_LPARAM(lParam) + static_cast<int>(self->m_monitorRect.top));
+            const int x = GET_X_LPARAM(lParam);
+            const int y = GET_Y_LPARAM(lParam);
+            const int resizeLayer = GetKeyState(VK_MENU) >= 0 ? self->layerResizeAt(x, y) : -1;
+            if (resizeLayer >= 0) {
+                self->m_layerIndex = static_cast<std::size_t>(resizeLayer);
+                self->m_layerHover = resizeLayer;
+                self->m_layerResizing = true;
+                self->m_layerDragOrigin = POINT { x, y };
+                self->m_layerDragScale = std::max(0.001f, self->m_rtssLayerScale);
+                const Rect& box = self->m_rtssLayerBounds[self->m_layerIndex];
+                const RtssLayerEdit& edit = self->m_settings.rtssLayerEdits[self->m_layerIndex];
+                self->m_layerSavedWidth = edit.width;
+                self->m_layerSavedHeight = edit.height;
+                self->m_layerStartWidth = edit.width > 0
+                    ? edit.width
+                    : static_cast<int>(std::lround(box.width() / self->m_layerDragScale));
+                self->m_layerStartHeight = edit.height > 0
+                    ? edit.height
+                    : static_cast<int>(std::lround(box.height() / self->m_layerDragScale));
+            } else if (self->onResizeCorner(x, y)) {
+                self->m_resizing = true;
+                self->m_resizeOrigin = POINT { x, y };
+                self->m_resizeScale = self->m_settings.scalePercent;
+                self->m_resizeWidth = self->m_contentRectD2D.right - self->m_contentRectD2D.left;
+                self->m_resizeHeight = self->m_contentRectD2D.bottom - self->m_contentRectD2D.top;
+                self->m_backgroundResizing = self->m_settings.layout == OverlayLayout::Plates
+                    && !self->m_settings.rtssVisual && static_cast<bool>(self->m_onBackgroundEdit);
+                if (self->m_backgroundResizing) {
+                    auto& settings = self->m_settings;
+                    self->m_backgroundUnit = std::max(0.001f, self->m_rowUnit);
+                    self->m_backgroundStartWidth = settings.backgroundWidthPx >= 80
+                        ? settings.backgroundWidthPx
+                        : static_cast<int>(std::lround(self->m_resizeWidth / self->m_backgroundUnit));
+                    self->m_backgroundStartHeight = settings.backgroundHeightPx >= 40
+                        ? settings.backgroundHeightPx
+                        : static_cast<int>(std::lround(self->m_resizeHeight / self->m_backgroundUnit));
+                    if (settings.anchorMode == OverlayAnchorMode::Corner) {
+                        settings.originX = static_cast<int>(std::lround(self->m_contentRectD2D.left));
+                        settings.originY = static_cast<int>(std::lround(self->m_contentRectD2D.top));
+                        settings.anchorMode = OverlayAnchorMode::Free;
+                        settings.offsetX = settings.offsetY = 0;
+                    }
+                }
+            } else if (self->onPaddingGrip(x, y)) {
+                self->m_paddingDragging = true;
+                self->m_paddingOrigin = POINT { x, y };
+                self->m_paddingStart = self->m_settings.paddingPx < 0 ? 10 : self->m_settings.paddingPx;
+            } else if (self->m_onLayerEdit && GetKeyState(VK_MENU) >= 0 && self->layerAt(x, y) >= 0) {
+                self->m_layerIndex = static_cast<std::size_t>(self->layerAt(x, y));
+                self->m_layerDragging = true;
+                self->m_layerDragOrigin = POINT { x, y };
+                self->m_layerDragScale = self->m_rtssLayerScale;
+                const RtssLayerEdit& edit = self->m_settings.rtssLayerEdits[self->m_layerIndex];
+                self->m_layerStartX = edit.x;
+                self->m_layerStartY = edit.y;
+            } else if (GetKeyState(VK_MENU) >= 0 && self->rowAt(x, y)
+                && (self->m_settings.pixelLayout && self->m_settings.layout == OverlayLayout::Plates
+                        ? static_cast<bool>(self->m_onRowEdit)
+                        : static_cast<bool>(self->m_onStyledRowEdit))) {
+                self->m_rowDragId = *self->rowAt(x, y);
+                self->m_rowDragging = true;
+                self->m_rowReordering = !self->m_settings.pixelLayout && GetKeyState(VK_SHIFT) < 0
+                    && static_cast<bool>(self->m_onRowReorder);
+                self->m_rowDragOrigin = POINT { x, y };
+                self->m_rowDragScale = std::max(0.001f, self->m_rowUnit);
+                const auto entry = std::find_if(self->m_rowBounds.begin(), self->m_rowBounds.end(),
+                    [self](const OverlayRowBounds& row) { return row.id == self->m_rowDragId; });
+                self->m_rowStartBounds = entry->rect;
+                if (self->m_settings.pixelLayout && self->m_settings.layout == OverlayLayout::Plates) {
+                    self->m_rowStart
+                        = self->m_settings.rowPositions[static_cast<std::size_t>(self->m_rowDragId)];
+                    if (self->m_rowStart.y < 0) {
+                        self->m_rowStart.y = static_cast<int>(std::lround(
+                            (entry->rect.top - self->m_contentRectD2D.top) / self->m_rowDragScale));
+                    }
+                } else {
+                    self->m_styleRowStart
+                        = self->m_settings.styleRowOffsets[static_cast<std::size_t>(self->m_rowDragId)];
+                }
+            } else {
+                self->beginDrag(x + static_cast<int>(self->m_monitorRect.left),
+                    y + static_cast<int>(self->m_monitorRect.top));
+            }
             SetCapture(window);
             return 0;
         }
@@ -108,6 +207,26 @@ LRESULT CALLBACK OverlayWindow::windowProc(HWND window, UINT message, WPARAM wPa
         break;
 
     case WM_MOUSEMOVE:
+        if (self != nullptr && self->m_layerResizing) {
+            self->updateLayerResize(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+            return 0;
+        }
+        if (self != nullptr && self->m_resizing) {
+            self->updateResize(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+            return 0;
+        }
+        if (self != nullptr && self->m_paddingDragging) {
+            self->updatePadding(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+            return 0;
+        }
+        if (self != nullptr && self->m_layerDragging) {
+            self->updateLayerDrag(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+            return 0;
+        }
+        if (self != nullptr && self->m_rowDragging) {
+            self->updateRowDrag(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+            return 0;
+        }
         if (self != nullptr && self->m_dragging) {
             self->updateDrag(GET_X_LPARAM(lParam) + static_cast<int>(self->m_monitorRect.left),
                 GET_Y_LPARAM(lParam) + static_cast<int>(self->m_monitorRect.top));
@@ -115,7 +234,60 @@ LRESULT CALLBACK OverlayWindow::windowProc(HWND window, UINT message, WPARAM wPa
         }
         break;
 
+    case WM_MOUSEWHEEL:
+        if (self != nullptr && !self->m_settings.clickThrough && self->m_onDirectEdit) {
+            const bool ctrl = (GET_KEYSTATE_WPARAM(wParam) & MK_CONTROL) != 0;
+            const bool shift = (GET_KEYSTATE_WPARAM(wParam) & MK_SHIFT) != 0;
+            if (!ctrl && !shift) {
+                break;
+            }
+            const int step = GET_WHEEL_DELTA_WPARAM(wParam) > 0 ? 1 : -1;
+            if (ctrl && shift) {
+                self->m_settings.rowGapPx = std::clamp(
+                    (self->m_settings.rowGapPx < 0 ? 3 : self->m_settings.rowGapPx) + step * 2, 0, 14);
+            } else if (ctrl) {
+                self->m_settings.scalePercent = std::clamp(self->m_settings.scalePercent + step * 5, 70, 160);
+            } else {
+                self->m_settings.paddingPx = std::clamp(
+                    (self->m_settings.paddingPx < 0 ? 10 : self->m_settings.paddingPx) + step * 2, 0, 28);
+            }
+            self->repaint();
+            self->m_onDirectEdit(
+                self->m_settings.scalePercent, self->m_settings.paddingPx, self->m_settings.rowGapPx, true);
+            return 0;
+        }
+        break;
+
     case WM_LBUTTONUP:
+        if (self != nullptr && self->m_layerResizing) {
+            self->updateLayerResize(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+            self->finishLayerResize();
+            ReleaseCapture();
+            return 0;
+        }
+        if (self != nullptr && self->m_resizing) {
+            self->finishResize();
+            ReleaseCapture();
+            return 0;
+        }
+        if (self != nullptr && self->m_paddingDragging) {
+            self->updatePadding(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+            self->finishPadding();
+            ReleaseCapture();
+            return 0;
+        }
+        if (self != nullptr && self->m_layerDragging) {
+            self->updateLayerDrag(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+            self->finishLayerDrag();
+            ReleaseCapture();
+            return 0;
+        }
+        if (self != nullptr && self->m_rowDragging) {
+            self->updateRowDrag(GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam));
+            self->finishRowDrag();
+            ReleaseCapture();
+            return 0;
+        }
         if (self != nullptr && self->m_dragging) {
             self->endDrag();
             ReleaseCapture();
@@ -124,7 +296,12 @@ LRESULT CALLBACK OverlayWindow::windowProc(HWND window, UINT message, WPARAM wPa
         break;
 
     case WM_CAPTURECHANGED:
-        if (self != nullptr && self->m_dragging) {
+        if (self != nullptr) {
+            self->finishResize();
+            self->finishPadding();
+            self->finishLayerDrag();
+            self->finishLayerResize();
+            self->finishRowDrag();
             self->endDrag();
         }
         break;
@@ -135,6 +312,12 @@ LRESULT CALLBACK OverlayWindow::windowProc(HWND window, UINT message, WPARAM wPa
             return 0;
         }
         break;
+
+    case WM_APP + 1:
+        if (self != nullptr) {
+            self->repaint();
+        }
+        return 0;
 
     case WM_ERASEBKGND:
         return 1;
@@ -258,6 +441,12 @@ void OverlayWindow::setGameMonitor(const RECT* monitor)
     }
 }
 
+void OverlayWindow::setMenuSceneOpacity(std::optional<int> opacity)
+{
+    m_menuSceneOpacity = opacity;
+    repaint();
+}
+
 void OverlayWindow::setSettings(const OverlaySettings& settings)
 {
     // Плавный переход считаем от текущего видимого состояния, а не от нового:
@@ -279,6 +468,14 @@ void OverlayWindow::setSettings(const OverlaySettings& settings)
         || settings.originX != m_settings.originX || settings.originY != m_settings.originY
         || settings.anchorMode != m_settings.anchorMode
         || settings.followGameMonitor != m_settings.followGameMonitor;
+    if (settings.rtssTemplate != m_settings.rtssTemplate || settings.recipe != m_settings.recipe) {
+        m_layerHover = -1;
+        m_layerResizing = false;
+        m_layerDragging = false;
+        if (m_window != nullptr && GetCapture() == m_window) {
+            ReleaseCapture();
+        }
+    }
     m_settings = settings;
     if (m_window != nullptr) {
         // HTTRANSPARENT передаёт hit-test только окнам того же потока. Для игры
@@ -293,10 +490,17 @@ void OverlayWindow::setSettings(const OverlaySettings& settings)
                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
         }
         if (settings.clickThrough) {
+            m_showEditHandles = false;
+            m_layerHover = -1;
             if (GetCapture() == m_window) {
                 ReleaseCapture();
             }
             endDrag();
+            finishResize();
+            finishPadding();
+            finishLayerDrag();
+            finishLayerResize();
+            finishRowDrag();
         }
     }
 
@@ -305,7 +509,14 @@ void OverlayWindow::setSettings(const OverlaySettings& settings)
         repaint();
         return;
     }
-    startAnimation(previous, styleChanged);
+    // Пакет RTSS может не иметь ни одной знакомой метрики. Не показываем
+    // прозрачный первый кадр при смене шаблона, иначе он выглядит исчезнувшим.
+    const bool importedLayout
+        = settings.rtssVisual && settings.rtssTemplate && settings.rtssTemplate != previous.rtssTemplate;
+    startAnimation(previous, styleChanged && !importedLayout);
+    if (importedLayout) {
+        m_fade = 1.0f;
+    }
     repaint();
 }
 
@@ -314,10 +525,322 @@ void OverlayWindow::setMoveHandler(std::function<void(int, int, bool)> handler)
     m_onMove = std::move(handler);
 }
 
+void OverlayWindow::setDirectEditHandler(std::function<void(int, int, int, bool)> handler)
+{
+    m_onDirectEdit = std::move(handler);
+}
+
+void OverlayWindow::setBackgroundEditHandler(std::function<void(int, int, int, int, bool)> handler)
+{
+    m_onBackgroundEdit = std::move(handler);
+}
+
+bool OverlayWindow::onResizeCorner(int x, int y) const
+{
+    if (m_settings.rtssVisual && m_layerHover >= 0) {
+        return false;
+    }
+    const float width = m_contentRectD2D.right - m_contentRectD2D.left;
+    const float height = m_contentRectD2D.bottom - m_contentRectD2D.top;
+    return width >= 60.0f && height >= 45.0f && x >= m_contentRectD2D.right - 16.0f
+        && x <= m_contentRectD2D.right + 4.0f && y >= m_contentRectD2D.bottom - 16.0f
+        && y <= m_contentRectD2D.bottom + 4.0f;
+}
+
+bool OverlayWindow::onPaddingGrip(int x, int y) const
+{
+    const auto& area = m_contentRectD2D;
+    if (!m_onDirectEdit || m_settings.rtssVisual
+        || (m_settings.pixelLayout && m_settings.layout == OverlayLayout::Plates)
+        || area.right - area.left < 60.0f || area.bottom - area.top < 36.0f) {
+        return false;
+    }
+    const float padding = static_cast<float>(m_settings.paddingPx < 0 ? 10 : m_settings.paddingPx)
+        * m_settings.scalePercent / 100.0f;
+    const float left = area.left + std::clamp(padding, 5.0f, 24.0f);
+    const float top = area.top + std::clamp(padding, 5.0f, 20.0f);
+    return x >= left - 5.0f && x <= left + 9.0f && y >= top - 5.0f && y <= top + 9.0f;
+}
+
+void OverlayWindow::updateResize(int x, int y)
+{
+    if (!m_resizing) {
+        return;
+    }
+    if (m_backgroundResizing) {
+        const int width = std::clamp(
+            m_backgroundStartWidth + static_cast<int>(std::lround((x - m_resizeOrigin.x) / m_backgroundUnit)),
+            80, 2000);
+        const int height = std::clamp(m_backgroundStartHeight
+                + static_cast<int>(std::lround((y - m_resizeOrigin.y) / m_backgroundUnit)),
+            40, 1600);
+        if (width != m_settings.backgroundWidthPx || height != m_settings.backgroundHeightPx) {
+            m_settings.backgroundWidthPx = width;
+            m_settings.backgroundHeightPx = height;
+            repaint();
+            m_onBackgroundEdit(width, height, m_settings.originX, m_settings.originY, false);
+        }
+        return;
+    }
+    const float deltaX = static_cast<float>(x - m_resizeOrigin.x) / std::max(1.0f, m_resizeWidth);
+    const float deltaY = static_cast<float>(y - m_resizeOrigin.y) / std::max(1.0f, m_resizeHeight);
+    const int next = std::clamp(
+        static_cast<int>(std::lround(m_resizeScale * (1.0f + (deltaX + deltaY) / 2.0f))), 70, 160);
+    if (next != m_settings.scalePercent) {
+        m_settings.scalePercent = next;
+        repaint();
+        if (m_onDirectEdit) {
+            m_onDirectEdit(next, m_settings.paddingPx, m_settings.rowGapPx, false);
+        }
+    }
+}
+
+void OverlayWindow::finishResize()
+{
+    if (!m_resizing) {
+        return;
+    }
+    m_resizing = false;
+    if (m_backgroundResizing) {
+        m_backgroundResizing = false;
+        m_onBackgroundEdit(m_settings.backgroundWidthPx, m_settings.backgroundHeightPx, m_settings.originX,
+            m_settings.originY, true);
+    } else if (m_onDirectEdit) {
+        m_onDirectEdit(m_settings.scalePercent, m_settings.paddingPx, m_settings.rowGapPx, true);
+    }
+}
+
+void OverlayWindow::updatePadding(int x, int y)
+{
+    if (!m_paddingDragging) {
+        return;
+    }
+    const float scale = std::max(0.7f, static_cast<float>(m_settings.scalePercent) / 100.0f);
+    const int delta
+        = static_cast<int>(std::lround((x - m_paddingOrigin.x + y - m_paddingOrigin.y) / (2.0f * scale)));
+    const int next = std::clamp(m_paddingStart + delta, 0, 28);
+    if (next != m_settings.paddingPx) {
+        m_settings.paddingPx = next;
+        repaint();
+        if (m_onDirectEdit) {
+            m_onDirectEdit(m_settings.scalePercent, next, m_settings.rowGapPx, false);
+        }
+    }
+}
+
+void OverlayWindow::finishPadding()
+{
+    if (!m_paddingDragging) {
+        return;
+    }
+    m_paddingDragging = false;
+    if (m_onDirectEdit) {
+        m_onDirectEdit(m_settings.scalePercent, m_settings.paddingPx, m_settings.rowGapPx, true);
+    }
+}
+
+void OverlayWindow::setLayerEditHandler(std::function<void(std::size_t, int, int, bool)> handler)
+{
+    m_onLayerEdit = std::move(handler);
+}
+
+void OverlayWindow::setLayerExtentHandler(std::function<void(std::size_t, int, int, bool)> handler)
+{
+    m_onLayerExtent = std::move(handler);
+}
+
+int OverlayWindow::layerAt(int x, int y) const
+{
+    if (!m_settings.rtssTemplate || !m_settings.rtssVisual || m_settings.recipe != OverlayRecipe::Rtss) {
+        return -1;
+    }
+    for (std::size_t index = m_rtssLayerBounds.size(); index > 0; --index) {
+        const Rect& box = m_rtssLayerBounds[index - 1];
+        if (box.right > box.left && box.contains(static_cast<float>(x), static_cast<float>(y))) {
+            return static_cast<int>(index - 1);
+        }
+    }
+    return -1;
+}
+
+int OverlayWindow::layerResizeAt(int x, int y) const
+{
+    if (!m_onLayerExtent || !m_settings.rtssTemplate || !m_settings.rtssVisual
+        || m_settings.recipe != OverlayRecipe::Rtss) {
+        return -1;
+    }
+    const int topLayer = layerAt(x, y);
+    for (std::size_t index = m_rtssLayerBounds.size(); index > 0; --index) {
+        if (index > m_settings.rtssLayerEdits.size()
+            || (topLayer >= 0 && topLayer != static_cast<int>(index - 1))) {
+            continue;
+        }
+        const Rect& box = m_rtssLayerBounds[index - 1];
+        if (box.width() >= 22.0f && box.height() >= 22.0f && x >= box.right - 12.0f && x <= box.right + 3.0f
+            && y >= box.bottom - 12.0f && y <= box.bottom + 3.0f) {
+            return static_cast<int>(index - 1);
+        }
+    }
+    return -1;
+}
+
+void OverlayWindow::updateLayerDrag(int x, int y)
+{
+    if (!m_layerDragging || !m_onLayerEdit || m_layerIndex >= m_settings.rtssLayerEdits.size()) {
+        return;
+    }
+    const float unit = std::max(0.001f, m_layerDragScale);
+    const int nextX = std::clamp(m_layerStartX
+            + static_cast<int>(std::lround((x - m_layerDragOrigin.x) / unit)), -2048, 2048);
+    const int nextY = std::clamp(m_layerStartY
+            + static_cast<int>(std::lround((y - m_layerDragOrigin.y) / unit)), -2048, 2048);
+    RtssLayerEdit& edit = m_settings.rtssLayerEdits[m_layerIndex];
+    if (edit.x != nextX || edit.y != nextY) {
+        edit.x = nextX;
+        edit.y = nextY;
+        repaint();
+        m_onLayerEdit(m_layerIndex, nextX, nextY, false);
+    }
+}
+
+void OverlayWindow::finishLayerDrag()
+{
+    if (!m_layerDragging) {
+        return;
+    }
+    m_layerDragging = false;
+    if (m_onLayerEdit && m_layerIndex < m_settings.rtssLayerEdits.size()) {
+        const RtssLayerEdit& edit = m_settings.rtssLayerEdits[m_layerIndex];
+        m_onLayerEdit(m_layerIndex, edit.x, edit.y, true);
+    }
+}
+
+void OverlayWindow::updateLayerResize(int x, int y)
+{
+    if (!m_layerResizing || !m_onLayerExtent || m_layerIndex >= m_settings.rtssLayerEdits.size()) {
+        return;
+    }
+    const int dx = x - m_layerDragOrigin.x;
+    const int dy = y - m_layerDragOrigin.y;
+    const int resizedWidth = resizeRtssExtent(m_layerStartWidth, dx, m_layerDragScale);
+    const int resizedHeight = resizeRtssExtent(m_layerStartHeight, dy, m_layerDragScale);
+    const int width = resizedWidth == m_layerStartWidth ? m_layerSavedWidth : resizedWidth;
+    const int height = resizedHeight == m_layerStartHeight ? m_layerSavedHeight : resizedHeight;
+    RtssLayerEdit& edit = m_settings.rtssLayerEdits[m_layerIndex];
+    if (edit.width != width || edit.height != height) {
+        edit.width = width;
+        edit.height = height;
+        repaint();
+        m_onLayerExtent(m_layerIndex, width, height, false);
+    }
+}
+
+void OverlayWindow::finishLayerResize()
+{
+    if (!m_layerResizing) {
+        return;
+    }
+    m_layerResizing = false;
+    if (m_onLayerExtent && m_layerIndex < m_settings.rtssLayerEdits.size()) {
+        const RtssLayerEdit& edit = m_settings.rtssLayerEdits[m_layerIndex];
+        m_onLayerExtent(m_layerIndex, edit.width, edit.height, true);
+    }
+}
+
+void OverlayWindow::setRowEditHandler(std::function<void(MetricId, OverlayRowPosition, bool)> handler)
+{
+    m_onRowEdit = std::move(handler);
+}
+
+void OverlayWindow::setRowReorderHandler(std::function<void(MetricId, MetricId, bool)> handler)
+{
+    m_onRowReorder = std::move(handler);
+}
+
+void OverlayWindow::setStyledRowEditHandler(std::function<void(MetricId, OverlayRowOffset, bool)> handler)
+{
+    m_onStyledRowEdit = std::move(handler);
+}
+
+std::optional<MetricId> OverlayWindow::rowAt(int x, int y) const
+{
+    if (m_settings.recipe == OverlayRecipe::Rtss && m_settings.rtssVisual && m_settings.rtssTemplate) {
+        return std::nullopt;
+    }
+    for (auto it = m_rowBounds.rbegin(); it != m_rowBounds.rend(); ++it) {
+        if (it->rect.contains(static_cast<float>(x), static_cast<float>(y))) {
+            return it->id;
+        }
+    }
+    return std::nullopt;
+}
+
+void OverlayWindow::updateRowDrag(int x, int y)
+{
+    if (!m_rowDragging) {
+        return;
+    }
+    if (m_rowReordering) {
+        const auto target = rowAt(x, y);
+        if (target && *target != m_rowDragId) {
+            moveOverlayMetric(m_settings, m_rowDragId, *target);
+            repaint();
+            m_onRowReorder(m_rowDragId, *target, false);
+        }
+        return;
+    }
+    const int dx = static_cast<int>(std::lround((x - m_rowDragOrigin.x) / m_rowDragScale));
+    const int dy = static_cast<int>(std::lround((y - m_rowDragOrigin.y) / m_rowDragScale));
+    if (!m_settings.pixelLayout || m_settings.layout != OverlayLayout::Plates) {
+        OverlayRowOffset next = moveOverlayRowOffset(m_styleRowStart, dx, dy);
+        const int minX = static_cast<int>(std::ceil(-m_rowStartBounds.left / m_rowDragScale));
+        const int maxX
+            = static_cast<int>(std::floor((m_bitmapWidth - m_rowStartBounds.right) / m_rowDragScale));
+        const int minY = static_cast<int>(std::ceil(-m_rowStartBounds.top / m_rowDragScale));
+        const int maxY
+            = static_cast<int>(std::floor((m_bitmapHeight - m_rowStartBounds.bottom) / m_rowDragScale));
+        next.x = clampDraggedRow(next.x, m_styleRowStart.x, minX, maxX);
+        next.y = clampDraggedRow(next.y, m_styleRowStart.y, minY, maxY);
+        auto& current = m_settings.styleRowOffsets[static_cast<std::size_t>(m_rowDragId)];
+        if (current.x != next.x || current.y != next.y) {
+            current = next;
+            repaint();
+            m_onStyledRowEdit(m_rowDragId, next, false);
+        }
+        return;
+    }
+    const OverlayRowPosition next = moveOverlayRow(m_rowStart, dx, dy);
+    auto& current = m_settings.rowPositions[static_cast<std::size_t>(m_rowDragId)];
+    if (current.labelX != next.labelX || current.valueX != next.valueX || current.y != next.y) {
+        current = next;
+        repaint();
+        m_onRowEdit(m_rowDragId, next, false);
+    }
+}
+
+void OverlayWindow::finishRowDrag()
+{
+    if (!m_rowDragging) {
+        return;
+    }
+    m_rowDragging = false;
+    if (m_rowReordering) {
+        m_rowReordering = false;
+        m_onRowReorder(m_rowDragId, m_rowDragId, true);
+    } else if (m_settings.pixelLayout && m_settings.layout == OverlayLayout::Plates) {
+        if (m_onRowEdit) {
+            m_onRowEdit(m_rowDragId, m_settings.rowPositions[static_cast<std::size_t>(m_rowDragId)], true);
+        }
+    } else if (m_onStyledRowEdit) {
+        m_onStyledRowEdit(
+            m_rowDragId, m_settings.styleRowOffsets[static_cast<std::size_t>(m_rowDragId)], true);
+    }
+}
+
 void OverlayWindow::beginDrag(int screenX, int screenY)
 {
     m_dragging = true;
-    m_dragOrigin = POINT{ screenX, screenY };
+    m_dragOrigin = POINT { screenX, screenY };
     m_dragOffsetX
         = m_settings.anchorMode == OverlayAnchorMode::Free ? m_settings.originX : m_settings.offsetX;
     m_dragOffsetY
@@ -480,6 +1003,8 @@ void OverlayWindow::hide()
     }
     m_visible = false;
     m_animating = false;
+    m_showEditHandles = false;
+    m_layerHover = -1;
     m_fade = 1.0f;
     KillTimer(m_window, 1);
     ShowWindow(m_window, SW_HIDE);
@@ -506,8 +1031,11 @@ bool OverlayWindow::ensureRenderTarget(UINT width, UINT height)
             return false;
         }
 
-        const D2D1_RENDER_TARGET_PROPERTIES properties = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT,
-            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
+        // 8-битная SDR-поверхность: Windows DWM выполняет SDRBoost сам для HDR-монитора.
+        // FP16 без ручной поправки уровня белого сделал бы те же цвета темнее.
+        const D2D1_RENDER_TARGET_PROPERTIES properties
+            = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT,
+                D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED));
 
         HRESULT result = factory->CreateDCRenderTarget(&properties, &m_target);
         if (FAILED(result) || m_target == nullptr) {
@@ -567,7 +1095,48 @@ void OverlayWindow::repaint()
     render();
 }
 
+bool OverlayWindow::hasVisiblePixels() const
+{
+    if (m_pixels == nullptr || m_contentRectD2D.right <= m_contentRectD2D.left
+        || m_contentRectD2D.bottom <= m_contentRectD2D.top) {
+        return false;
+    }
+    const auto left
+        = static_cast<UINT>(std::clamp(m_contentRectD2D.left, 0.0f, static_cast<float>(m_bitmapWidth)));
+    const auto top
+        = static_cast<UINT>(std::clamp(m_contentRectD2D.top, 0.0f, static_cast<float>(m_bitmapHeight)));
+    const auto right
+        = static_cast<UINT>(std::clamp(m_contentRectD2D.right, 0.0f, static_cast<float>(m_bitmapWidth)));
+    const auto bottom
+        = static_cast<UINT>(std::clamp(m_contentRectD2D.bottom, 0.0f, static_cast<float>(m_bitmapHeight)));
+    const auto* pixels = static_cast<const std::uint8_t*>(m_pixels);
+    for (UINT y = top; y < bottom; ++y) {
+        for (UINT x = left; x < right; ++x) {
+            if (pixels[(static_cast<std::size_t>(y) * m_bitmapWidth + x) * 4 + 3] != 0) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
 
+bool OverlayWindow::hasPixelColor(std::uint8_t red, std::uint8_t green, std::uint8_t blue) const
+{
+    if (!m_pixels) {
+        return false;
+    }
+    const auto* pixels = static_cast<const std::uint8_t*>(m_pixels);
+    const std::size_t count = static_cast<std::size_t>(m_bitmapWidth) * m_bitmapHeight;
+    for (std::size_t index = 0; index < count; ++index) {
+        const auto* pixel = pixels + index * 4;
+        if (pixel[3] >= 200 && std::abs(static_cast<int>(pixel[2]) - red) <= 8
+            && std::abs(static_cast<int>(pixel[1]) - green) <= 8
+            && std::abs(static_cast<int>(pixel[0]) - blue) <= 8) {
+            return true;
+        }
+    }
+    return false;
+}
 
 void OverlayWindow::drawScene(float scale)
 {
@@ -575,7 +1144,7 @@ void OverlayWindow::drawScene(float scale)
     const OverlayText text = makeOverlayText(m_settings, m_store);
     Rect bounds { 0.0f, 0.0f, static_cast<float>(m_bitmapWidth), static_cast<float>(m_bitmapHeight) };
     OverlaySettings painted = m_settings;
-    RECT savedMonitor {};
+    RECT savedMonitor { };
     const bool savedAvailable = painted.anchorMode == OverlayAnchorMode::Free
         && findOverlayMonitor(painted.savedMonitorId, savedMonitor);
     if (savedAvailable) {
@@ -613,8 +1182,39 @@ void OverlayWindow::drawScene(float scale)
 
     m_target->BeginDraw();
     m_target->Clear(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.0f));
-    const Rect content = paintOverlay(m_target, painted, m_theme, text, bounds, scale, formats);
+    const Rect content = paintOverlay(m_target, painted, m_theme, text, bounds, scale, formats,
+        &m_rtssLayerBounds, &m_rtssLayerScale, &m_rowBounds, &m_rowUnit);
     m_contentRectD2D = D2D1::RectF(content.left, content.top, content.right, content.bottom);
+    if (m_showEditHandles && !m_settings.clickThrough && (m_onDirectEdit || m_onLayerExtent)) {
+        ID2D1SolidColorBrush* brush = nullptr;
+        if (SUCCEEDED(m_target->CreateSolidColorBrush(D2D1::ColorF(0.19f, 0.87f, 0.63f, 0.95f), &brush))) {
+            if (m_onDirectEdit && content.width() >= 60.0f && content.height() >= 45.0f
+                && (!m_settings.rtssVisual || m_layerHover < 0)) {
+                const D2D1_RECT_F size = D2D1::RectF(content.right - 12.0f, content.bottom - 12.0f,
+                    content.right - 3.0f, content.bottom - 3.0f);
+                m_target->FillRectangle(size, brush);
+                if (!m_settings.rtssVisual
+                    && !(m_settings.pixelLayout && m_settings.layout == OverlayLayout::Plates)) {
+                    const float padding
+                        = static_cast<float>(m_settings.paddingPx < 0 ? 10 : m_settings.paddingPx)
+                        * m_settings.scalePercent / 100.0f;
+                    const float x = content.left + std::clamp(padding, 5.0f, 24.0f);
+                    const float y = content.top + std::clamp(padding, 5.0f, 20.0f);
+                    m_target->FillRectangle(D2D1::RectF(x - 3.0f, y - 3.0f, x + 6.0f, y + 6.0f), brush);
+                }
+            }
+            if (m_onLayerExtent && m_layerHover >= 0
+                && static_cast<std::size_t>(m_layerHover) < m_rtssLayerBounds.size()) {
+                const Rect& box = m_rtssLayerBounds[static_cast<std::size_t>(m_layerHover)];
+                if (box.width() >= 22.0f && box.height() >= 22.0f) {
+                    m_target->DrawRectangle(D2D1::RectF(box.left, box.top, box.right, box.bottom), brush, 1.0f);
+                    m_target->FillRectangle(D2D1::RectF(
+                        box.right - 9.0f, box.bottom - 9.0f, box.right + 3.0f, box.bottom + 3.0f), brush);
+                }
+            }
+            brush->Release();
+        }
+    }
     m_target->EndDraw();
 }
 
@@ -643,7 +1243,8 @@ bool OverlayWindow::render()
 
     OverlaySettings animated = animatedSettings();
     // Прозрачность при появлении и смене стиля: всё содержимое проявляется целиком.
-    animated.opacityPercent = static_cast<int>(std::lround(static_cast<double>(animated.opacityPercent) * m_fade));
+    animated.opacityPercent = static_cast<int>(std::lround(
+        static_cast<double>(m_menuSceneOpacity.value_or(animated.opacityPercent)) * m_fade));
     const OverlaySettings saved = m_settings;
     m_settings = animated;
     drawScene(static_cast<float>(std::clamp(animated.scalePercent, 70, 160)) / 100.0f);

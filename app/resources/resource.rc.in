@@ -4,8 +4,10 @@
 // что рисуется в рельсе приложения.
 #pragma code_page(65001)
 #include <windows.h>
+#include "@YAWA_CHANGELOG_IDS@"
 
 101 ICON "@YAWA_ICON_PATH@"
+IDR_CHANGELOG RCDATA "@YAWA_CHANGELOG_PATH@"
 
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION @PROJECT_VERSION@,0

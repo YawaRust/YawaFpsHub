@@ -3,10 +3,13 @@
 #include "metrics/sensor_status.h"
 #include "metrics/smbios_memory.h"
 #include "ui/canvas_transform.h"
+#include "ui/rtss_exchange.h"
 #include "ui/settings.h"
 
 #include "test_support.h"
 #include <algorithm>
+#include <charconv>
+#include <memory>
 
 #include <string>
 #include <string_view>
@@ -177,6 +180,13 @@ namespace {
         CHECK(rows.front().id == MetricId::VramUsed);
         Settings saved;
         saved.overlay = settings;
+        moveOverlayMetric(saved.overlay, MetricId::CpuLoad, MetricId::VramUsed);
+        CHECK(!saved.overlay.pixelLayout);
+        Settings reordered;
+        std::string reorderError;
+        CHECK(parseSettings(serializeSettings(saved), reordered, reorderError));
+        CHECK(!reordered.overlay.pixelLayout);
+        CHECK(overlayMetricRows(reordered.overlay, store)[0].id == MetricId::CpuLoad);
         enableOverlayPixelLayout(saved.overlay);
         saved.overlay.rowPositions[static_cast<std::size_t>(MetricId::VramUsed)] = { 30, 320, 17 };
         Settings parsed;
@@ -382,6 +392,42 @@ namespace {
         CHECK(sensorMissingReason(MetricId::DiskTemp, SensorFailure::NeedsAccess) == SensorFailure::Unknown);
     }
 
+    void testRestoreOverlayTemplateKeepsPersonalSettings()
+    {
+        OverlaySettings settings;
+        const auto fps = static_cast<std::size_t>(MetricId::Fps);
+        settings.pixelLayout = true;
+        settings.rowPositions[fps] = { 45, 300, 120 };
+        settings.styleRowOffsets[fps] = { 18, -7 };
+        settings.backgroundWidthPx = 520;
+        settings.backgroundHeightPx = 300;
+        settings.metricRgba[fps] = 0xAABBCCDDu;
+        settings.originX = 340;
+        settings.savedMonitorId = "display:test";
+        settings.metrics[fps] = false;
+        restoreOverlayTemplate(settings);
+        CHECK(!settings.pixelLayout && settings.rowPositions[fps].y == -1);
+        CHECK(settings.styleRowOffsets[fps].x == 0 && settings.styleRowOffsets[fps].y == 0);
+        CHECK(settings.backgroundWidthPx == -1 && settings.backgroundHeightPx == -1);
+        CHECK(settings.metricRgba[fps] == 0xAABBCCDDu && !settings.metrics[fps]);
+        CHECK(settings.originX == 340 && settings.savedMonitorId == "display:test");
+
+        std::string error;
+        CHECK(importRtssOverlay("[Master]\nImplementation=2\n[General]\nLayers=1\n"
+                                "[Layer0]\nText=<FR>\n",
+            settings, error));
+        const auto original = settings.rtssTemplate;
+        settings.rtssLayerEdits[0].visible = false;
+        settings.rtssLayerEdits[0].text = "other";
+        settings.rtssLayerEdits[0].x = 100;
+        settings.rtssLayerEdits[0].backgroundColor = 0x80808080u;
+        restoreOverlayTemplate(settings);
+        CHECK(settings.rtssTemplate == original && settings.rtssLayerEdits[0].visible);
+        CHECK(!settings.rtssLayerEdits[0].text && !settings.rtssLayerEdits[0].backgroundColor);
+        CHECK(settings.rtssLayerEdits[0].x == 0);
+        CHECK(settings.originX == 340 && settings.savedMonitorId == "display:test");
+    }
+
     void testCanvasCoordinatesSurviveZoom()
     {
         const CanvasAxis horizontal { 20.0f, 35.0f, 0.5f };
@@ -392,6 +438,40 @@ namespace {
         const CanvasAxis zoomed { horizontal.origin, horizontal.panAtZoom(focus, 0.75f), 0.75f };
         CHECK(zoomed.toScreen(focus) == screenPosition);
         CHECK(zoomed.toCanvas(0.0f) == zoomed.origin + zoomed.pan);
+        // Строка у нижнего края рабочего стола должна стать читаемой в центре холста,
+        // при этом обратное преобразование обязано сохранить координаты экрана.
+        const ScreenBox line { 100, 980, 550, 1020 };
+        const CanvasFit fitted = fitCanvasContent(line, 356.0f, 200.0f, 1920.0f);
+        CHECK(fitted.zoom > 3.0f && fitted.zoom < 6.0f);
+        const CanvasAxis fittedX { 20.0f, fitted.panX, fitted.zoom * 356.0f / 1920.0f };
+        const CanvasAxis fittedY { 320.0f, fitted.panY, fitted.zoom * 356.0f / 1920.0f };
+        CHECK(std::abs(fittedX.toCanvas(325.0f) - 198.0f) < 0.01f);
+        CHECK(std::abs(fittedY.toCanvas(1000.0f) - 420.0f) < 0.01f);
+        CHECK(std::abs(fittedX.toScreen(fittedX.toCanvas(100.0f)) - 100.0f) < 0.01f);
+        CHECK(fittedX.toCanvas(550.0f) <= 20.0f + 356.0f - 14.0f + 0.01f);
+        const CanvasFit workspace = fitCanvasContent(line, 1115.0f, 580.0f, 1920.0f);
+        const CanvasAxis workspaceX { 184.0f, workspace.panX, workspace.zoom * 1115.0f / 1920.0f };
+        CHECK(workspaceX.toCanvas(550.0f) - workspaceX.toCanvas(100.0f) > 1000.0f);
+        CHECK(std::abs(workspaceX.toScreen(workspaceX.toCanvas(325.0f)) - 325.0f) < 0.01f);
+        CHECK(resizeRtssExtent(120, 0, 2.0f) == 120);
+        CHECK(resizeRtssExtent(120, 18, 2.0f) == 129);
+        CHECK(resizeRtssExtent(120, -400, 2.0f) == 16);
+        CHECK(resizeRtssExtent(2048, 10, 1.0f) == 2048);
+        CHECK(resizeRtssExtent(4096, 0, 1.0f) == 4096);
+        CHECK(alignCanvasEdge(10.0f, 90.0f, 40.0f, 70.0f, 0) == -30.0f);
+        CHECK(alignCanvasEdge(10.0f, 90.0f, 40.0f, 70.0f, 1) == -5.0f);
+        CHECK(alignCanvasEdge(10.0f, 90.0f, 40.0f, 70.0f, 2) == 20.0f);
+        CHECK(clampDraggedRow(150, 150, 20, 80) == 150);
+        CHECK(clampDraggedRow(149, 150, 20, 80) == 150);
+        CHECK(clampDraggedRow(152, 150, 20, 80) == 152);
+        CHECK(clampDraggedRow(150, 150, -50, -10) == 150);
+        CHECK(clampDraggedRow(200, 150, -50, -10) == 150);
+        // RTSS со смещёнными абсолютными координатами: вписываем слои, не пустоту от (0,0).
+        const CanvasFit rtss = fitCanvasContent({ 1420, 680, 1720, 880 }, 356.0f, 200.0f, 1920.0f);
+        const CanvasAxis rtssX { 20.0f, rtss.panX, rtss.zoom * 356.0f / 1920.0f };
+        CHECK(std::abs(rtssX.toCanvas(1570.0f) - 198.0f) < 0.01f);
+        CHECK(fitCanvasContent({ 0, 0, 4096, 100 }, 356.0f, 200.0f, 1920.0f).zoom < 0.75f);
+        CHECK(fitCanvasContent({ }, 356.0f, 200.0f, 1920.0f).zoom == 1.0f);
         // Виртуальный экран начинается на x=-1920: начало сохранённого монитора — x=1920.
         CHECK(originOnMonitor(2040, 1920) == 120);
         CHECK(originOnMonitor(110, 0) == 110);
@@ -419,6 +499,38 @@ namespace {
         const ScreenBox previous = target;
         CHECK(!monitorOnCanvas(virtualScreen, ScreenBox { 4000, 0, 5000, 1080 }, target));
         CHECK(target.left == previous.left && target.right == previous.right);
+    }
+
+    void testDraggedRowKeepsColumnsAndClamps()
+    {
+        const OverlayRowPosition initial { 12, 252, 40 };
+        const OverlayRowPosition moved = moveOverlayRow(initial, 13, -7);
+        CHECK(moved.labelX == 25 && moved.valueX == 265 && moved.y == 33);
+        const OverlayRowPosition left = moveOverlayRow(initial, -999, -999);
+        CHECK(left.labelX == 0 && left.valueX == 240 && left.y == 0);
+        const OverlayRowPosition right = moveOverlayRow(initial, 999, 9999);
+        CHECK(right.labelX == 230 && right.valueX == 470 && right.y == 1490);
+        CHECK(moveOverlayRow({ 400, 100, 10 }, 999, 0).labelX == 470);
+    }
+
+    void testStyledRowOffsetKeepsPresetAndRoundTrips()
+    {
+        Settings settings;
+        CHECK(!settings.overlay.pixelLayout);
+        auto& offset = settings.overlay.styleRowOffsets[static_cast<std::size_t>(MetricId::CpuLoad)];
+        offset = moveOverlayRowOffset(offset, -18, 42);
+        CHECK(offset.x == -18 && offset.y == 42);
+        CHECK(!settings.overlay.pixelLayout);
+        Settings loaded;
+        std::string error;
+        CHECK(parseSettings(serializeSettings(settings), loaded, error));
+        const auto& restored = loaded.overlay.styleRowOffsets[static_cast<std::size_t>(MetricId::CpuLoad)];
+        CHECK(restored.x == -18 && restored.y == 42);
+        CHECK(!loaded.overlay.pixelLayout);
+        CHECK(moveOverlayRowOffset(restored, 5000, -5000).x == 2048);
+        CHECK(moveOverlayRowOffset(restored, 5000, -5000).y == -2048);
+        CHECK(parseSettings("[overlay_style_offsets]\ncpu_load = 3000,0\n", loaded, error));
+        CHECK(loaded.overlay.styleRowOffsets[static_cast<std::size_t>(MetricId::CpuLoad)].x == 0);
     }
 
     void testOverlayAnchorMigration()
@@ -469,6 +581,28 @@ namespace {
         CHECK(roundTrip.overlay.followGameMonitor);
         CHECK(parseSettings("[overlay]\nfollow_game_monitor = no\n", roundTrip, error));
         CHECK(!roundTrip.overlay.followGameMonitor);
+        CHECK(!roundTrip.overlay.showSparkline);
+        CHECK(parseSettings("[overlay]\nfps_sparkline = 1\n", settings, error));
+        CHECK(settings.overlay.showSparkline);
+        CHECK(parseSettings(serializeSettings(settings), roundTrip, error));
+        CHECK(roundTrip.overlay.showSparkline);
+        CHECK(parseSettings("[overlay]\nfps_sparkline = 0\n", roundTrip, error));
+        CHECK(!roundTrip.overlay.showSparkline);
+        CHECK(roundTrip.overlay.sparklineMetric == MetricId::Fps);
+        CHECK(roundTrip.overlay.menuOpacityPercent == 0);
+        settings.overlay.menuOpacityPercent = 38;
+        CHECK(parseSettings(serializeSettings(settings), roundTrip, error));
+        CHECK(roundTrip.overlay.menuOpacityPercent == 38);
+        CHECK(parseSettings("[overlay]\nmenu_opacity = 900\n", roundTrip, error));
+        CHECK(roundTrip.overlay.menuOpacityPercent == 100);
+        for (MetricId metric : { MetricId::CpuLoad, MetricId::GpuLoad, MetricId::FrameTime }) {
+            settings.overlay.sparklineMetric = metric;
+            CHECK(parseSettings(serializeSettings(settings), roundTrip, error));
+            CHECK(roundTrip.overlay.showSparkline);
+            CHECK(roundTrip.overlay.sparklineMetric == metric);
+        }
+        CHECK(parseSettings("[overlay]\nfps_sparkline = 1\nsparkline_metric = cpu_temp\n", roundTrip, error));
+        CHECK(roundTrip.overlay.sparklineMetric == MetricId::Fps);
         CHECK(parseSettings(
             "[overlay]\nanchor_mode = other\norigin_x = -20\norigin_y = 99999\n", roundTrip, error));
         CHECK(roundTrip.overlay.anchorMode == OverlayAnchorMode::Corner);
@@ -487,7 +621,11 @@ namespace {
                                  "letter_spacing = 150\n"
                                  "uppercase = 1\n"
                                  "separators = 0\n"
-                                 "fps_decimals = 2\n";
+                                 "fps_decimals = 2\n"
+                                 "background_width = 180\n"
+                                 "background_height = 90\n"
+                                 "[overlay_metric_text_scale]\n"
+                                 "cpu_load = 150\n";
 
         Settings settings;
         std::string error;
@@ -503,6 +641,10 @@ namespace {
         CHECK(settings.overlay.uppercaseMode == 1);
         CHECK(settings.overlay.separatorsMode == 0);
         CHECK(settings.overlay.fpsDecimals == 2);
+        CHECK(settings.overlay.backgroundWidthPx == 180);
+        CHECK(settings.overlay.backgroundHeightPx == 90);
+        CHECK(settings.overlay.metricTextScalePercent[static_cast<std::size_t>(MetricId::CpuLoad)] == 150);
+        CHECK(settings.overlay.metricTextScalePercent[static_cast<std::size_t>(MetricId::GpuLoad)] == 100);
 
         Settings copy;
         CHECK(parseSettings(serializeSettings(settings), copy, error));
@@ -511,6 +653,9 @@ namespace {
         CHECK(copy.overlay.rowColors[2] == 5);
         CHECK(copy.overlay.borderWidth == 2);
         CHECK(copy.overlay.fpsDecimals == 2);
+        CHECK(copy.overlay.backgroundWidthPx == 180);
+        CHECK(copy.overlay.backgroundHeightPx == 90);
+        CHECK(copy.overlay.metricTextScalePercent[static_cast<std::size_t>(MetricId::CpuLoad)] == 150);
 
         // Смена пресета возвращает ручные подстройки к значениям стиля.
         applyStyleDefaults(copy.overlay, OverlayStyle::Rtss);
@@ -541,6 +686,12 @@ namespace {
         CHECK(settings.overlay.shadowStrength == 100);
         CHECK(settings.overlay.letterSpacing == 0);
         CHECK(settings.overlay.fpsDecimals == 2);
+        CHECK(parseSettings("[overlay]\nbackground_width = 79\nbackground_height = 5000\n"
+                            "[overlay_metric_text_scale]\ncpu_load = 201\n",
+            settings, error));
+        CHECK(settings.overlay.backgroundWidthPx == -1);
+        CHECK(settings.overlay.backgroundHeightPx == -1);
+        CHECK(settings.overlay.metricTextScalePercent[static_cast<std::size_t>(MetricId::CpuLoad)] == 100);
     }
 
     void testParsesValues()
@@ -793,6 +944,368 @@ namespace {
         rejects(std::string(16385, 'x'));
     }
 
+    void testRtssImportRecognizesOnlyKnownSources()
+    {
+        OverlaySettings settings;
+        settings.originX = 200;
+        settings.savedMonitorId = "display:PRIMARY";
+        const std::string before = "[Master]\r\nImplementation=2\r\n[General]\r\nSources=1\r\nLayers=3\r\n"
+                                   "[Source0]\r\nName=GPU1 usage\r\nProvider=HAL\r\nID=GPU1 usage\r\n"
+                                   "[Layer0]\r\nText=<FR>\r\n[Layer1]\r\nText=%GPU1 usage%\r\n"
+                                   "[Layer2]\r\nText=%External source%\r\n";
+        std::string error;
+        CHECK(importRtssOverlay(before, settings, error));
+        CHECK(settings.style == OverlayStyle::Rtss);
+        CHECK(settings.metrics[static_cast<std::size_t>(MetricId::Fps)]);
+        CHECK(settings.metrics[static_cast<std::size_t>(MetricId::GpuLoad)]);
+        CHECK(!settings.metrics[static_cast<std::size_t>(MetricId::CpuLoad)]);
+        CHECK(settings.savedMonitorId == "display:PRIMARY" && settings.originX == 200);
+        CHECK((settings.rtssTemplate && *settings.rtssTemplate == before) && settings.rtssOmittedLayers == 1);
+        Settings persisted;
+        persisted.overlay = settings;
+        Settings restored;
+        CHECK(parseSettings(serializeSettings(persisted), restored, error));
+        CHECK((restored.overlay.rtssTemplate && *restored.overlay.rtssTemplate == before)
+            && restored.overlay.rtssOmittedLayers == 1);
+        const OverlaySettings snapshot = settings;
+        CHECK(!importRtssOverlay("[Master]\nImplementation=3\n[General]\nLayers=1\n"
+                                 "[Layer0]\nText=<FR>\n",
+            settings, error));
+        CHECK(settings.metrics == snapshot.metrics && settings.style == snapshot.style);
+        CHECK(!importRtssOverlay("[Master]\nImplementation=2\n[General]\nLayers=1\n"
+                                 "[Layer7]\nText=<FR>\n",
+            settings, error));
+        CHECK(!importRtssOverlay(std::string(1048577, 'x'), settings, error));
+    }
+
+    void testRtssHypertextDoesNotExpandPreview()
+    {
+        const std::string original = "<C=FFFFFF><S=180>CPU: %CPU temperature% °C\\n"
+                                     "<C=FF0000><A=1><FR> FPS";
+        const std::string visible = rtssVisibleTemplate(original);
+        CHECK(visible == "CPU: %CPU temperature% °C\n<FR> FPS");
+        CHECK(rtssVisibleTemplate("Первая\\nВторая") == "Первая\nВторая");
+        CHECK(rtssVisibleTemplate("<G=Frametime,0,0,1,33,0,80>") == "<G=Frametime,0,0,1,33,0,80>");
+        CHECK(rtssVisibleTemplate("<I=0,0,0,0,225,544>") == "<I=0,0,0,0,225,544>");
+        CHECK(original.find("<C=") == 0); // исходные слои при экспорте не переписываются.
+    }
+
+    void testRtssVisualLayersPersistWithoutExternalProvider()
+    {
+        const std::string source = "[Master]\nImplementation=2\nFontFace=Unispace\nFontHeight=-7\n"
+                                   "FontWeight=700\nZoomRatio=2\n[General]\nLayers=3\nSources=1\n"
+                                   "[Source0]\nName=GPU1 usage\nProvider=Other\nID=GPU1 usage\n"
+                                   "[Layer0]\nText=GPU\nPositionX=-2\nPositionY=-4\n"
+                                   "ExtentX=-16\nExtentY=-6\nBgndColor=1000000,,0,80000000,0,(Framerate,1)\n"
+                                   "[Layer1]\nText=%GPU1 usage%\nPositionX=-12\n"
+                                   "TextColor=1000000,,0,FFFF8000,0,(Framerate,1)\n"
+                                   "[Layer2]\nText=<FR> FPS\\nREADY\nExtentOrigin=2\nSize=200\n";
+        OverlaySettings imported;
+        std::string error;
+        CHECK(importRtssOverlay(source, imported, error));
+        CHECK(imported.rtssVisual && imported.rtssVisual->layers.size() == 3);
+        CHECK(imported.rtssVisual->fontFace == "Unispace" && imported.rtssVisual->zoom == 2);
+        CHECK(imported.rtssVisual->layers[0].x == -2 && imported.rtssVisual->layers[0].y == -4);
+        CHECK(imported.rtssVisual->layers[0].backgroundColor == 0x80000000u);
+        CHECK(imported.rtssVisual->layers[1].textColor == 0xFFFF8000u);
+        CHECK(imported.rtssVisual->layers[2].size == 200 && imported.rtssVisual->layers[2].origin == 2);
+        CHECK(rtssVisibleTemplate(imported.rtssVisual->layers[2].text) == "<FR> FPS\nREADY");
+        CHECK(imported.rtssVisual->availableTags.size() == 1
+            && imported.rtssVisual->availableTags[0].first == "<FR>");
+        Settings saved;
+        saved.overlay = imported;
+        saved.overlay.rtssLayerEdits[1].x = 23;
+        saved.overlay.rtssLayerEdits[1].y = -7;
+        saved.overlay.rtssLayerEdits[1].visible = false;
+        saved.overlay.rtssLayerEdits[1].text = "GPU <FR> / тест";
+        saved.overlay.rtssLayerEdits[1].textColor = 0x80773322u;
+        saved.overlay.rtssLayerEdits[0].backgroundColor = 0x00000000u;
+        saved.overlay.rtssLayerEdits[1].backgroundColor = 0x804488CCu;
+        saved.overlay.rtssLayerEdits[1].size = 175;
+        saved.overlay.rtssLayerEdits[1].width = 320;
+        saved.overlay.rtssLayerEdits[1].height = 48;
+        saved.overlay.rtssLayerEdits[2].text = ""; // пустая строка — тоже намеренная правка.
+        Settings restored;
+        CHECK(parseSettings(serializeSettings(saved), restored, error));
+        CHECK(restored.overlay.rtssLayerEdits[1].x == 23 && restored.overlay.rtssLayerEdits[1].y == -7
+            && !restored.overlay.rtssLayerEdits[1].visible);
+        CHECK(restored.overlay.rtssTemplate && *restored.overlay.rtssTemplate == source);
+        CHECK(restored.overlay.rtssVisual && restored.overlay.rtssVisual->layers[0].x == -2);
+        CHECK(restored.overlay.rtssVisual->availableTags.size() == 1);
+        CHECK(restored.overlay.rtssLayerEdits[1].text == saved.overlay.rtssLayerEdits[1].text);
+        CHECK(restored.overlay.rtssLayerEdits[1].textColor == 0x80773322u);
+        CHECK(restored.overlay.rtssLayerEdits[0].backgroundColor == 0x00000000u);
+        CHECK(restored.overlay.rtssLayerEdits[1].backgroundColor == 0x804488CCu);
+        CHECK(restored.overlay.rtssLayerEdits[2].backgroundColor == std::nullopt);
+        CHECK(restored.overlay.rtssLayerEdits[1].size == 175);
+        CHECK(restored.overlay.rtssLayerEdits[1].width == 320
+            && restored.overlay.rtssLayerEdits[1].height == 48);
+        CHECK(restored.overlay.rtssLayerEdits[2].text && restored.overlay.rtssLayerEdits[2].text->empty());
+        Settings longText = restored;
+        longText.overlay.rtssLayerEdits[1].text = std::string(8192, 'x');
+        Settings longTextRestored;
+        CHECK(parseSettings(serializeSettings(longText), longTextRestored, error));
+        CHECK(longTextRestored.overlay.rtssLayerEdits[1].text == longText.overlay.rtssLayerEdits[1].text);
+        longText.overlay.rtssLayerEdits[1].text->push_back('x');
+        Settings oversizedRestored;
+        CHECK(parseSettings(serializeSettings(longText), oversizedRestored, error));
+        CHECK(!oversizedRestored.overlay.rtssLayerEdits[1].text);
+        const std::string multiline = "FPS <FR>\nGPU тест\\nREADY\n";
+        longText.overlay.rtssLayerEdits[1].text = multiline + std::string(8192 - multiline.size(), 'x');
+        Settings multilineRestored;
+        CHECK(parseSettings(serializeSettings(longText), multilineRestored, error));
+        CHECK(multilineRestored.overlay.rtssLayerEdits[1].text == longText.overlay.rtssLayerEdits[1].text);
+        CHECK(multilineRestored.overlay.rtssLayerEdits[1].textColor == 0x80773322u);
+        CHECK(multilineRestored.overlay.rtssLayerEdits[1].width == 320);
+        multilineRestored.overlay.rtssLayerEdits[1].text.reset();
+        Settings textReset;
+        CHECK(parseSettings(serializeSettings(multilineRestored), textReset, error));
+        CHECK(!textReset.overlay.rtssLayerEdits[1].text);
+        CHECK(textReset.overlay.rtssLayerEdits[1].textColor == 0x80773322u);
+        CHECK(textReset.overlay.rtssLayerEdits[1].width == 320);
+        restored.overlay.rtssLayerEdits[1].textColor.reset();
+        Settings colorReset;
+        CHECK(parseSettings(serializeSettings(restored), colorReset, error));
+        CHECK(!colorReset.overlay.rtssLayerEdits[1].textColor);
+        CHECK(colorReset.overlay.rtssLayerEdits[1].backgroundColor == 0x804488CCu
+            && colorReset.overlay.rtssLayerEdits[1].size == 175
+            && colorReset.overlay.rtssLayerEdits[1].width == 320
+            && colorReset.overlay.rtssLayerEdits[1].text == saved.overlay.rtssLayerEdits[1].text);
+        const std::string graph10 = "[Master]\nImplementation=2\n[General]\nLayers=2\nSources=1\n"
+                                    "[Source0]\nName=CPU usage\nProvider=HAL\nID=CPU usage\n"
+                                    "[Layer0]\nText=<G=Frametime,0,0,1,0,40,10>\n"
+                                    "[Layer1]\nText=<G=CPU usage,0,0,1,0,100,10>\n";
+        CHECK(importRtssOverlay(graph10, imported, error));
+        CHECK(imported.rtssOmittedLayers == 0);
+        CHECK(imported.rtssVisual && imported.rtssVisual->layers[1].text.starts_with("<G=CPU usage,"));
+        const std::size_t provider = graph10.find("Provider=HAL");
+        std::string externalGraph = graph10;
+        externalGraph.replace(provider, 12, "Provider=Other");
+        CHECK(importRtssOverlay(externalGraph, imported, error));
+        CHECK(imported.rtssOmittedLayers == 1);
+        Settings invalidEdits;
+        CHECK(
+            parseSettings("[rtss_layer_edits]\n1 = 2049,0,0\n2 = 0,0,3\n256 = 1,1,1\n", invalidEdits, error));
+        CHECK(parseSettings("[rtss_layer_text]\n1 = XY\n256 = 4142\n"
+                            "[rtss_layer_color]\n1 = GGGGGGGG\n"
+                            "[rtss_layer_background]\n1 = FFFFFFGG\n256 = 00000000\n"
+                            "[rtss_layer_size]\n1 = 401\n"
+                            "[rtss_layer_extent]\n1 = 3000,40\n2 = 80,-4\n",
+            invalidEdits, error));
+        CHECK(invalidEdits.overlay.rtssLayerEdits[1].width == 0
+            && invalidEdits.overlay.rtssLayerEdits[2].height == 0);
+        CHECK(!invalidEdits.overlay.rtssLayerEdits[1].text
+            && !invalidEdits.overlay.rtssLayerEdits[1].textColor
+            && !invalidEdits.overlay.rtssLayerEdits[1].backgroundColor
+            && invalidEdits.overlay.rtssLayerEdits[1].size == 0);
+        CHECK(invalidEdits.overlay.rtssLayerEdits[1].visible && invalidEdits.overlay.rtssLayerEdits[1].x == 0
+            && invalidEdits.overlay.rtssLayerEdits[2].visible);
+        CHECK(importRtssOverlay(source, restored.overlay, error));
+        CHECK(restored.overlay.rtssLayerEdits[1].visible && restored.overlay.rtssLayerEdits[1].x == 0
+            && !restored.overlay.rtssLayerEdits[1].backgroundColor);
+    }
+
+    void testRtssGraphUsesLocalHistoryWithoutFabricatedSource()
+    {
+        const std::string source = "[Master]\nImplementation=2\n[General]\nLayers=1\n"
+                                   "[Layer0]\nName=Frametime graph\nText=<G=Frametime,0,0,1,33,0,80>\n"
+                                   "ExtentX=-32\nExtentY=-4\n";
+        OverlaySettings imported;
+        std::string error;
+        CHECK(importRtssOverlay(source, imported, error));
+        CHECK(imported.rtssVisual && imported.rtssVisual->layers.size() == 1);
+        CHECK(imported.rtssVisual->layers[0].text == "<G=Frametime,0,0,1,33,0,80>");
+        CHECK(imported.rtssOmittedLayers == 0);
+        CHECK(!imported.metrics[static_cast<std::size_t>(MetricId::FrameTime)]);
+        CHECK(imported.rtssTemplate && *imported.rtssTemplate == source);
+    }
+
+    void testRtssExternalProviderCannotImpersonateHal()
+    {
+        const std::string source = "[Master]\nImplementation=2\n[General]\nSources=2\nLayers=3\n"
+                                   "[Source0]\nName=CPU temperature\nProvider=HwInfo\nID=CPU temperature\n"
+                                   "[Source1]\nName=GPU1 usage\nProvider=HAL\nID=GPU1 usage\n"
+                                   "[Layer0]\nText=%CPU temperature%\nPositionX=-5\n"
+                                   "[Layer1]\nText=%GPU1 usage%\n"
+                                   "[Layer2]\nImage=custom.png\n";
+        OverlaySettings settings;
+        std::string error;
+        CHECK(importRtssOverlay(source, settings, error));
+        CHECK(settings.metrics[static_cast<std::size_t>(MetricId::GpuLoad)]);
+        CHECK(!settings.metrics[static_cast<std::size_t>(MetricId::CpuTemp)]);
+        CHECK(settings.rtssOmittedLayers == 2 && (settings.rtssTemplate && *settings.rtssTemplate == source));
+        settings.scalePercent = 140;
+        Settings stored;
+        stored.overlay = settings;
+        Settings restored;
+        CHECK(parseSettings(serializeSettings(stored), restored, error));
+        CHECK((restored.overlay.rtssTemplate && *restored.overlay.rtssTemplate == source));
+        CHECK(restored.overlay.scalePercent == 140);
+
+        const std::string imageOnly = "[Master]\nImplementation=2\n[General]\nLayers=1\n"
+                                      "[Layer0]\nImage=picture.png\n";
+        CHECK(importRtssOverlay(imageOnly, settings, error));
+        CHECK((settings.rtssTemplate && *settings.rtssTemplate == imageOnly)
+            && settings.rtssOmittedLayers == 1);
+        CHECK(std::none_of(
+            settings.metrics.begin(), settings.metrics.end(), [](bool chosen) { return chosen; }));
+        const std::string ambiguous = "[Master]\nImplementation=2\n[General]\nSources=2\nLayers=1\n"
+                                      "[Source0]\nName=GPU1 usage\nProvider=HAL\nID=GPU1 usage\n"
+                                      "[Source1]\nName=GPU1 usage\nProvider=AIDA\nID=GPU1 usage\n"
+                                      "[Layer0]\nText=%GPU1 usage%\n";
+        CHECK(importRtssOverlay(ambiguous, settings, error));
+        CHECK(!settings.metrics[static_cast<std::size_t>(MetricId::GpuLoad)]);
+        CHECK((settings.rtssTemplate && *settings.rtssTemplate == ambiguous)
+            && settings.rtssOmittedLayers == 1);
+        CHECK(!importRtssOverlay("[Master]\nImplementation=3\n[General]\nLayers=1\n"
+                                 "[Layer0]\nText=<FR>\n",
+            settings, error));
+        CHECK((settings.rtssTemplate && *settings.rtssTemplate == ambiguous));
+        const std::string embedded = "[Master]\nImplementation=2\n[Settings]\nEmbeddedImage="
+            + std::string(70000, 'A') + "\n[General]\nLayers=1\n[Layer0]\nText=<FR>\n";
+        CHECK(importRtssOverlay(embedded, settings, error));
+        stored.overlay = settings;
+        CHECK(parseSettings(serializeSettings(stored), restored, error));
+        CHECK(restored.overlay.rtssTemplate && *restored.overlay.rtssTemplate == embedded);
+        const std::string imageLayout = "[Master]\nImplementation=2\n[Settings]\n"
+                                        "EmbeddedImage=atlas.png\n[General]\nLayers=1\n"
+                                        "[Layer0]\nText=<I=0,0,2,3,2,2>\nExtentX=2\nExtentY=2\n";
+        CHECK(importRtssOverlay(imageLayout, settings, error));
+        CHECK(settings.rtssVisual && settings.rtssVisual->embeddedImage == "atlas.png");
+        CHECK(settings.rtssVisual->layers[0].text == "<I=0,0,2,3,2,2>");
+        auto visual = std::make_shared<RtssVisualLayout>(*settings.rtssVisual);
+        const std::string image = "\x89PNG\r\n\x1A\n" + std::string(24, 'x');
+        visual->imageBytes = std::make_shared<const std::string>(image);
+        settings.rtssVisual = std::move(visual);
+        stored.overlay = settings;
+        CHECK(parseSettings(serializeSettings(stored), restored, error));
+        CHECK(restored.overlay.rtssVisual && restored.overlay.rtssVisual->imageBytes
+            && *restored.overlay.rtssVisual->imageBytes == image);
+        CHECK(restored.overlay.rtssTemplate && *restored.overlay.rtssTemplate == imageLayout);
+        const std::string unsafe = "[Master]\nImplementation=2\n[Settings]\n"
+                                   "EmbeddedImage=../atlas.png\n[General]\nLayers=1\n"
+                                   "[Layer0]\nText=<I=0,0,0,0,2,2>\n";
+        CHECK(importRtssOverlay(unsafe, settings, error));
+        CHECK(settings.rtssVisual && settings.rtssVisual->embeddedImage.empty());
+    }
+
+    void testRtssExchangeKeepsOriginalAndRejectsDamage()
+    {
+        const std::string_view hex
+            = "3043445592000000a7000000000000000000000030575a4c006104d132451200000004000000e00c000000b6000000"
+              "604b93"
+              "3073e89491d3a58182246de0b029d3a68c1b3a61e8a479e3a6878c060ab61c29e3a68c9c306cba3450c0244c9e3272"
+              "e6f490"
+              "d140c1162661f2949103a34b030554cae0a1d3838711293e1a28d8c2244c9e3272627469a0804a193c747ab07973e6"
+              "4d0305"
+              "65f0846903874d19176fecb001f0000000000600000090088a93230d14b07973e68d0b386ece000808";
+        std::string package;
+        for (std::size_t at = 0; at < hex.size(); at += 2) {
+            unsigned int byte = 0;
+            const auto parsed = std::from_chars(hex.data() + at, hex.data() + at + 2, byte, 16);
+            CHECK(parsed.ec == std::errc { });
+            package.push_back(static_cast<char>(byte));
+        }
+        OverlaySettings imported;
+        imported.savedMonitorId = "MY_MONITOR";
+        std::string error;
+        CHECK(importRtssExchange(package, imported, error));
+        RtssExchange unpacked;
+        CHECK(unpackRtssExchange(package, unpacked, error));
+        CHECK(unpacked.images.size() == 1 && unpacked.images[0].first == "logo.png"
+            && unpacked.images[0].second == "\x89PNG\r\n");
+        CHECK(imported.rtssTemplate && imported.rtssTemplate->find("Text=<FR>") != std::string::npos);
+        CHECK(imported.rtssExchange && *imported.rtssExchange == package);
+        CHECK(imported.rtssResources == 1 && imported.rtssOmittedLayers == 1);
+        CHECK(imported.metrics[static_cast<std::size_t>(MetricId::Fps)]);
+        CHECK(imported.savedMonitorId == "MY_MONITOR");
+        Settings saved;
+        saved.overlay = imported;
+        Settings restored;
+        CHECK(parseSettings(serializeSettings(saved), restored, error));
+        CHECK(restored.overlay.rtssExchange && *restored.overlay.rtssExchange == package);
+        CHECK(restored.overlay.rtssTemplate && *restored.overlay.rtssTemplate == *imported.rtssTemplate);
+        CHECK(restored.overlay.rtssResources == 1);
+        OverlaySettings snapshot = imported;
+        package[0] = 'X';
+        CHECK(!importRtssExchange(package, imported, error));
+        CHECK(imported.rtssExchange == snapshot.rtssExchange);
+        package[0] = '0';
+        package.back() = static_cast<char>(static_cast<unsigned char>(package.back()) | 0x80u);
+        CHECK(!importRtssExchange(package, imported, error));
+        CHECK(imported.rtssExchange == snapshot.rtssExchange);
+        package[4] = 0;
+        CHECK(!importRtssExchange(package, imported, error));
+        CHECK(imported.rtssExchange == snapshot.rtssExchange);
+        CHECK(!importRtssExchange(package.substr(0, package.size() - 2), imported, error));
+        CHECK(imported.rtssExchange == snapshot.rtssExchange);
+    }
+
+    void testRtssExportKeepsSupportedOrderAndColor()
+    {
+        OverlaySettings source;
+        source.metrics.fill(false);
+        source.metrics[static_cast<std::size_t>(MetricId::Fps)] = true;
+        source.metrics[static_cast<std::size_t>(MetricId::CpuLoad)] = true;
+        source.metrics[static_cast<std::size_t>(MetricId::GpuLoad)] = true;
+        source.metrics[static_cast<std::size_t>(MetricId::CpuPeakLoad)] = true; // нет RTSS HAL-аналога
+        source.metricRgba[static_cast<std::size_t>(MetricId::GpuLoad)] = 0xED1C24AAu;
+        auto cpu = std::find(source.order.begin(), source.order.end(), MetricId::CpuLoad);
+        auto gpu = std::find(source.order.begin(), source.order.end(), MetricId::GpuLoad);
+        std::iter_swap(cpu, gpu);
+        const std::string text = serializeRtssOverlay(source);
+        CHECK(text.find("Implementation=2\r\n") != std::string::npos);
+        CHECK(text.find("Sources=2\r\n") != std::string::npos);
+        CHECK(text.find("Layers=3\r\n") != std::string::npos);
+        CHECK(text.find("TextColor=AAED1C24\r\n") != std::string::npos);
+        CHECK(text.find("Text=%GPU1 usage%") < text.find("Text=%CPU usage%"));
+        CHECK(text.find("CPU usage max") == std::string::npos);
+        OverlaySettings imported;
+        std::string error;
+        CHECK(importRtssOverlay(text, imported, error));
+        CHECK(imported.metrics[static_cast<std::size_t>(MetricId::Fps)]);
+        CHECK(imported.metrics[static_cast<std::size_t>(MetricId::GpuLoad)]);
+        CHECK(imported.metrics[static_cast<std::size_t>(MetricId::CpuLoad)]);
+        CHECK(imported.metricRgba[static_cast<std::size_t>(MetricId::GpuLoad)] == 0xED1C24AAu);
+        CHECK(imported.order[0] == MetricId::Fps && imported.order[1] == MetricId::GpuLoad
+            && imported.order[2] == MetricId::CpuLoad);
+        CHECK(!imported.metrics[static_cast<std::size_t>(MetricId::CpuPeakLoad)]);
+        source.metrics.fill(false);
+        source.metrics[static_cast<std::size_t>(MetricId::CpuPeakLoad)] = true;
+        CHECK(serializeRtssOverlay(source).empty());
+    }
+
+    void testGameProfileKeepsPersonalPlacement()
+    {
+        OverlaySettings base;
+        base.savedMonitorId = "display:PRIMARY";
+        base.originX = 200;
+        base.followGameMonitor = true;
+        base.clickThrough = true;
+        base.scalePercent = 110;
+        OverlaySettings profile;
+        profile.scalePercent = 145;
+        profile.metrics.fill(false);
+        profile.metrics[static_cast<std::size_t>(MetricId::Fps)] = true;
+        const OverlaySettings applied = overlayForGame(base, profile);
+        CHECK(applied.scalePercent == 145);
+        CHECK(applied.metrics[static_cast<std::size_t>(MetricId::Fps)]);
+        CHECK(!applied.metrics[static_cast<std::size_t>(MetricId::GpuLoad)]);
+        CHECK(applied.savedMonitorId == base.savedMonitorId);
+        CHECK(applied.originX == 200 && applied.followGameMonitor && applied.clickThrough);
+        Settings saved = defaultSettings();
+        saved.overlay = applied;
+        copyOverlayPlacement(saved.overlay, defaultSettings().overlay);
+        CHECK(serializeSettings(saved).find("display:PRIMARY") == std::string::npos);
+        CHECK(!saved.overlay.followGameMonitor && !saved.overlay.clickThrough);
+        CHECK(gameProfileKey(L"Game.EXE") == "game.exe");
+        CHECK(gameProfileKey(L"The Witcher 3.exe") == "the witcher 3.exe");
+        CHECK(gameProfileKey(L"Игра.exe") == "%000418%000433%000440%000430.exe");
+        CHECK(gameProfileKey(L"../game.exe").empty());
+        CHECK(gameProfileKey(L"game:bad.exe").empty());
+        CHECK(gameProfileKey(L"game.txt").empty());
+    }
+
     void testCrlfFile()
     {
         Settings settings;
@@ -817,7 +1330,10 @@ void runSettingsTests()
     testOverlayPreviewScale();
     testDefaultsRoundTrip();
     testUnknownSensorFailureStaysUnknown();
+    testRestoreOverlayTemplateKeepsPersonalSettings();
     testCanvasCoordinatesSurviveZoom();
+    testDraggedRowKeepsColumnsAndClamps();
+    testStyledRowOffsetKeepsPresetAndRoundTrips();
     testOverlayAnchorMigration();
     testOverlayCustomization();
     testOverlayCustomizationClamps();
@@ -827,6 +1343,14 @@ void runSettingsTests()
     testLabelLengthIsLimited();
     testKeysAreStable();
     testRecipeMigrationAndAxes();
+    testRtssImportRecognizesOnlyKnownSources();
+    testRtssHypertextDoesNotExpandPreview();
+    testRtssVisualLayersPersistWithoutExternalProvider();
+    testRtssGraphUsesLocalHistoryWithoutFabricatedSource();
+    testRtssExternalProviderCannotImpersonateHal();
+    testRtssExchangeKeepsOriginalAndRejectsDamage();
+    testRtssExportKeepsSupportedOrderAndColor();
+    testGameProfileKeepsPersonalPlacement();
     testCrlfFile();
 }
 

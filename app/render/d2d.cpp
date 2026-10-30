@@ -133,7 +133,11 @@ bool Renderer::createDeviceResources(std::string& error)
     const D2D1_SIZE_U size = D2D1::SizeU(static_cast<UINT>(std::max<LONG>(client.right, 1)),
         static_cast<LONG>(std::max<LONG>(client.bottom, 1)));
 
-    const HRESULT result = m_d2d->CreateHwndRenderTarget(D2D1::RenderTargetProperties(),
+    // SDR sRGB, как у layered-окна оверлея: DWM сам поднимет яркость SDR на HDR-экране.
+    // FP16 здесь потребовал бы ручной пересчёт уровня белого и изменил бы цвета предпросмотра.
+    const auto properties = D2D1::RenderTargetProperties(D2D1_RENDER_TARGET_TYPE_DEFAULT,
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE));
+    const HRESULT result = m_d2d->CreateHwndRenderTarget(properties,
         D2D1::HwndRenderTargetProperties(m_window, size, D2D1_PRESENT_OPTIONS_IMMEDIATELY), &m_target);
     if (FAILED(result)) {
         error = "CreateHwndRenderTarget не удался";
