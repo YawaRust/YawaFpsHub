@@ -2673,8 +2673,11 @@ void MainWindow::samplingLoop()
             tracker.setSystemProcesses(systemPids.data(), systemCount);
 
             // Для оценки игры не смешиваем фоновые процессы и весь адаптер с её PID.
-            const std::uint32_t gamePid = tracker.activeProcessId() == foregroundPid
-                    && !tracker.isSystemProcess(foregroundPid) && tracker.hasActiveStream()
+            // ETW-поток кадров может ещё не успеть появиться для только что запущенной
+            // игры, поэтому PID берём из активного окна напрямую: замеры CPU/GPU приходят
+            // от PDH по этому PID, а не из ETW, и не ждём подтверждения от трекера кадров.
+            const std::uint32_t gamePid = foregroundPid != 0
+                    && !tracker.isSystemProcess(foregroundPid)
                 ? static_cast<std::uint32_t>(foregroundPid)
                 : 0;
             const std::size_t requested = m_requestedGpu.exchange(static_cast<std::size_t>(-1));

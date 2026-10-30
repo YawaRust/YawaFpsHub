@@ -1256,9 +1256,8 @@ namespace {
         const float zoom = static_cast<float>(layout.zoom) * scale;
         const float cellHeight = static_cast<float>(layout.fontHeight) * zoom;
         const float cellWidth = cellHeight * 0.61f;
-        const auto units = [zoom, cellWidth, cellHeight](int value, bool vertical) {
-            return value < 0 ? static_cast<float>(-value) * (vertical ? cellHeight : cellWidth)
-                             : static_cast<float>(value) * zoom;
+        const auto units = [zoom](int value, bool /*vertical*/) {
+            return static_cast<float>(value) * zoom;
         };
         const std::wstring family = layout.fontFace.empty() ? L"Consolas" : rtssWide(layout.fontFace);
         std::vector<RtssPlacement> placed;
