@@ -1234,9 +1234,104 @@ std::string rtssVisibleTemplate(std::string_view text)
     return visible;
 }
 
+// Проверяет, является ли строка корректным UTF-8.
+bool isValidUtf8(std::string_view text)
+{
+    std::size_t index = 0;
+    while (index < text.size()) {
+        const unsigned char byte = static_cast<unsigned char>(text[index]);
+        if (byte < 0x80) {
+            ++index;
+        } else if ((byte & 0xE0) == 0xC0) {
+            if (index + 1 >= text.size()
+                || (static_cast<unsigned char>(text[index + 1]) & 0xC0) != 0x80) {
+                return false;
+            }
+            index += 2;
+        } else if ((byte & 0xF0) == 0xE0) {
+            if (index + 2 >= text.size()
+                || (static_cast<unsigned char>(text[index + 1]) & 0xC0) != 0x80
+                || (static_cast<unsigned char>(text[index + 2]) & 0xC0) != 0x80) {
+                return false;
+            }
+            index += 3;
+        } else if ((byte & 0xF8) == 0xF0) {
+            if (index + 3 >= text.size()
+                || (static_cast<unsigned char>(text[index + 1]) & 0xC0) != 0x80
+                || (static_cast<unsigned char>(text[index + 2]) & 0xC0) != 0x80
+                || (static_cast<unsigned char>(text[index + 3]) & 0xC0) != 0x80) {
+                return false;
+            }
+            index += 4;
+        } else {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Конвертирует CP1251 (Windows Cyrillic) в UTF-8. RTSS .ovl/.ovx файлы с русской
+// Windows кодированы в CP1251, а не в UTF-8; без конвертации кириллица в именах
+// слоёв и метриках превращается в моджибаке.
+std::string cp1251ToUtf8(std::string_view text)
+{
+    std::string result;
+    result.reserve(text.size() * 2);
+    for (std::size_t index = 0; index < text.size(); ++index) {
+        const unsigned char byte = static_cast<unsigned char>(text[index]);
+        if (byte < 0x80) {
+            result.push_back(static_cast<char>(byte));
+        } else {
+            const std::uint32_t code = [byte] {
+                if (byte >= 0xC0 && byte <= 0xDF) {
+                    return 0x0410u + (byte - 0xC0); // А–Я
+                }
+                if (byte >= 0xE0 && byte <= 0xEF) {
+                    return 0x0430u + (byte - 0xE0); // а–я
+                }
+                if (byte == 0xA8) {
+                    return 0x0401u; // Ё
+                }
+                if (byte == 0xB8) {
+                    return 0x0451u; // ё
+                }
+                if (byte == 0xA2) {
+                    return 0x201Eu; // „
+                }
+                if (byte == 0xBB) {
+                    return 0x00ABu; // «
+                }
+                if (byte == 0xAB) {
+                    return 0x00BBu; // »
+                }
+                return 0xFFFDu; // replacement
+            }();
+            if (code < 0x800) {
+                result.push_back(static_cast<char>(0xC0 | (code >> 6)));
+                result.push_back(static_cast<char>(0x80 | (code & 0x3F)));
+            } else {
+                result.push_back(static_cast<char>(0xE0 | (code >> 12)));
+                result.push_back(static_cast<char>(0x80 | ((code >> 6) & 0x3F)));
+                result.push_back(static_cast<char>(0x80 | (code & 0x3F)));
+            }
+        }
+    }
+    return result;
+}
+
 bool importRtssOverlay(std::string_view text, OverlaySettings& overlay, std::string& error)
 {
     error.clear();
+
+    // RTSS .ovl/.ovx файлы с русской Windows кодированы в CP1251 (не UTF-8).
+    // Если текст не валидный UTF-8, декодируем как CP1251, иначе кириллица
+    // в именах слоёв и метриках превратится в моджибаке при widen().
+    std::string normalized;
+    if (!isValidUtf8(text)) {
+        normalized = cp1251ToUtf8(text);
+        text = normalized;
+    }
+
     if (text.size() > kMaxRtssBytes || text.find('\0') != std::string_view::npos) {
         error = "Шаблон RTSS слишком большой или содержит двоичные данные";
         return false;
