@@ -1523,6 +1523,17 @@ std::string serializeRtssOverlay(const OverlaySettings& overlay)
     if (rows.empty()) {
         return { };
     }
+
+    const auto& layers = overlay.rtssVisual
+        ? overlay.rtssVisual->layers
+        : std::vector<RtssVisualLayer> { };
+    const auto layerFor = [&](std::size_t index) -> const RtssVisualLayer* {
+        if (index < layers.size()) {
+            return &layers[static_cast<std::size_t>(index)];
+        }
+        return nullptr;
+    };
+
     const std::size_t sources = static_cast<std::size_t>(std::count_if(
         rows.begin(), rows.end(), [](const RtssMetric* metric) { return !metric->source.empty(); }));
     std::string text = "[Master]\r\nImplementation=2\r\nFontFace=Consolas\r\nFontHeight=-9\r\n"
@@ -1540,17 +1551,36 @@ std::string serializeRtssOverlay(const OverlaySettings& overlay)
     }
     for (std::size_t index = 0; index < rows.size(); ++index) {
         const RtssMetric& metric = *rows[index];
+        const RtssVisualLayer* layer = layerFor(index);
+        const int posX = layer ? layer->x : 4;
+        const int posY = layer ? layer->y : static_cast<int>(5 + index * 14);
+        const int extentX = layer ? layer->width : 0;
+        const int extentY = layer ? layer->height : 0;
+        const int origin = layer ? layer->origin : 0;
+        const int size = layer ? layer->size : 100;
         text += "[Layer" + std::to_string(index)
             + "]\r\nName=" + std::string(metric.source.empty() ? "Framerate" : metric.source)
             + "\r\nText=" + std::string(metric.tag)
-            + "\r\nPositionX=4\r\nPositionY=" + std::to_string(5 + static_cast<int>(index) * 14)
-            + "\r\nExtentX=0\r\nExtentY=0\r\nExtentOrigin=0\r\nFixedAlignment=1\r\nTextColor=";
+            + "\r\nPositionX=" + std::to_string(posX)
+            + "\r\nPositionY=" + std::to_string(posY)
+            + "\r\nExtentX=" + std::to_string(extentX)
+            + "\r\nExtentY=" + std::to_string(extentY)
+            + "\r\nExtentOrigin=" + std::to_string(origin)
+            + "\r\nFixedAlignment=1\r\nSize=" + std::to_string(size)
+            + "\r\nTextColor=";
         const auto color = overlay.metricRgba[static_cast<std::size_t>(metric.id)];
-        if (color) {
-            const std::string rgba = overlayRgbaHex(*color);
-            text += rgba.substr(7, 2) + rgba.substr(1, 6);
+        const std::uint32_t layerColor = layer ? layer->textColor : 0xFFFFFFFFu;
+        const std::uint32_t finalColor = color ? *color : layerColor;
+        const std::string rgba = overlayRgbaHex(finalColor);
+        text += rgba.substr(7, 2) + rgba.substr(1, 6);
+        if (layer && layer->hasBackground) {
+            const std::string bgRgba = overlayRgbaHex(layer->backgroundColor);
+            text += "\r\nBgndColor=" + bgRgba.substr(7, 2) + bgRgba.substr(1, 6);
+        }
+        if (!layer || layer->visibilitySource.empty()) {
+            text += "\r\nVisibilitySource=" + std::string(metric.source);
         } else {
-            text += "FFFFFFFF";
+            text += "\r\nVisibilitySource=" + layer->visibilitySource;
         }
         text += "\r\n";
     }
