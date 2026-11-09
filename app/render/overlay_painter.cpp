@@ -1256,9 +1256,8 @@ namespace {
         const float zoom = static_cast<float>(layout.zoom) * scale;
         const float cellHeight = static_cast<float>(layout.fontHeight) * zoom;
         const float cellWidth = cellHeight * 0.61f;
-        const auto units = [zoom, cellWidth, cellHeight](int value, bool vertical) {
-            return value < 0 ? static_cast<float>(-value) * (vertical ? cellHeight : cellWidth)
-                             : static_cast<float>(value) * zoom;
+        const auto units = [zoom](int value, bool /*vertical*/) {
+            return static_cast<float>(value) * zoom;
         };
         const std::wstring family = layout.fontFace.empty() ? L"Consolas" : rtssWide(layout.fontFace);
         std::vector<RtssPlacement> placed;
@@ -1356,13 +1355,16 @@ namespace {
             }
             // Явный Extent задаёт границу слоя: текст и отсутствующие провайдеры не
             // могут увеличивать весь макет и превращать остальные датчики в пиксельную пыль.
+            // Отрицательный Extent (встречается в сторонних шаблонах RTSS) берётся по модулю,
+            // иначе ширина/высота слоя получаются отрицательными, прямоугольник переворачивается
+            // и слой пропускается при отрисовке.
             const float width = edit.width > 0 ? static_cast<float>(edit.width) * zoom
                 : layer.width == 0 ? (imageExtent ? (imageCrop.right - imageCrop.left) * zoom
                                                   : std::clamp(textWidth, cellWidth, 1024.0f * zoom))
-                                   : units(layer.width, false);
+                                   : units(std::abs(layer.width), false);
             const float height = edit.height > 0 ? static_cast<float>(edit.height) * zoom
                 : layer.height == 0 ? (imageExtent ? (imageCrop.bottom - imageCrop.top) * zoom : textHeight)
-                                    : units(layer.height, true);
+                                    : units(std::abs(layer.height), true);
             float x = units(layer.x, false) + static_cast<float>(edit.x) * zoom;
             float y = units(layer.y, true) + static_cast<float>(edit.y) * zoom;
             x -= width * static_cast<float>(layer.origin % 3) / 2.0f;
